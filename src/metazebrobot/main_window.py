@@ -7,9 +7,10 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
                              QTableWidget, QTableWidgetItem, QMessageBox, QFrame,
                              QScrollArea, QGridLayout, QGroupBox, QDateEdit, QCheckBox,
-                             QFormLayout, QDialog, QSystemTrayIcon, QMenu)
+                             QFormLayout, QDialog, QSystemTrayIcon, QMenu, QHeaderView,
+                             QMenuBar)
 from PySide6.QtCore import Qt, QDate
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
 
 def main():
     try:
@@ -30,6 +31,66 @@ def main():
     except Exception as e:
         print(f"Fatal error: {str(e)}")
         raise
+
+class TerminationDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Update Dish Status")
+        self.setMinimumWidth(400)
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        # Status selection
+        self.status = QComboBox()
+        self.status.addItems(["active", "inactive"])
+        form_layout.addRow("Status:", self.status)
+
+        # Termination date (only enabled if status is inactive)
+        self.termination_date = QDateEdit()
+        self.termination_date.setDate(QDate.currentDate())
+        self.termination_date.setCalendarPopup(True)
+        self.termination_date.setEnabled(False)
+        form_layout.addRow("Termination Date:", self.termination_date)
+
+        # Termination reason (only enabled if status is inactive)
+        self.termination_reason = QLineEdit()
+        self.termination_reason.setPlaceholderText("Enter reason for termination...")
+        self.termination_reason.setEnabled(False)
+        form_layout.addRow("Termination Reason:", self.termination_reason)
+
+        # Connect status change to enable/disable termination fields
+        self.status.currentTextChanged.connect(self.handle_status_change)
+
+        layout.addLayout(form_layout)
+
+        # Buttons
+        button_box = QHBoxLayout()
+        save_button = QPushButton("Save")
+        save_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+
+        button_box.addWidget(save_button)
+        button_box.addWidget(cancel_button)
+        layout.addLayout(button_box)
+
+    def handle_status_change(self, status):
+        """Enable or disable termination fields based on status"""
+        is_inactive = status == "inactive"
+        self.termination_date.setEnabled(is_inactive)
+        self.termination_reason.setEnabled(is_inactive)
+
+    def get_data(self):
+        """Return the dialog data"""
+        status = self.status.currentText()
+        return {
+            "status": status,
+            "termination_date": self.termination_date.date().toString("yyyyMMdd") if status == "inactive" else None,
+            "termination_reason": self.termination_reason.text() if status == "inactive" else None
+        }
 
 class QualityCheckDialog(QDialog):
     def __init__(self, parent=None):
@@ -169,6 +230,55 @@ class LabInventoryGUI(QMainWindow):
             QMessageBox.critical(self, "Initialization Error", f"Error initializing UI: {str(e)}")
             raise
 
+    def setup_menu_bar(self):
+        """Set up the menu bar with options including the game"""
+        menu_bar = self.menuBar()
+        
+        # File menu
+        file_menu = menu_bar.addMenu("File")
+        
+        # Exit action
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # Tools menu
+        tools_menu = menu_bar.addMenu("Tools")
+        
+        # Game action
+        game_action = QAction("Lab Bug Squash Game", self)
+        game_action.setStatusTip("Take a break with a quick game")
+        game_action.triggered.connect(self.launch_game)
+        tools_menu.addAction(game_action)
+        
+        # Help menu
+        help_menu = menu_bar.addMenu("Help")
+        
+        # About action
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
+
+    # Add this method to your LabInventoryGUI class
+    def launch_game(self):
+        """Launch the bug squash game"""
+        from lab_bug_squash import BugSquashGame
+        self.game = BugSquashGame()
+        self.game.show()
+
+    # Add this method to your LabInventoryGUI class
+    def show_about_dialog(self):
+        """Show an about dialog with information about the application"""
+        QMessageBox.about(
+            self,
+            "About Lab Inventory Management System",
+            """<h2>Lab Inventory Management System</h2>
+            <p>A comprehensive system for managing laboratory materials and samples.</p>
+            <p>Developed for lab researchers to efficiently track materials and dishes.</p>
+            <p>Version 1.0</p>"""
+        )
+
     def setup_system_tray(self):
         """Setup the system tray icon and menu"""
         # Create the system tray icon
@@ -258,6 +368,9 @@ class LabInventoryGUI(QMainWindow):
         self.setWindowTitle("Lab Inventory Management System")
         self.setGeometry(100, 100, 1200, 800)
         
+        # Setup menu bar
+        self.setup_menu_bar()
+
         # Load config first
         print("Loading config...")
         if not self.load_config():
@@ -1056,7 +1169,7 @@ class LabInventoryGUI(QMainWindow):
         self.pls_volume.setValue(50)
 
     def create_fish_dish_tab(self):
-        """Create the fish dish management tab"""
+        """Create the fish dish management tab with sortable table"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
@@ -1066,17 +1179,26 @@ class LabInventoryGUI(QMainWindow):
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
         
-        # Form section
+        # Form section - use a more compact layout
         form_group = QGroupBox("New Dish Information")
         form_layout = QGridLayout()
+        form_layout.setColumnStretch(1, 1)  # Make the input columns stretch
+        form_layout.setColumnStretch(3, 1)
+        form_layout.setHorizontalSpacing(10)  # Add some spacing between columns
+        form_layout.setVerticalSpacing(5)     # Reduce vertical spacing
         
-        # Basic information section
+        # Basic information section - use a more compact layout
         row = 0
         
         # Cross ID
         form_layout.addWidget(QLabel("Cross ID:"), row, 0)
         self.cross_id = QLineEdit()
         form_layout.addWidget(self.cross_id, row, 1)
+        
+        # Genotype (moved up to first row)
+        form_layout.addWidget(QLabel("Genotype:"), row, 2)
+        self.genotype = QLineEdit()
+        form_layout.addWidget(self.genotype, row, 3)
         
         row += 1
         
@@ -1085,7 +1207,12 @@ class LabInventoryGUI(QMainWindow):
         self.dish_number = QSpinBox()
         self.dish_number.setMinimum(1)
         form_layout.addWidget(self.dish_number, row, 1)
-
+        
+        # Sex
+        form_layout.addWidget(QLabel("Sex:"), row, 2)
+        self.sex = QComboBox()
+        self.sex.addItems(["unknown", "M", "F"])
+        form_layout.addWidget(self.sex, row, 3)
         
         row += 1
         
@@ -1095,19 +1222,6 @@ class LabInventoryGUI(QMainWindow):
         self.dof.setDate(QDate.currentDate())
         self.dof.setCalendarPopup(True)
         form_layout.addWidget(self.dof, row, 1)
-        
-        # Genotype
-        form_layout.addWidget(QLabel("Genotype:"), row, 2)
-        self.genotype = QLineEdit()
-        form_layout.addWidget(self.genotype, row, 3)
-        
-        row += 1
-        
-        # Sex
-        form_layout.addWidget(QLabel("Sex:"), row, 0)
-        self.sex = QComboBox()
-        self.sex.addItems(["unknown", "M", "F"])
-        form_layout.addWidget(self.sex, row, 1)
         
         # Species
         form_layout.addWidget(QLabel("Species:"), row, 2)
@@ -1166,14 +1280,12 @@ class LabInventoryGUI(QMainWindow):
         self.beaker_housing.setChecked(False)
         form_layout.addWidget(self.beaker_housing, row, 1)
         
-        row += 1
-
         # Number of fish
-        form_layout.addWidget(QLabel("Number of Fish:"), row, 0)
+        form_layout.addWidget(QLabel("Number of Fish:"), row, 2)
         self.fish_count = QSpinBox()
         self.fish_count.setRange(0, 1000)  # Set reasonable range
         self.fish_count.setValue(1)  # Default value
-        form_layout.addWidget(self.fish_count, row, 1)
+        form_layout.addWidget(self.fish_count, row, 3)
         
         # Add form to group box
         form_group.setLayout(form_layout)
@@ -1195,20 +1307,39 @@ class LabInventoryGUI(QMainWindow):
         scroll.setWidget(scroll_widget)
         layout.addWidget(scroll)
         
-        # # Dishes table
+        # Add visibility toggle for inactive dishes
+        visibility_layout = QHBoxLayout()
+        self.show_inactive = QCheckBox("Show inactive dishes")
+        self.show_inactive.setChecked(True)  # Show all dishes by default
+        self.show_inactive.stateChanged.connect(self.update_dishes_table)
+        visibility_layout.addWidget(self.show_inactive)
+        visibility_layout.addStretch()  # Push checkbox to the left
+        layout.addLayout(visibility_layout)
+        
+        # Dishes table
         self.dishes_table = QTableWidget()
-        self.dishes_table.setColumnCount(6)
-        self.dishes_table.setHorizontalHeaderLabels([
-            "Dish ID", "Date Created", "Genotype",
-            "Responsible", "Status", "Location"
-        ])
         layout.addWidget(self.dishes_table)
 
-        # Connect double-click signal after creating the table
-        self.dishes_table.cellDoubleClicked.connect(self.handle_dish_double_click)
+        # Setup the table with sorting functionality
+        self.setup_dish_table()
         
+        # Initial update of the table
         self.update_dishes_table()
+        
         return tab
+
+    def handle_header_click(self, column):
+        """Handle clicks on the table header for sorting"""
+        # Toggle sort order if clicking the same column
+        if hasattr(self, 'dishes_sort_column') and self.dishes_sort_column == column:
+            self.dishes_sort_order = Qt.DescendingOrder if self.dishes_sort_order == Qt.AscendingOrder else Qt.AscendingOrder
+        else:
+            self.dishes_sort_column = column
+            self.dishes_sort_order = Qt.AscendingOrder
+        
+        # Update the table with the new sorting
+        self.update_dishes_table()
+
 
     def clear_fish_dish_form(self):
         """Clear all inputs in the fish dish form"""
@@ -1228,16 +1359,38 @@ class LabInventoryGUI(QMainWindow):
         self.fish_count.setValue(1)
 
     def setup_dish_table(self):
-        """Setup the dish table with double-click handling"""
-        # Set up table as before
+        """Setup the dish table with sorting and double-click handling"""
+        # Set up table columns
         self.dishes_table.setColumnCount(6)
         self.dishes_table.setHorizontalHeaderLabels([
             "Dish ID", "Date Created", "Genotype",
             "Responsible", "Status", "Location"
         ])
         
-        # Connect double-click signal
-        self.dishes_table.cellDoubleClicked.connect(self.handle_dish_double_click)
+        # Customize table appearance and behavior
+        self.dishes_table.setAlternatingRowColors(True)  # Makes rows easier to read
+        self.dishes_table.setSelectionBehavior(QTableWidget.SelectRows)  # Select entire rows
+        self.dishes_table.setSelectionMode(QTableWidget.SingleSelection)  # Allow only one selection
+        self.dishes_table.verticalHeader().setVisible(True)  # Keep row numbers visible
+        self.dishes_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make cells read-only
+        
+        # Make columns resize properly - using integers for resize modes
+        header = self.dishes_table.horizontalHeader()
+        # Skip the section resize modes that are causing errors
+        # Just set column widths instead
+        self.dishes_table.setColumnWidth(0, 150)  # Dish ID width
+        self.dishes_table.setColumnWidth(1, 100)  # Date width
+        self.dishes_table.setColumnWidth(2, 120)  # Genotype width
+        self.dishes_table.setColumnWidth(3, 120)  # Responsible width
+        self.dishes_table.setColumnWidth(4, 80)   # Status width
+        self.dishes_table.setColumnWidth(5, 80)   # Location width
+        # Initialize our custom sorting variables (not using built-in sorting)
+        self.dishes_sort_column = 0  # Default sort by dish ID
+        self.dishes_sort_order = Qt.AscendingOrder  # Default to ascending order
+        
+        # Connect signals
+        self.dishes_table.horizontalHeader().sectionClicked.connect(self.handle_header_click)
+        self.dishes_table.cellDoubleClicked.connect(self.handle_dish_cell_double_click)
 
     def handle_dish_double_click(self, row, column):
         """Handle double-click on a dish in the table"""
@@ -1444,13 +1597,66 @@ class LabInventoryGUI(QMainWindow):
             return False
 
     def update_dishes_table(self):
-        """Update the fish dishes table"""
+        """Update the fish dishes table with sorted entries"""
         dishes = self.safe_get_nested(self.data, 'fish_dishes', 'fish_dishes', default={})
-        self.dishes_table.setRowCount(len(dishes))
         
-        for i, (dish_id, dish_data) in enumerate(dishes.items()):
+        # Filter dishes based on status if checkbox is unchecked
+        if not self.show_inactive.isChecked():
+            dishes = {k: v for k, v in dishes.items() if v.get('status', 'active') == 'active'}
+        
+        # Convert to list for sorting
+        dish_list = list(dishes.items())
+        
+        # Sort the dishes by dish_id (default sorting)
+        # You can change the sort key based on the current sort column and order
+        sort_column = self.dishes_sort_column if hasattr(self, 'dishes_sort_column') else 0
+        sort_order = self.dishes_sort_order if hasattr(self, 'dishes_sort_order') else Qt.AscendingOrder
+        
+        # Define sort key functions for different columns
+        def get_sort_key(item, col):
+            dish_id, dish_data = item
+            if col == 0:  # Dish ID
+                # Split the dish_id by underscore and further split by dots if needed
+                # This makes sorting work correctly for IDs like "14781_1", "14781_10"
+                parts = dish_id.split('_')
+                if len(parts) == 2:
+                    try:
+                        main_id = parts[0]
+                        # Handle sub-IDs that might be numeric
+                        sub_id = parts[1]
+                        try:
+                            # Try to convert sub_id to integer for numeric sorting
+                            return (main_id, int(sub_id))
+                        except ValueError:
+                            # If sub_id is not numeric, use string sorting
+                            return (main_id, sub_id)
+                    except (IndexError, ValueError):
+                        pass
+                # Fallback to string sorting
+                return dish_id
+            elif col == 1:  # Date created
+                return self.safe_get_nested(dish_data, 'date_created', default='')
+            elif col == 2:  # Genotype
+                return self.safe_get_nested(dish_data, 'metadata', 'genotype', default='')
+            elif col == 3:  # Responsible
+                return self.safe_get_nested(dish_data, 'metadata', 'responsible', default='')
+            elif col == 4:  # Status
+                return self.safe_get_nested(dish_data, 'status', default='')
+            elif col == 5:  # Location
+                return self.safe_get_nested(dish_data, 'metadata', 'enclosure', 'room', default='')
+            else:
+                return dish_id
+        
+        # Sort the dishes
+        dish_list.sort(key=lambda item: get_sort_key(item, sort_column), 
+                    reverse=(sort_order == Qt.DescendingOrder))
+        
+        # Set row count AFTER filtering
+        self.dishes_table.setRowCount(len(dish_list))
+        
+        # Populate the table with sorted data
+        for i, (dish_id, dish_data) in enumerate(dish_list):
             self.dishes_table.setItem(i, 0, QTableWidgetItem(dish_id))
-
             self.dishes_table.setItem(i, 1, QTableWidgetItem(
                 str(self.safe_get_nested(dish_data, 'date_created', default=''))
             ))
@@ -1466,6 +1672,60 @@ class LabInventoryGUI(QMainWindow):
             self.dishes_table.setItem(i, 5, QTableWidgetItem(
                 str(self.safe_get_nested(dish_data, 'metadata', 'enclosure', 'room', default=''))
             ))
+
+    def handle_dish_cell_double_click(self, row, column):
+        """Handle double-click on dish table cells"""
+        try:
+            # Get dish ID from the first column
+            dish_id = self.dishes_table.item(row, 0).text()
+            
+            # If clicking the status column
+            if column == 4:  # Status column
+                self.show_termination_dialog(dish_id)
+            else:
+                # Handle other columns (e.g., quality check dialog)
+                self.handle_dish_double_click(row, column)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error handling cell click: {str(e)}")
+
+    def show_termination_dialog(self, dish_id):
+        """Show dialog to update dish status"""
+        try:
+            # Load current dish data
+            dish_data = self.load_single_dish(dish_id)
+            if not dish_data:
+                QMessageBox.warning(self, "Error", f"Could not load dish {dish_id}")
+                return
+
+            # Create and show dialog
+            dialog = TerminationDialog(self)
+            
+            # Set current values
+            dialog.status.setCurrentText(dish_data.get("status", "active"))
+            if dish_data.get("termination_date"):
+                dialog.termination_date.setDate(QDate.fromString(dish_data["termination_date"], "yyyyMMdd"))
+            if dish_data.get("termination_reason"):
+                dialog.termination_reason.setText(dish_data["termination_reason"])
+
+            if dialog.exec() == QDialog.Accepted:
+                # Get updated data
+                update_data = dialog.get_data()
+                
+                # Update dish data
+                dish_data.update(update_data)
+                
+                # Save changes
+                if self.save_fish_dish(dish_data):
+                    # Update in-memory data
+                    self.data['fish_dishes']['fish_dishes'][dish_id] = dish_data
+                    self.update_dishes_table()
+                    QMessageBox.information(self, "Success", "Dish status updated successfully")
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to save dish status update")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error updating dish status: {str(e)}")
 
 def main():
     app = QApplication(sys.argv)
