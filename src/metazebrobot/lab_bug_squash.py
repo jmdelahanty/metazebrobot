@@ -6,6 +6,9 @@ from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QPixmap, QIcon, QColor, QPainter
 
 class BugSquashGame(QMainWindow):
+    """
+    Claude built this 'for fun' after helping me with something. Pretty neato.
+    """
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Lab Bug Squash")

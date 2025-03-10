@@ -1,0 +1,171 @@
+Based on the code and project structure you've shared, I'll outline a development plan to refactor this project for better maintainability. The current application appears to be a laboratory inventory management system for zebrafish research materials and dishes.
+
+# Development Plan for MetaZebrobot Refactoring
+
+## Current Assessment
+
+- The application is built with PySide6 (Qt for Python)
+- Main functionality is in `main_window.py` which contains all UI logic and business logic
+- `metadata_model.py` contains Pydantic models for data validation
+- `lab_bug_squash.py` seems to be a mini-game included in the application
+- Configuration is stored in `config.json`
+- Data is stored in JSON files for materials and fish dishes
+
+### Issues to Address
+
+1. **Monolithic Structure**: Nearly all code is in `main_window.py`
+2. **Mixed Concerns**: UI, business logic, and data operations are tightly coupled
+3. **Limited Modularity**: Difficult to maintain and extend
+4. **No Test Infrastructure**: No visible testing structure
+
+## Proposed Architecture
+
+### 1. Create a Model-View-Controller (MVC) Structure
+
+```
+metazebrobot/
+├── src/
+│   ├── metazebrobot/
+│   │   ├── __init__.py
+│   │   ├── models/           # Data models
+│   │   │   ├── __init__.py
+│   │   │   ├── agarose.py
+│   │   │   ├── fish_water.py
+│   │   │   ├── poly_l_serine.py
+│   │   │   ├── fish_dish.py
+│   │   │   └── metadata_model.py
+│   │   ├── controllers/      # Business logic 
+│   │   │   ├── __init__.py
+│   │   │   ├── agarose_controller.py
+│   │   │   ├── fish_water_controller.py
+│   │   │   ├── poly_l_serine_controller.py
+│   │   │   └── fish_dish_controller.py
+│   │   ├── views/            # UI components
+│   │   │   ├── __init__.py
+│   │   │   ├── main_window.py
+│   │   │   ├── agarose_tab.py
+│   │   │   ├── fish_water_tab.py
+│   │   │   ├── poly_l_serine_tab.py
+│   │   │   ├── fish_dish_tab.py
+│   │   │   └── dialogs/
+│   │   │       ├── __init__.py
+│   │   │       ├── quality_check_dialog.py
+│   │   │       └── termination_dialog.py
+│   │   ├── utils/            # Utility functions
+│   │   │   ├── __init__.py
+│   │   │   ├── config.py
+│   │   │   └── file_operations.py
+│   │   ├── data/             # Data access layer
+│   │   │   ├── __init__.py
+│   │   │   ├── data_manager.py
+│   │   │   └── json_storage.py
+│   │   └── mini_games/       # Games for breaks
+│   │       ├── __init__.py
+│   │       └── lab_bug_squash.py
+│   └── main.py               # Application entry point
+├── tests/                    # Test directory
+│   ├── __init__.py
+│   ├── test_models.py
+│   ├── test_controllers.py
+│   └── test_data.py
+├── config.json               # Configuration file
+└── README.md                 # Documentation
+```
+
+### 2. Implementation Plan
+
+#### Phase 1: Project Structure Setup
+
+1. Create the directory structure
+2. Move existing code into appropriate modules
+3. Create empty files for new modules
+4. Update imports to reflect new structure
+
+#### Phase 2: Data Layer Refactoring
+
+1. Create `data_manager.py` to handle all file operations
+2. Move JSON loading/saving from `main_window.py` to `json_storage.py`
+3. Implement error handling and validation
+4. Create convenience methods for CRUD operations
+
+#### Phase 3: Model Layer Refactoring
+
+1. Refactor Pydantic models into separate files by domain
+2. Add helper methods to models where appropriate
+3. Ensure validation rules are correct and comprehensive
+4. Implement relationships between models
+
+#### Phase 4: Controller Layer Implementation
+
+1. Create controller classes for each major feature
+2. Move business logic from `main_window.py` to appropriate controllers
+3. Implement error handling and validation at the controller level
+4. Add logging for significant operations
+
+#### Phase 5: UI Layer Refactoring
+
+1. Break down `main_window.py` into smaller view components
+2. Move dialog classes to separate files
+3. Implement signals/slots for communication between components
+4. Ensure UI concerns are separated from business logic
+
+#### Phase 6: Testing and Documentation
+
+1. Write unit tests for models and controllers
+2. Create integration tests for end-to-end functionality
+3. Update documentation
+4. Create examples and usage guides
+
+### 3. Specific Improvements
+
+1. **Configuration Management**
+   - Create a dedicated config manager class
+   - Support environment variable overrides
+   - Add validation for configuration
+
+2. **Data Access Layer**
+   - Abstract storage mechanisms behind interfaces
+   - Consider adding support for SQLite as an alternative to JSON files
+   - Implement proper error handling and retries for file operations
+
+3. **UI Improvements**
+   - Create a base tab class with common functionality
+   - Implement a unified styling approach
+   - Add responsive layout improvements
+
+4. **Code Quality**
+   - Add type hints throughout the codebase
+   - Implement consistent error handling
+   - Add docstrings to all public methods and classes
+   - Enforce PEP 8 style guidelines
+
+5. **API Integration**
+   - Based on the PyRAT API documentation provided, implement a client to interact with this API
+   - Create a synchronization mechanism between local data and the API
+
+### 4. Dependencies Management
+
+1. Create a `requirements.txt` or `pyproject.toml` file
+2. Document all dependencies with version constraints
+3. Consider using virtual environments for development
+
+## Implementation Timeline
+
+1. **Phase 1 (Project Structure)**: 1-2 days
+2. **Phase 2 (Data Layer)**: 2-3 days
+3. **Phase 3 (Models)**: 2-3 days  
+4. **Phase 4 (Controllers)**: 3-4 days
+5. **Phase 5 (UI Layer)**: 3-5 days
+6. **Phase 6 (Testing)**: 3-4 days
+
+Total estimated time: 2-3 weeks of development effort
+
+## Benefits of This Approach
+
+1. **Improved Maintainability**: Smaller, focused modules are easier to understand and modify
+2. **Better Testability**: Separated concerns allow for easier unit testing
+3. **Enhanced Extensibility**: New features can be added with minimal changes to existing code
+4. **Clearer Organization**: Developers can quickly locate relevant code
+5. **Reduced Technical Debt**: Proper structure prevents accumulation of quick fixes
+
+Would you like more details on any specific part of this refactoring plan before we proceed?

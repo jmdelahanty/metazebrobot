@@ -1441,12 +1441,12 @@ class LabInventoryGUI(QMainWindow):
             # Generate dish ID
             dish_id = f"{self.cross_id.text()}_{self.dish_number.value()}"
             
-            # Create the metadata structure
-            metadata = {
+            # Create the new dish entry with flattened structure
+            new_dish = {
+                "dish_id": dish_id,
+                "date_created": today,
                 "cross_id": self.cross_id.text(),
-                "dish_id": {
-                    "dish_number": self.dish_number.value(),
-                },
+                "dish_number": self.dish_number.value(),
                 "dof": self.dof.date().toString("yyyyMMdd"),
                 "genotype": self.genotype.text(),
                 "sex": self.sex.currentText(),
@@ -1464,14 +1464,7 @@ class LabInventoryGUI(QMainWindow):
                     },
                     "room": self.room.text(),
                     "in_beaker": self.beaker_housing.isChecked()
-                }
-            }
-            
-            # Create the new dish entry
-            new_dish = {
-                "dish_id": dish_id,
-                "date_created": today,
-                "metadata": metadata,
+                },
                 "quality_checks": {
                     today: "Created and checked - normal"
                 },
@@ -1481,7 +1474,7 @@ class LabInventoryGUI(QMainWindow):
             }
             
             # Check if dish already exists
-            dish_file = self.dish_data_dir / f"{dish_id}_{metadata['dof']}.json"
+            dish_file = self.dish_data_dir / f"{dish_id}_{new_dish['dof']}.json"
             if dish_file.exists():
                 QMessageBox.warning(self, "Error", f"Dish {dish_id} already exists!")
                 return
@@ -1514,7 +1507,14 @@ class LabInventoryGUI(QMainWindow):
             
             # Generate filename from dish_id and dof
             dish_id = dish_data['dish_id']
-            dof = dish_data['metadata']['dof']
+            
+            # Check if using old or new structure for dof
+            if 'dof' in dish_data:
+                dof = dish_data['dof']
+            else:
+                # Fall back to old structure if needed
+                dof = dish_data['metadata']['dof']
+                
             filename = f"{dish_id}_{dof}.json"
             file_path = self.dish_data_dir / filename
             
@@ -1581,7 +1581,13 @@ class LabInventoryGUI(QMainWindow):
             dish_data['quality_checks'][check_time] = check_data
             
             # Save updated dish data
-            dof = dish_data['metadata']['dof']
+            # Check if using old or new structure for dof
+            if 'dof' in dish_data:
+                dof = dish_data['dof']
+            else:
+                # Fall back to old structure if needed
+                dof = dish_data['metadata']['dof']
+            
             file_path = self.dish_data_dir / f"{dish_id}_{dof}.json"
             
             with open(file_path, 'w') as f:
@@ -1637,13 +1643,28 @@ class LabInventoryGUI(QMainWindow):
             elif col == 1:  # Date created
                 return self.safe_get_nested(dish_data, 'date_created', default='')
             elif col == 2:  # Genotype
-                return self.safe_get_nested(dish_data, 'metadata', 'genotype', default='')
+                # Check if this is the new flattened structure or old nested structure
+                genotype = self.safe_get_nested(dish_data, 'genotype', default=None)
+                if genotype is None:
+                    # Try old structure
+                    genotype = self.safe_get_nested(dish_data, 'metadata', 'genotype', default='')
+                return genotype
             elif col == 3:  # Responsible
-                return self.safe_get_nested(dish_data, 'metadata', 'responsible', default='')
+                # Check if this is the new flattened structure or old nested structure
+                responsible = self.safe_get_nested(dish_data, 'responsible', default=None)
+                if responsible is None:
+                    # Try old structure
+                    responsible = self.safe_get_nested(dish_data, 'metadata', 'responsible', default='')
+                return responsible
             elif col == 4:  # Status
                 return self.safe_get_nested(dish_data, 'status', default='')
             elif col == 5:  # Location
-                return self.safe_get_nested(dish_data, 'metadata', 'enclosure', 'room', default='')
+                # Check if this is the new flattened structure or old nested structure
+                room = self.safe_get_nested(dish_data, 'enclosure', 'room', default=None)
+                if room is None:
+                    # Try old structure
+                    room = self.safe_get_nested(dish_data, 'metadata', 'enclosure', 'room', default='')
+                return room
             else:
                 return dish_id
         
@@ -1660,18 +1681,32 @@ class LabInventoryGUI(QMainWindow):
             self.dishes_table.setItem(i, 1, QTableWidgetItem(
                 str(self.safe_get_nested(dish_data, 'date_created', default=''))
             ))
-            self.dishes_table.setItem(i, 2, QTableWidgetItem(
-                str(self.safe_get_nested(dish_data, 'metadata', 'genotype', default=''))
-            ))
-            self.dishes_table.setItem(i, 3, QTableWidgetItem(
-                str(self.safe_get_nested(dish_data, 'metadata', 'responsible', default=''))
-            ))
+            
+            # Handle genotype - check for both old and new structure
+            genotype = self.safe_get_nested(dish_data, 'genotype', default=None)
+            if genotype is None:
+                # Try old structure
+                genotype = self.safe_get_nested(dish_data, 'metadata', 'genotype', default='')
+            self.dishes_table.setItem(i, 2, QTableWidgetItem(str(genotype)))
+            
+            # Handle responsible - check for both old and new structure
+            responsible = self.safe_get_nested(dish_data, 'responsible', default=None)
+            if responsible is None:
+                # Try old structure
+                responsible = self.safe_get_nested(dish_data, 'metadata', 'responsible', default='')
+            self.dishes_table.setItem(i, 3, QTableWidgetItem(str(responsible)))
+            
+            # Status is the same in both structures
             self.dishes_table.setItem(i, 4, QTableWidgetItem(
                 str(self.safe_get_nested(dish_data, 'status', default=''))
             ))
-            self.dishes_table.setItem(i, 5, QTableWidgetItem(
-                str(self.safe_get_nested(dish_data, 'metadata', 'enclosure', 'room', default=''))
-            ))
+            
+            # Handle room - check for both old and new structure
+            room = self.safe_get_nested(dish_data, 'enclosure', 'room', default=None)
+            if room is None:
+                # Try old structure
+                room = self.safe_get_nested(dish_data, 'metadata', 'enclosure', 'room', default='')
+            self.dishes_table.setItem(i, 5, QTableWidgetItem(str(room)))
 
     def handle_dish_cell_double_click(self, row, column):
         """Handle double-click on dish table cells"""
