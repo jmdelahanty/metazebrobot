@@ -1,0 +1,353 @@
+2025-03-10 12:08:25,424 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:08:25,446 - __main__ - INFO - Initializing main window...
+2025-03-10 12:08:25,446 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:08:25,446 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:08:25,446 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/agarose_bottles.json
+2025-03-10 12:08:25,446 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/agarose_solutions.json
+2025-03-10 12:08:25,446 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/fish_water_sources.json
+2025-03-10 12:08:25,446 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/fish_water_derivatives.json
+2025-03-10 12:08:25,446 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/poly-l-serine_bottles.json
+2025-03-10 12:08:25,446 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/poly-l-serine_derivatives.json
+2025-03-10 12:08:25,449 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:08:26,494 - __main__ - INFO - Application started successfully
+2025-03-10 12:08:38,922 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:08:38,922 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/agarose_bottles.json
+2025-03-10 12:08:38,923 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/agarose_solutions.json
+2025-03-10 12:08:38,923 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/fish_water_sources.json
+2025-03-10 12:08:38,924 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/fish_water_derivatives.json
+2025-03-10 12:08:38,924 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/poly-l-serine_bottles.json
+2025-03-10 12:08:38,925 - metazebrobot.utils.file_operations - WARNING - File does not exist: /home/delahantyj@hhmi.org/gitrepos/materials/poly-l-serine_derivatives.json
+2025-03-10 12:11:19,764 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:11:19,765 - __main__ - ERROR - Failed to load configuration. Exiting.
+2025-03-10 12:12:28,244 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:12:28,258 - __main__ - INFO - Initializing main window...
+2025-03-10 12:12:28,258 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:12:28,258 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:12:28,261 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:12:28,279 - __main__ - INFO - Application started successfully
+2025-03-10 12:17:34,562 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:17:37,550 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:17:37,550 - root - ERROR - Unhandled exception in main: name 'data_manager' is not defined
+Traceback (most recent call last):
+  File "/home/delahantyj@hhmi.org/gitrepos/metazebrobot/src/main.py", line 47, in main
+    if not data_manager.initialize():
+           ^^^^^^^^^^^^
+NameError: name 'data_manager' is not defined
+2025-03-10 12:18:40,828 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:18:40,828 - root - ERROR - Unhandled exception in main: module 'metazebrobot.data.data_manager' has no attribute 'initialize'
+Traceback (most recent call last):
+  File "/home/delahantyj@hhmi.org/gitrepos/metazebrobot/src/main.py", line 48, in main
+    if not data_manager.initialize():
+           ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'metazebrobot.data.data_manager' has no attribute 'initialize'
+2025-03-10 12:18:49,340 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:18:49,340 - root - ERROR - Unhandled exception in main: module 'metazebrobot.data.data_manager' has no attribute 'initialize'
+Traceback (most recent call last):
+  File "/home/delahantyj@hhmi.org/gitrepos/metazebrobot/src/main.py", line 48, in main
+    if not data_manager.initialize():
+           ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'metazebrobot.data.data_manager' has no attribute 'initialize'
+2025-03-10 12:19:30,395 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:19:30,421 - __main__ - INFO - Initializing main window...
+2025-03-10 12:19:30,421 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:19:30,421 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:19:30,545 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:19:30,582 - __main__ - INFO - Application started successfully
+2025-03-10 12:22:02,537 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:32:16,875 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:32:16,890 - __main__ - INFO - Initializing main window...
+2025-03-10 12:32:16,891 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:32:16,891 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:32:16,998 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:32:17,029 - metazebrobot.views.main_window - ERROR - Error creating tabs: name 'FishDishTab' is not defined
+2025-03-10 12:32:25,183 - root - ERROR - Unhandled exception in main: name 'FishDishTab' is not defined
+Traceback (most recent call last):
+  File "/home/delahantyj@hhmi.org/gitrepos/metazebrobot/src/main.py", line 59, in main
+    window = LabInventoryGUI()
+             ^^^^^^^^^^^^^^^^^
+  File "/home/delahantyj@hhmi.org/gitrepos/metazebrobot/src/metazebrobot/views/main_window.py", line 44, in __init__
+    self.init_ui()
+  File "/home/delahantyj@hhmi.org/gitrepos/metazebrobot/src/metazebrobot/views/main_window.py", line 247, in init_ui
+    fish_dishes_tab = FishDishTab()
+                      ^^^^^^^^^^^
+NameError: name 'FishDishTab' is not defined
+2025-03-10 12:32:54,534 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:32:54,558 - __main__ - INFO - Initializing main window...
+2025-03-10 12:32:54,558 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:32:54,558 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:32:54,669 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:32:54,730 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14781_1: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14781_1', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,731 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14781_2: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14781_2', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,731 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14781_3: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14781_3', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,731 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14781_4: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14781_4', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,731 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14781_5: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14781_5', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,731 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14783_10: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14783_10', '...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,732 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14783_1: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14783_1', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,732 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14783_2: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14783_2', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,732 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14783_3: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14783_3', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,732 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14783_4: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14783_4', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,732 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14783_5: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14783_5', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,733 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14783_6: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14783_6', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,733 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14783_7: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14783_7', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,733 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14783_8: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14783_8', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,733 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14783_9: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14783_9', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,733 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_10: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_10', '...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,733 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_11: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_11', '...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,733 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_12: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_12', '...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,734 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_13: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_13', '...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,734 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_14: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_14', '...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,734 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_15: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_15', '...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,734 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_16: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_16', '...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,734 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_9: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_9', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,734 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_1: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_1', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,734 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_2: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_2', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,734 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_3: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_3', 'd...rmination_reason': None}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,735 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_7: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_7', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,735 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_8: 1 validation error for FishDish
+metadata
+  Field required [type=missing, input_value={'dish_id': '14841_8', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:32:54,735 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDishTab' object has no attribute 'dish_sort_column'
+2025-03-10 12:33:58,070 - __main__ - INFO - Application started successfully
+2025-03-10 12:34:07,253 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:41:20,714 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:41:20,742 - __main__ - INFO - Initializing main window...
+2025-03-10 12:41:20,742 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:41:20,742 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:41:20,855 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:41:20,894 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_6: 7 validation errors for FishDish
+cross_id
+  Field required [type=missing, input_value={'dish_id': '14841_6', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+dof
+  Field required [type=missing, input_value={'dish_id': '14841_6', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+genotype
+  Field required [type=missing, input_value={'dish_id': '14841_6', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+responsible
+  Field required [type=missing, input_value={'dish_id': '14841_6', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+fish_count
+  Field required [type=missing, input_value={'dish_id': '14841_6', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+breeding
+  Field required [type=missing, input_value={'dish_id': '14841_6', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+enclosure
+  Field required [type=missing, input_value={'dish_id': '14841_6', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:41:20,894 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDishTab' object has no attribute 'dish_sort_column'
+2025-03-10 12:41:31,677 - __main__ - INFO - Application started successfully
+2025-03-10 12:44:22,183 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:44:23,630 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:44:23,659 - __main__ - INFO - Initializing main window...
+2025-03-10 12:44:23,659 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:44:23,659 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:44:23,759 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:44:23,797 - metazebrobot.controllers.fish_dish_controller - ERROR - Error parsing dish 14841_4: 7 validation errors for FishDish
+cross_id
+  Field required [type=missing, input_value={'dish_id': '14841_4', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+dof
+  Field required [type=missing, input_value={'dish_id': '14841_4', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+genotype
+  Field required [type=missing, input_value={'dish_id': '14841_4', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+responsible
+  Field required [type=missing, input_value={'dish_id': '14841_4', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+fish_count
+  Field required [type=missing, input_value={'dish_id': '14841_4', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+breeding
+  Field required [type=missing, input_value={'dish_id': '14841_4', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+enclosure
+  Field required [type=missing, input_value={'dish_id': '14841_4', 'd...n_reason': 'euthanasia'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.10/v/missing
+2025-03-10 12:44:23,798 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDishTab' object has no attribute 'dish_sort_column'
+2025-03-10 12:45:01,009 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:45:05,654 - __main__ - INFO - Application started successfully
+2025-03-10 12:45:10,811 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:45:11,178 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:45:11,197 - __main__ - INFO - Initializing main window...
+2025-03-10 12:45:11,197 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:45:11,197 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:45:11,297 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:45:11,333 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDishTab' object has no attribute 'dish_sort_column'
+2025-03-10 12:45:14,497 - __main__ - INFO - Application started successfully
+2025-03-10 12:45:21,329 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:45:27,613 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:45:27,638 - __main__ - INFO - Initializing main window...
+2025-03-10 12:45:27,638 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:45:27,638 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:45:27,734 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:45:27,773 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDishTab' object has no attribute 'dish_sort_column'
+2025-03-10 12:45:33,203 - __main__ - INFO - Application started successfully
+2025-03-10 12:48:02,187 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:48:04,083 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:48:04,112 - __main__ - INFO - Initializing main window...
+2025-03-10 12:48:04,112 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:48:04,112 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:48:04,215 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:48:04,254 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDishTab' object has no attribute 'dish_sort_column'
+2025-03-10 12:48:09,238 - __main__ - INFO - Application started successfully
+2025-03-10 12:48:15,588 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:49:39,734 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:49:39,756 - __main__ - INFO - Initializing main window...
+2025-03-10 12:49:39,756 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:49:39,756 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:49:39,862 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:49:39,902 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDishTab' object has no attribute 'dish_sort_column'
+2025-03-10 12:50:07,350 - __main__ - INFO - Application started successfully
+2025-03-10 12:50:20,189 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:51:47,445 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:51:47,462 - __main__ - INFO - Initializing main window...
+2025-03-10 12:51:47,462 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:51:47,462 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:51:47,579 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:51:47,615 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDishTab' object has no attribute 'dish_sort_column'
+2025-03-10 12:51:49,978 - __main__ - INFO - Application started successfully
+2025-03-10 12:51:57,542 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:53:16,387 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:53:16,403 - __main__ - INFO - Initializing main window...
+2025-03-10 12:53:16,403 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:53:16,403 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:53:16,510 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:53:16,546 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDishTab' object has no attribute 'dish_sort_column'
+2025-03-10 12:53:27,639 - __main__ - INFO - Application started successfully
+2025-03-10 12:53:36,401 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:54:05,001 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:54:05,027 - __main__ - INFO - Initializing main window...
+2025-03-10 12:54:05,027 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:54:05,027 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:54:05,127 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:54:05,171 - __main__ - INFO - Application started successfully
+2025-03-10 12:54:17,959 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDish' object has no attribute 'metadata'
+2025-03-10 12:57:28,180 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 12:57:31,483 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 12:57:31,504 - __main__ - INFO - Initializing main window...
+2025-03-10 12:57:31,505 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 12:57:31,505 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 12:57:31,653 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 12:57:31,698 - __main__ - INFO - Application started successfully
+2025-03-10 12:57:46,921 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dish status: name 'QDialog' is not defined
+2025-03-10 14:10:00,229 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dish status: name 'QDialog' is not defined
+2025-03-10 14:10:10,730 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 14:11:33,360 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 14:11:33,378 - __main__ - INFO - Initializing main window...
+2025-03-10 14:11:33,378 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 14:11:33,378 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 14:11:33,505 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 14:11:33,532 - __main__ - INFO - Application started successfully
+2025-03-10 14:11:41,956 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dish status: name 'QDialog' is not defined
+2025-03-10 14:11:54,592 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 14:12:29,365 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 14:12:29,388 - __main__ - INFO - Initializing main window...
+2025-03-10 14:12:29,388 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 14:12:29,388 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 14:12:29,497 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 14:12:29,543 - __main__ - INFO - Application started successfully
+2025-03-10 14:12:35,332 - metazebrobot.data.data_manager - ERROR - Cannot save dish: missing dish_id or dof
+2025-03-10 14:15:06,263 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 14:15:07,493 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 14:15:07,511 - __main__ - INFO - Initializing main window...
+2025-03-10 14:15:07,511 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 14:15:07,511 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 14:15:07,614 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 14:15:07,658 - __main__ - INFO - Application started successfully
+2025-03-10 14:15:12,593 - root - INFO - Saving dish 14841_3
+2025-03-10 14:15:12,593 - root - INFO - Saving dish 20250129
+2025-03-10 14:16:01,758 - metazebrobot.views.main_window - INFO - Closing application
+2025-03-10 14:16:03,287 - __main__ - INFO - Starting MetaZebrobot application...
+2025-03-10 14:16:03,306 - __main__ - INFO - Initializing main window...
+2025-03-10 14:16:03,306 - metazebrobot.views.main_window - INFO - Initializing main window
+2025-03-10 14:16:03,306 - metazebrobot.views.main_window - INFO - Loading data
+2025-03-10 14:16:03,413 - metazebrobot.views.main_window - INFO - Setting up UI
+2025-03-10 14:16:03,458 - __main__ - INFO - Application started successfully
+2025-03-10 14:16:24,080 - root - INFO - Saving dish 14841_3, dof 20250129
+2025-03-10 14:24:56,862 - metazebrobot.views.fish_dish_tab - ERROR - Error updating dishes table: 'FishDish' object has no attribute 'add_quality_checkresponsible'
+2025-03-10 14:26:06,575 - metazebrobot.views.main_window - INFO - Closing application
