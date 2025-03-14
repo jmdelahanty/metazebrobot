@@ -1,0 +1,15 @@
+# Ignore logs and data files
+*.log
+*.json
+*.csv
+
+# Ignore all __pycache__ directories anywhere in the project
+__pycache__/
+*/__pycache__/
+*/**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore compiled Python files
+*.so
+*.pyc

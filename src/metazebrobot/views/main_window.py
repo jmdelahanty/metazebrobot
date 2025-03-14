@@ -17,6 +17,7 @@ from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
 from ..data.data_manager import data_manager
 from .agarose_tab import AgaroseTab
 from .fish_dish_tab import FishDishTab
+from .dialogs.export_dialog import ExportDialog
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,16 @@ class LabInventoryGUI(QMainWindow):
         save_action.triggered.connect(self.save_data)
         file_menu.addAction(save_action)
         
+        # Export submenu
+        export_menu = file_menu.addMenu("Export")
+        
+        # Export survivability report action
+        export_action = QAction("Survivability Reports...", self)
+        export_action.triggered.connect(self.show_export_dialog)
+        export_menu.addAction(export_action)
+        
+        file_menu.addSeparator()
+        
         # Exit action
         exit_action = QAction("Exit", self)
         exit_action.setShortcut("Ctrl+Q")
@@ -199,10 +210,24 @@ class LabInventoryGUI(QMainWindow):
             "About MetaZebrobot",
             """<h2>MetaZebrobot</h2>
             <p>A comprehensive system for managing laboratory materials and samples.</p>
-            <p>Developed for lab researchers to efficiently track materials and dishes.</p>
+            <p>Developed for Ahrens' lab researchers to efficiently track materials and dishes.</p>
             <p>Version 1.0.0</p>"""
         )
-        
+
+    def show_export_dialog(self):
+        """Show the export dialog."""
+        try:
+            # Create and show the export dialog
+            dialog = ExportDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error showing export dialog: {str(e)}")
+            QMessageBox.warning(
+                self, 
+                "Export Error", 
+                f"Error showing export dialog: {str(e)}"
+            )        
+
     def init_ui(self):
         """Initialize the user interface."""
         logger.info("Setting up UI")
