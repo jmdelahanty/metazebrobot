@@ -4,7 +4,7 @@ A laboratory inventory management system for zebrafish research materials and di
 
 ## Overview
 
-MetaZebrobot is meant to start tracking metadata for my work at Janelia in the Johnson and Arhens labs. There's a lot more information we can use to better understsand our fish behavior and neural data if we just simply look at them I think. So this is a project to integrate literally as much metadata about my projects as I can so every experiment is completely documented from the fish being born down to the fish being studied in a particular place, time, condition, etc...
+MetaZebrobot is meant to start tracking metadata for my work at Janelia in the Johnson and Arhens labs. There's a lot more information we can use to better understand our fish behavior and neural data if we just simply look at them I think. So this is a project to integrate literally as much metadata about my projects as I can so every experiment is completely documented from the fish being born down to the fish being studied in a particular place, time, condition, etc...
 
 ## Features
 
@@ -41,7 +41,7 @@ metazebrobot/
 
 ### Setup
 
-Docs for this will show up maybe one day. For now, I don't think anyone else would want to use this thing or rely on it.... at your discretion...
+Docs for this will show up maybe one day. For now, I don't think anyone else would want to use this thing or rely on it. Frankly, people shouldn't! Its at your discretion...
 
 ## Development
 
