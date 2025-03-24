@@ -28,7 +28,9 @@ import requests
 from urllib.parse import urljoin
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, Tuple
+from rich.console import Console
+from rich import print as rprint
 
 def get_user_id(base_url: str, client_token: str, user_token: str, 
                 identifier: str, verify_ssl: bool = False) -> Optional[int]:
@@ -100,105 +102,242 @@ def get_user_id(base_url: str, client_token: str, user_token: str,
         print(f"Error fetching user: {str(e)}")
         return None
 
-def get_user_cache(base_url: str, client_token: str, user_token: str, 
-                   verify_ssl: bool = False) -> Dict[int, str]:
+def load_user_mapping(mapping_file: str) -> Dict[str, int]:
     """
-    Retrieve all users and build a cache mapping of user IDs to usernames.
+    Load user mapping (username:userid) from a JSON file.
     
     Args:
-        base_url: Base URL of the PyRAT instance.
-        client_token: API-Client-Token.
-        user_token: API-User-Token.
-        verify_ssl: Whether to verify SSL certificates.
-    
+        mapping_file: Path to the JSON file containing username to user ID mappings
+        
     Returns:
-        Dictionary mapping user IDs to usernames.
+        Dictionary mapping usernames to user IDs
     """
-    if not base_url.endswith('/'):
-        base_url += '/'
-    
-    api_base = urljoin(base_url, 'api/v3/')
-    users_url = urljoin(api_base, 'users')
-    
-    headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-    }
-    auth = (client_token, user_token)
-    
-    cache_file = Path(os.path.expanduser("~/.pyrat_user_cache.json"))
-    cache_max_age_days = 7  # Cache is valid for 7 days
-    
-    # Check if we have a recent cache file
-    if cache_file.exists():
-        try:
-            with open(cache_file, 'r') as f:
-                cache_data = json.load(f)
-                # Check cache age
-                cache_timestamp = cache_data.get("timestamp", 0)
-                current_timestamp = datetime.now().timestamp()
-                age_in_seconds = current_timestamp - cache_timestamp
-                
-                if age_in_seconds < (cache_max_age_days * 24 * 60 * 60):
-                    print(f"Using cached user data ({len(cache_data['users'])} users)")
-                    return {int(k): v for k, v in cache_data["users"].items()}
-        except Exception as e:
-            print(f"Error reading cache: {str(e)}")
-    
-    # Cache doesn't exist, is expired, or had an error - fetch fresh data
-    all_users = []
-    offset = 0
-    limit = 100
-    
-    print("Fetching user data from PyRAT API...")
-    while True:
-        params = {
-            'l': limit,
-            'o': offset
-        }
-        try:
-            response = requests.get(users_url, auth=auth, headers=headers, params=params, verify=verify_ssl)
-            if response.status_code != 200:
-                print(f"Error fetching users: {response.status_code} - {response.text}")
-                break
-                
-            users = response.json()
-            if not users:
-                break
-                
-            all_users.extend(users)
-            if len(users) < limit:
-                break
-                
-            offset += limit
-        except Exception as e:
-            print(f"Error fetching users: {str(e)}")
-            break
-    
-    # Build the user mapping
-    user_mapping = {
-        user.get("userid"): user.get("username") 
-        for user in all_users 
-        if user.get("userid") is not None
-    }
-    
-    # Save to cache
     try:
-        cache_data = {
-            "timestamp": datetime.now().timestamp(),
-            "users": user_mapping
-        }
-        with open(cache_file, 'w') as f:
-            json.dump(cache_data, f)
-        print(f"Cached {len(user_mapping)} users to {cache_file}")
+        with open(mapping_file, 'r') as f:
+            mapping = json.load(f)
+            
+        # Convert the mapping to ensure keys are strings and values are integers
+        # This handles both formats: username->id and id->username
+        result = {}
+        for key, value in mapping.items():
+            # Handle if the JSON is in id:username format
+            if key.isdigit() and isinstance(value, str):
+                result[value] = int(key)
+            # Handle if the JSON is in username:id format
+            elif isinstance(key, str) and (isinstance(value, int) or (isinstance(value, str) and value.isdigit())):
+                result[key] = int(value)
+                
+        print(f"Loaded {len(result)} username-to-ID mappings from {mapping_file}")
+        return result
     except Exception as e:
-        print(f"Error saving user cache: {str(e)}")
+        print(f"Error loading user mapping file: {str(e)}")
+        return {}
+
+def load_and_update_user_mapping(mapping_file: str,
+                               base_url: str = None, 
+                               client_token: str = None, 
+                               user_token: str = None,
+                               refresh: bool = False, 
+                               verify_ssl: bool = False,
+                               console: Optional[Console] = None
+                           ) -> Dict[str, int]:
+    """
+    Load user mapping (username:userid) from a JSON file and optionally update it with API data.
     
-    return user_mapping
+    Args:
+        mapping_file: Path to the JSON file containing username to user ID mappings
+        base_url: Base URL of the PyRAT instance for API updates
+        client_token: API-Client-Token for API updates
+        user_token: API-User-Token for API updates
+        refresh: Whether to refresh the mapping from the API
+        verify_ssl: Whether to verify SSL certificates
+        console: Rich console object for output (optional)
+        
+    Returns:
+        Dictionary mapping usernames to user IDs
+    """
+    # Use provided console or create a new one if none provided
+    if console is None:
+        console = Console()
+    
+    # Initialize mapping
+    username_to_id = {}
+    
+    # Check if mapping file exists
+    mapping_exists = os.path.exists(mapping_file)
+    
+    # Load existing mapping if it exists
+    if mapping_exists:
+        try:
+            with open(mapping_file, 'r') as f:
+                mapping_data = json.load(f)
+                
+            # Convert the mapping - handle both formats
+            if isinstance(mapping_data, dict):
+                for key, value in mapping_data.items():
+                    # Handle id:username format (convert to username:id)
+                    if key.isdigit() and isinstance(value, str):
+                        username_to_id[value] = int(key)
+                    # Handle username:id format
+                    elif isinstance(key, str) and (isinstance(value, int) or 
+                                                 (isinstance(value, str) and value.isdigit())):
+                        username_to_id[key] = int(value)
+                
+                console.print(f"[green]Loaded {len(username_to_id)} username-to-ID mappings from {mapping_file}[/green]\n")
+        except Exception as e:
+            console.print(f"[bold red]Error loading user mapping file: {str(e)}[/bold red]\n")
+    
+    # If refresh is requested and we have API credentials, update from API
+    if refresh and base_url and client_token and user_token:
+        console.print("[bold blue]Refreshing user mapping from API...[/bold blue]")
+        
+        if not base_url.endswith('/'):
+            base_url += '/'
+        
+        api_base = urljoin(base_url, 'api/v3/')
+        users_url = urljoin(api_base, 'users')
+        
+        headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        }
+        auth = (client_token, user_token)
+        
+        # Fetch all users
+        all_users = []
+        offset = 0
+        limit = 100
+        
+        with console.status("[bold cyan]Fetching users from API...[/bold cyan]"):
+            while True:
+                params = {
+                    'l': limit,
+                    'o': offset
+                }
+                try:
+                    response = requests.get(users_url, auth=auth, headers=headers, params=params, verify=verify_ssl)
+                    if response.status_code != 200:
+                        console.print(f"[bold red]Error fetching users: {response.status_code} - {response.text}[/bold red]")
+                        break
+                        
+                    users = response.json()
+                    if not users:
+                        break
+                        
+                    all_users.extend(users)
+                    if len(users) < limit:
+                        break
+                        
+                    offset += limit
+                except Exception as e:
+                    console.print(f"[bold red]Error fetching users: {str(e)}[/bold red]")
+                    break
+        
+        # Update mapping with API data
+        added_count = 0
+        for user in all_users:
+            username = user.get("username")
+            user_id = user.get("userid")
+            
+            if username and user_id and username not in username_to_id:
+                username_to_id[username] = user_id
+                added_count += 1
+        
+        if added_count > 0:
+            console.print(f"[green]Added {added_count} new users from API to mapping[/green]\n")
+        else:
+            console.print("[yellow]No new users found to add to mapping[/yellow]\n")
+        
+        # Save updated mapping
+        if added_count > 0:
+            try:
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(os.path.abspath(mapping_file)), exist_ok=True)
+                
+                with open(mapping_file, 'w') as f:
+                    json.dump(username_to_id, f, indent=2)
+                console.print(f"[green]Updated mapping saved to {mapping_file}[/green]")
+            except Exception as e:
+                console.print(f"[bold red]Error saving updated mapping: {str(e)}[/bold red]")
+    
+    return username_to_id
+
+def add_age_information(tanks: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """
+    Add age information to each tank in the list.
+    
+    Args:
+        tanks: List of tank dictionaries.
+        
+    Returns:
+        Tuple containing:
+        - Updated list of tank dictionaries with age information
+        - Dictionary with age status counts
+    """
+    from datetime import datetime
+    current_date = datetime.now().date()
+    
+    # Initialize counters for age status
+    status_counts = {
+        "URGENT": 0,
+        "WARNING": 0,
+        "OK": 0,
+        "UNKNOWN": 0
+    }
+    
+    for tank in tanks:
+        birth_date_str = tank.get('date_of_birth')
+        
+        # Initialize age fields
+        tank['age_days'] = None
+        tank['age_weeks'] = None
+        tank['age_months'] = None
+        tank['age_status'] = "UNKNOWN"
+        
+        if birth_date_str:
+            try:
+                # Handle different date formats
+                if 'T' in birth_date_str:
+                    # ISO format with time part
+                    birth_date = datetime.fromisoformat(birth_date_str.split('T')[0]).date()
+                elif '-' in birth_date_str:
+                    # YYYY-MM-DD format
+                    birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+                else:
+                    # Try YYYYMMDD format as fallback
+                    birth_date = datetime.strptime(birth_date_str, '%Y%m%d').date()
+                
+                # Calculate age in days
+                age_days = (current_date - birth_date).days
+                tank['age_days'] = age_days
+                
+                # Calculate age in weeks and months for convenience
+                tank['age_weeks'] = age_days // 7
+                tank['age_months'] = age_days // 30
+                
+                # Set age status
+                if age_days > 365:
+                    tank['age_status'] = "URGENT"
+                    status_counts["URGENT"] += 1
+                elif age_days > (365 - 50):  # Within 50 days of being one year old
+                    tank['age_status'] = "WARNING"
+                    status_counts["WARNING"] += 1
+                else:
+                    tank['age_status'] = "OK"
+                    status_counts["OK"] += 1
+                
+            except (ValueError, TypeError):
+                # Keep age as None for tanks with invalid date formats
+                status_counts["UNKNOWN"] += 1
+        else:
+            status_counts["UNKNOWN"] += 1
+    
+    return tanks, status_counts
 
 def get_tanks(base_url: str, client_token: str, user_token: str, 
               filters: Optional[Dict[str, Any]] = None,
-              limit: int = 10000, verify_ssl: bool = False) -> Optional[List[Dict[str, Any]]]:
+              limit: int = 10000, verify_ssl: bool = False,
+              console: Optional[Console] = None) -> Optional[List[Dict[str, Any]]]:
     """
     Get tanks with flexible filtering.
     
@@ -209,10 +348,15 @@ def get_tanks(base_url: str, client_token: str, user_token: str,
         filters: Dictionary of filter parameters.
         limit: Maximum number of results to return.
         verify_ssl: Whether to verify SSL certificates.
+        console: Rich console object for output (optional)
         
     Returns:
         List of tank dictionaries if successful, None otherwise.
     """
+    # Use provided console or create a new one if none provided
+    if console is None:
+        console = Console()
+        
     if not base_url.endswith('/'):
         base_url += '/'
     
@@ -226,13 +370,14 @@ def get_tanks(base_url: str, client_token: str, user_token: str,
     
     auth = (client_token, user_token)
     
-    # Default keys to request
+    # Default keys to request - ensure we have all date fields that could be useful for age calculation
     default_keys = [
         'tank_id', 'tank_label', 'tank_position', 'location_rack_name', 
         'location_room_name', 'location_area_name', 'location_building_name',
         'responsible_id', 'responsible_fullname', 'owner_fullname',
         'status', 'strain_name_with_id', 'age_level', 'number_of_male',
-        'number_of_female', 'number_of_unknown', 'date_of_birth'
+        'number_of_female', 'number_of_unknown', 
+        'date_of_birth', 'date_of_release', 'export_date', 'close_date'
     ]
     
     params = {
@@ -246,40 +391,49 @@ def get_tanks(base_url: str, client_token: str, user_token: str,
         params.update(filters)
     
     try:
-        print(f"Querying tanks with parameters: {params}")
-        response = requests.get(
-            tanks_url, 
-            auth=auth, 
-            headers=headers, 
-            params=params, 
-            verify=verify_ssl
-        )
-        
-        if response.status_code == 200:
-            all_tanks = response.json()
-            print(f"API returned {len(all_tanks)} tanks")
+        with console.status("[bold cyan]Querying PyRAT API...[/bold cyan]"):
+            response = requests.get(
+                tanks_url, 
+                auth=auth, 
+                headers=headers, 
+                params=params, 
+                verify=verify_ssl
+            )
             
-            # Get total count from headers if available
-            total_count = response.headers.get('X-Total-Count')
-            if total_count and int(total_count) > len(all_tanks):
-                print(f"Note: There are {total_count} total tanks, but only {len(all_tanks)} were returned due to the limit")
-            
-            return all_tanks
-        else:
-            print(f"Error: {response.status_code} - {response.text}")
-            return None
+            if response.status_code == 200:
+                all_tanks = response.json()
+                console.print(f"[green]API returned {len(all_tanks)} tanks[/green]")
+                
+                # Get total count from headers if available
+                total_count = response.headers.get('X-Total-Count')
+                if total_count and int(total_count) > len(all_tanks):
+                    console.print(f"[yellow]Note: There are {total_count} total tanks, but only {len(all_tanks)} were returned due to the limit[/yellow]")
+                
+                return all_tanks
+            else:
+                console.print(f"[bold red]Error: {response.status_code} - {response.text}[/bold red]")
+                return None
     except Exception as e:
-        print(f"Error: {str(e)}")
+        console.print(f"[bold red]Error: {str(e)}[/bold red]")
         return None
 
-def print_tank_summary(tanks: List[Dict[str, Any]], user_cache: Optional[Dict[int, str]] = None) -> None:
+def print_tank_summary(tanks: List[Dict[str, Any]], 
+                      id_to_username: Optional[Dict[int, str]] = None,
+                      age_status_counts: Optional[Dict[str, int]] = None,
+                      console: Optional[Console] = None) -> None:
     """
     Print a summary of the tanks.
     
     Args:
         tanks: List of tank dictionaries.
-        user_cache: Optional mapping of user IDs to usernames.
+        id_to_username: Optional mapping of user IDs to usernames.
+        age_status_counts: Optional dictionary with age status counts.
+        console: Rich console object for output (optional)
     """
+    # Use provided console or throw an error if one isn't provided
+    if console is None:
+        raise ValueError("A Rich console object is required for output but none was provided.")
+
     # Count tanks by status
     status_counts = {}
     for tank in tanks:
@@ -292,10 +446,10 @@ def print_tank_summary(tanks: List[Dict[str, Any]], user_cache: Optional[Dict[in
         resp_id = tank.get('responsible_id')
         resp_name = tank.get('responsible_fullname', 'Unknown')
         
-        # If we have a user cache and the full name isn't in the tank data,
-        # try to get it from the cache
-        if user_cache and resp_id and (not resp_name or resp_name == "Unknown"):
-            resp_name = user_cache.get(resp_id, f"ID:{resp_id}")
+        # If we have an ID mapping and the full name isn't in the tank data,
+        # try to get it from the mapping
+        if id_to_username and resp_id and (not resp_name or resp_name == "Unknown"):
+            resp_name = id_to_username.get(resp_id, f"ID:{resp_id}")
             
         responsible_counts[resp_name] = responsible_counts.get(resp_name, 0) + 1
     
@@ -304,27 +458,93 @@ def print_tank_summary(tanks: List[Dict[str, Any]], user_cache: Optional[Dict[in
     for tank in tanks:
         age_level = tank.get('age_level', 'unknown')
         age_counts[age_level] = age_counts.get(age_level, 0) + 1
-    
+
+    # Use the pre-calculated age fields
+    ages = []
+    age_data = []  # Will store (tank_id, tank_label, age_days) tuples for detailed reporting
+
+    for tank in tanks:
+        age_days = tank.get('age_days')
+        tank_id = tank.get('tank_id', 'N/A')
+        tank_label = tank.get('tank_label', 'N/A')
+        
+        if age_days is not None:
+            ages.append(age_days)
+            age_data.append((tank_id, tank_label, age_days))
+
     # Print summary
-    print("\n===== Tank Summary =====")
-    print(f"Total tanks: {len(tanks)}")
+    console.print("\n[bold white on blue]===== Tank Summary =====[/bold white on blue]")
+    console.print(f"[bold]Total tanks:[/bold] {len(tanks)}")
     
-    print("\nStatus distribution:")
+    console.print("\n[bold]Status distribution:[/bold]")
     for status, count in sorted(status_counts.items(), key=lambda x: x[1], reverse=True):
-        print(f"  {status}: {count}")
-    
-    print("\nResponsible person distribution:")
-    for resp, count in sorted(responsible_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
-        print(f"  {resp}: {count}")
+        console.print(f"  {status}: {count}")
         
     if len(responsible_counts) > 10:
-        print(f"  ... and {len(responsible_counts) - 10} more")
+        console.print(f"  ... and {len(responsible_counts) - 10} more")
     
-    print("\nAge level distribution:")
+    console.print("\n[bold]Age level distribution:[/bold]")
     for age, count in sorted(age_counts.items(), key=lambda x: x[1], reverse=True):
-        print(f"  {age}: {count}")
+        console.print(f"  {age}: {count}")
     
-    print("\n=========================")
+    # Print age statistics
+    if ages:
+        
+        # Count tanks by age ranges
+        age_ranges = {
+            "0-30 days": 0,
+            "31-60 days": 0,
+            "61-90 days": 0,
+            "91-180 days": 0,
+            "181-365 days": 0,
+            "366+ days": 0,
+        }
+        
+        for age in ages:
+            if age <= 30:
+                age_ranges["0-30 days"] += 1
+            elif age <= 60:
+                age_ranges["31-60 days"] += 1
+            elif age <= 90:
+                age_ranges["61-90 days"] += 1
+            elif age <= 180:
+                age_ranges["91-180 days"] += 1
+            elif age <= 365:
+                age_ranges["181-365 days"] += 1
+            else:
+                age_ranges["366+ days"] += 1
+        
+        console.print("\n[bold]Age statistics (days):[/bold]")
+
+        console.print("\n[bold]Age distribution:[/bold]")
+        for range_name, count in age_ranges.items():
+            if count > 0:
+                percent = (count / len(ages)) * 100
+                console.print(f"  {range_name}: {count} ({percent:.1f}%)")
+                
+        # Print oldest tanks (top 5)
+        if len(age_data) > 0:
+            console.print("\n[bold]Oldest tanks:[/bold]")
+            for tank_id, tank_label, age in sorted(age_data, key=lambda x: x[2], reverse=True)[:5]:
+                console.print(f"  Tank {tank_id} ({tank_label}): {age} days")
+                
+        # Print youngest tanks (top 5)
+        if len(age_data) > 0:
+            console.print("\n[bold]Youngest tanks:[/bold]")
+            for tank_id, tank_label, age in sorted(age_data, key=lambda x: x[2])[:5]:
+                console.print(f"  Tank {tank_id} ({tank_label}): {age} days")
+    else:
+        console.print("\n[yellow]No age data available[/yellow]")
+
+    # Print age status summary if provided
+    if age_status_counts:
+        console.print("\n[bold]Age Status Summary:[/bold]")
+        console.print(f"[bold red]URGENT (>365 days):[/bold red] {age_status_counts.get('URGENT', 0)} tanks")
+        console.print(f"[bold yellow]WARNING (315-365 days):[/bold yellow] {age_status_counts.get('WARNING', 0)} tanks")
+        console.print(f"[bold green]OK (<315 days):[/bold green] {age_status_counts.get('OK', 0)} tanks")
+        console.print(f"[bold]UNKNOWN:[/bold] {age_status_counts.get('UNKNOWN', 0)} tanks")
+    
+    console.print("\n[bold white on blue]=========================[/bold white on blue]")
 
 def main() -> None:
     """Main function to run the script."""
@@ -345,54 +565,95 @@ def main() -> None:
     parser.add_argument('--limit', type=int, default=10000, help='Maximum number of results to return')
     parser.add_argument('--verify-ssl', action='store_true', help='Enable SSL certificate verification')
     parser.add_argument('--output', help='Output file for the results (JSON format)')
+    parser.add_argument('--user-mapping', default='~/.pyrat_user_mapping.json', help='JSON file containing username:userid mappings')
+    parser.add_argument('--refresh-mapping', action='store_true',help='Refresh user mapping with data from API')
     parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed output')
-    parser.add_argument('--cache-users', action='store_true', help='Cache user data for faster lookups')
     
     args = parser.parse_args()
+    
+    # Create rich console
+    console = Console()
     
     # Configure request verification
     verify_ssl = args.verify_ssl
     if not verify_ssl:
-        print("ℹ️ SSL certificate verification is disabled")
+        console.print("[yellow]\n⚠️   SSL certificate verification is disabled[/yellow]\n")
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     
-    print(f"Connecting to: {args.base_url}")
+    console.print(f"[bold blue]Connecting to:[/bold blue] {args.base_url}\n")
     
     # Initialize filters
     filters = {}
     
-    # Cache users if requested - will be used for summary statistics
-    user_cache = None
-    if args.cache_users:
-        user_cache = get_user_cache(args.base_url, args.client_token, args.user_token, verify_ssl)
+    # Expand the user mapping path if it begins with ~
+    user_mapping_path = os.path.expanduser(args.user_mapping)
     
-    # Look up the user ID based on the provided responsible identifier or use direct ID
+    # Load and potentially update user mapping
+    user_mapping = load_and_update_user_mapping(
+        user_mapping_path,
+        args.base_url if args.refresh_mapping else None,
+        args.client_token if args.refresh_mapping else None,
+        args.user_token if args.refresh_mapping else None,
+        args.refresh_mapping,
+        verify_ssl,
+        console
+    )
+    
+    # Create reverse mapping for summary display (id -> username)
+    id_to_username = {v: k for k, v in user_mapping.items()}
+    
+    # Look up the user ID based on the provided responsible identifier, mapping, or direct ID
     if args.responsible_id:
         filters['responsible_id'] = args.responsible_id
-        print(f"Filtering tanks with responsible_id: {args.responsible_id}")
+        console.print(f"[cyan]Filtering tanks with responsible_id:[/cyan] {args.responsible_id}")
     elif args.responsible:
-        user_id = get_user_id(args.base_url, args.client_token, args.user_token, args.responsible, verify_ssl)
+        # First try to look up the user ID in the mapping
+        user_id = None
+        if args.responsible in user_mapping:
+            user_id = user_mapping[args.responsible]
+            console.print(f"[green]Found user ID {user_id} for {args.responsible} in mapping file[/green]\n")
+        else:
+            # Fall back to API lookup if not in mapping
+            user_id = get_user_id(args.base_url, args.client_token, args.user_token, args.responsible, verify_ssl)
+            
+            # If found via API, add to mapping and save
+            if user_id is not None and args.responsible:
+                user_mapping[args.responsible] = user_id
+                id_to_username[user_id] = args.responsible
+                try:
+                    with open(user_mapping_path, 'w') as f:
+                        json.dump(user_mapping, f, indent=2)
+                    console.print(f"[green]Updated mapping with new user: {args.responsible} -> {user_id}[/green]")
+                except Exception as e:
+                    console.print(f"[bold red]Error updating mapping file: {str(e)}[/bold red]")
+        
         if user_id is not None:
             filters['responsible_id'] = user_id
-            print(f"Filtering tanks with responsible_id: {user_id}")
+            console.print(f"[cyan]Filtering tanks with responsible_id:[/cyan] {user_id}")
         else:
-            print("Error: Could not find a user matching the provided responsible identifier.")
+            console.print("[bold red]Error: Could not find a user matching the provided responsible identifier.[/bold red]")
             sys.exit(1)
     
     # Add other filters
     if args.rack:
         filters['location_rack_name'] = args.rack
+        console.print(f"[cyan]Filtering by rack:[/cyan] {args.rack}")
     if args.room:
         filters['location_room_name'] = args.room
+        console.print(f"[cyan]Filtering by room:[/cyan] {args.room}")
     if args.area:
         filters['location_area_name'] = args.area
+        console.print(f"[cyan]Filtering by area:[/cyan] {args.area}")
     if args.building:
         filters['location_building_name'] = args.building
+        console.print(f"[cyan]Filtering by building:[/cyan] {args.building}")
     if args.status:
         filters['status'] = args.status
+        console.print(f"[cyan]Filtering by status:[/cyan] {args.status}")
     if args.strain:
         filters['strain_name_with_id'] = args.strain
+        console.print(f"[cyan]Filtering by strain:[/cyan] {args.strain}")
         
     # Add age filters if specified
     from datetime import datetime, timedelta
@@ -401,15 +662,16 @@ def main() -> None:
         # Calculate the cutoff date for maximum age
         cutoff_date = (datetime.now() - timedelta(days=args.max_age_days)).strftime('%Y-%m-%d')
         filters['birth_date_from'] = cutoff_date
-        print(f"Filtering tanks born after: {cutoff_date} (max age {args.max_age_days} days)")
+        console.print(f"[cyan]Filtering tanks born after:[/cyan] {cutoff_date} [dim](max age {args.max_age_days} days)[/dim]")
         
     if args.min_age_days is not None:
         # Calculate the cutoff date for minimum age
         cutoff_date = (datetime.now() - timedelta(days=args.min_age_days)).strftime('%Y-%m-%d')
         filters['birth_date_to'] = cutoff_date
-        print(f"Filtering tanks born before: {cutoff_date} (min age {args.min_age_days} days)")
+        console.print(f"[cyan]Filtering tanks born before:[/cyan] {cutoff_date} [dim](min age {args.min_age_days} days)[/dim]")
     
     # Get the tanks
+    console.print(f"[bold]Querying tanks from PyRAT API...[/bold]")
     all_tanks = get_tanks(
         args.base_url, 
         args.client_token, 
@@ -420,12 +682,22 @@ def main() -> None:
     )
     
     if all_tanks:
-        # Print summary statistics
-        print_tank_summary(all_tanks, user_cache)
+        # Add age information to each tank
+        console.print("[bold]Processing tank data...[/bold]")
+        all_tanks, age_status_counts = add_age_information(all_tanks)
         
+        # Print summary statistics
+        print_tank_summary(
+            all_tanks,
+            id_to_username,
+            age_status_counts,
+            console
+            )
+
         # Print detailed output if requested
         if args.verbose:
-            print("\nTanks found:")
+            console.print("\n[bold white on blue]Tanks found:[/bold white on blue]")
+            
             for i, tank in enumerate(all_tanks, 1):
                 tank_id = tank.get('tank_id', 'N/A')
                 tank_label = tank.get('tank_label', 'N/A')
@@ -433,7 +705,12 @@ def main() -> None:
                 position = tank.get('tank_position', 'N/A')
                 status = tank.get('status', 'N/A')
                 strain = tank.get('strain_name_with_id', 'N/A')
+                
+                # Get responsible name - first try fullname from API, then from mapping
+                resp_id = tank.get('responsible_id')
                 responsible = tank.get('responsible_fullname', 'N/A')
+                if responsible == 'N/A' and resp_id in id_to_username:
+                    responsible = f"{id_to_username[resp_id]} (ID: {resp_id})"
                 
                 # Fish counts
                 males = tank.get('number_of_male', 0)
@@ -441,27 +718,44 @@ def main() -> None:
                 unknown = tank.get('number_of_unknown', 0)
                 total = males + females + unknown
                 
-                print(f"{i}. ID: {tank_id}, Label: {tank_label}")
-                print(f"   Location: {location}, Position: {position}")
-                print(f"   Status: {status}, Strain: {strain}")
-                print(f"   Fish: {total} ({males}M/{females}F/{unknown}U)")
-                print(f"   Responsible: {responsible}")
-                print()
+                # Age information
+                age_days = tank.get('age_days')
+                age_status = tank.get('age_status', 'UNKNOWN')
+                
+                # Format tank header with number
+                console.print(f"[bold]{i}. ID: {tank_id}, Label: {tank_label}[/bold]")
+                console.print(f"   Location: {location}, Position: {position}")
+                console.print(f"   Status: {status}, Strain: {strain}")
+                console.print(f"   Fish: {total} ({males}M/{females}F/{unknown}U)")
+                console.print(f"   Responsible: {responsible}")
+                
+                # Display age with appropriate styling
+                if age_days is not None:
+                    if age_status == "URGENT":
+                        console.print(f"   Age: [bold red]URGENT: {age_days} days[/bold red]")
+                    elif age_status == "WARNING":
+                        console.print(f"   Age: [bold yellow]WARNING: {age_days} days[/bold yellow]")
+                    elif age_status == "OK":
+                        console.print(f"   Age: [bold green]OK: {age_days} days[/bold green]")
+                    else:
+                        console.print(f"   Age: {age_days} days")
+                
+                console.print()
         else:
-            print(f"\nFound {len(all_tanks)} tanks. Use --verbose for detailed listing.")
+            console.print(f"\n[bold green]Found {len(all_tanks)} tanks.[/bold green] Use --verbose for detailed listing.")
         
         # Save results if requested
         if args.output:
             try:
                 with open(args.output, 'w') as f:
                     json.dump(all_tanks, f, indent=2)
-                print(f"\nComplete results saved to {args.output}")
+                console.print(f"\n[bold green]Complete results saved to {args.output}[/bold green]")
             except Exception as e:
-                print(f"Error saving results: {str(e)}")
+                console.print(f"[bold red]Error saving results: {str(e)}[/bold red]")
         
         sys.exit(0)
     else:
-        print("No tanks found or there was an error with the request.")
+        console.print("[bold red]No tanks found or there was an error with the request.[/bold red]")
         sys.exit(1)
 
 if __name__ == "__main__":

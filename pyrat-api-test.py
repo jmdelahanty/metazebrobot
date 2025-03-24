@@ -1,235 +1,138 @@
 #!/usr/bin/env python3
 """
-PyRAT API v3 Extended Test Script
+PyRAT API Authentication Test
 
-This script tests connectivity to a PyRAT API v3 instance and demonstrates using listing endpoints.
+Tests authentication with the PyRAT API following the exact documentation pattern.
 """
 
 import requests
-import sys
-import json
 import argparse
+import json
 from urllib.parse import urljoin
+import sys
 
-class PyRatApiClient:
-    """Client for interacting with the PyRAT API v3."""
+def test_pyrat_auth(base_url, client_token, user_token, verify_ssl=False):
+    """
+    Test authentication with the PyRAT API.
     
-    def __init__(self, base_url, client_token, user_token, verify_ssl=True):
-        """
-        Initialize the PyRAT API client.
+    Args:
+        base_url: Base URL of the PyRAT instance
+        client_token: API-Client-Token (formatted as API-Client-Id-API-Client-Key)
+        user_token: API-User-Token
+        verify_ssl: Whether to verify SSL certificates
+    """
+    # Ensure base_url ends with a slash
+    if not base_url.endswith('/'):
+        base_url += '/'
+    
+    # Construct API base URL 
+    api_base = urljoin(base_url, 'api/v3/')
+    
+    # Disable SSL verification warning if requested
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    
+    # Headers
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+    }
+    
+    # 1. First test /version endpoint which doesn't require authentication
+    version_url = urljoin(api_base, 'version')
+    print(f"\nTesting version endpoint: {version_url}")
+    
+    try:
+        response = requests.get(version_url, headers=headers, verify=verify_ssl)
+        print(f"Status: {response.status_code}")
         
-        Args:
-            base_url: Base URL of the PyRAT instance (e.g., 'https://example.com/pyrat/')
-            client_token: API-Client-Token (format: 'API-Client-Id-API-Client-Key')
-            user_token: API-User-Token (format: 'API-User-Id-API-User-Key')
-            verify_ssl: Whether to verify SSL certificates (set to False to disable verification)
-        """
-        # Ensure base_url ends with a slash
-        if not base_url.endswith('/'):
-            base_url += '/'
+        if response.status_code == 200:
+            print(f"✅ Version endpoint accessible")
+            print(f"Response: {json.dumps(response.json(), indent=2)}")
+        else:
+            print(f"❌ Failed to access version endpoint: {response.text}")
+            return False
+    except Exception as e:
+        print(f"❌ Error accessing version endpoint: {str(e)}")
+        return False
+    
+    # 2. Test /credentials endpoint with authentication
+    credentials_url = urljoin(api_base, 'credentials')
+    print(f"\nTesting credentials endpoint: {credentials_url}")
+    
+    # Set up authentication according to documentation
+    # API-Client-Token as username, API-User-Token as password
+    auth = (client_token, user_token)
+    
+    try:
+        response = requests.get(credentials_url, auth=auth, headers=headers, verify=verify_ssl)
+        print(f"Status: {response.status_code}")
         
-        self.base_url = base_url
-        self.api_base = urljoin(base_url, 'api/v3/')
-        self.auth = (client_token, user_token)
-        self.verify_ssl = verify_ssl
-        self.headers = {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-        }
-    
-    def get_version(self):
-        """Get PyRAT version information."""
-        url = urljoin(self.api_base, 'version')
-        response = requests.get(url, headers=self.headers, verify=self.verify_ssl)
-        response.raise_for_status()
-        return response.json()
-    
-    def get_credentials(self):
-        """Get information about the current API credentials."""
-        url = urljoin(self.api_base, 'credentials')
-        response = requests.get(url, auth=self.auth, headers=self.headers, verify=self.verify_ssl)
-        response.raise_for_status()
-        return response.json()
-    
-    def get_permissions(self):
-        """Get available permissions information."""
-        url = urljoin(self.api_base, 'permissions.json')
-        response = requests.get(url, auth=self.auth, headers=self.headers, verify=self.verify_ssl)
-        response.raise_for_status()
-        return response.json()
-    
-    def get_openapi_spec(self):
-        """Get the OpenAPI specification."""
-        url = urljoin(self.api_base, 'openapi.json')
-        response = requests.get(url, auth=self.auth, headers=self.headers, verify=self.verify_ssl)
-        response.raise_for_status()
-        return response.json()
-    
-    def get_list(self, endpoint, keys=None, sort=None, limit=None, offset=None, **filters):
-        """
-        Get a list from a listing endpoint.
-        
-        Args:
-            endpoint: API endpoint path (e.g., 'animals')
-            keys: List of keys to include in the response
-            sort: List of sort expressions (e.g., ['owner_full_name:asc', 'age_days:desc'])
-            limit: Maximum number of rows to return
-            offset: Number of rows to skip
-            **filters: Additional filter parameters
+        if response.status_code == 200:
+            result = response.json()
+            print(f"Response: {json.dumps(result, indent=2)}")
             
-        Returns:
-            JSON response from the API
-        """
-        url = urljoin(self.api_base, endpoint)
-        params = {}
-        
-        # Add keys
-        if keys:
-            params['k'] = keys
-        
-        # Add sort
-        if sort:
-            params['s'] = sort
-        
-        # Add limit and offset
-        if limit is not None:
-            params['l'] = limit
-        if offset is not None:
-            params['o'] = offset
-        
-        # Add filters
-        params.update(filters)
-        
-        response = requests.get(url, params=params, auth=self.auth, headers=self.headers, verify=self.verify_ssl)
-        response.raise_for_status()
-        return response.json()
-
-def run_tests(client):
-    """Run a series of tests against the PyRAT API."""
-    tests = [
-        {
-            'name': 'Get Version',
-            'function': client.get_version,
-            'args': []
-        },
-        {
-            'name': 'Get Credentials',
-            'function': client.get_credentials,
-            'args': []
-        }
-    ]
-    
-    # Optional tests that might not be accessible depending on permissions
-    optional_tests = [
-        {
-            'name': 'Get Permissions',
-            'function': client.get_permissions,
-            'args': []
-        },
-        {
-            'name': 'Get OpenAPI Spec (may be large)',
-            'function': client.get_openapi_spec,
-            'args': []
-        },
-        # Example of using a listing endpoint - uncomment if you have access to animals
-        # {
-        #    'name': 'List Animals',
-        #    'function': client.get_list,
-        #    'args': ['animals'],
-        #    'kwargs': {'keys': ['eartag_or_id', 'sex', 'strain_name'], 'limit': 5}
-        # }
-    ]
-    
-    results = {'success': 0, 'failure': 0}
-    
-    print("\n=== Running Required Tests ===")
-    
-    # Run required tests
-    for test in tests:
-        print(f"\nRunning test: {test['name']}")
-        try:
-            if 'kwargs' in test:
-                response = test['function'](*test['args'], **test['kwargs'])
+            if result.get("client_valid", False) and result.get("user_valid", False):
+                print(f"✅ Authentication successful! Both client and user tokens are valid.")
+                return True
             else:
-                response = test['function'](*test['args'])
-            
-            print(f"✅ Success!")
-            print(f"Response: {json.dumps(response, indent=2)}")
-            results['success'] += 1
-        except Exception as e:
-            print(f"❌ Failed: {str(e)}")
-            results['failure'] += 1
-    
-    print("\n=== Running Optional Tests ===")
-    
-    # Run optional tests
-    for test in optional_tests:
-        print(f"\nRunning test: {test['name']}")
-        try:
-            if 'kwargs' in test:
-                response = test['function'](*test['args'], **test['kwargs'])
-            else:
-                response = test['function'](*test['args'])
-            
-            # For large responses, don't print the full content
-            if test['name'] == 'Get OpenAPI Spec (may be large)':
-                print(f"✅ Success! (Response too large to display)")
-            else:
-                print(f"✅ Success!")
-                print(f"Response: {json.dumps(response, indent=2)}")
-            
-            results['success'] += 1
-        except Exception as e:
-            print(f"❌ Failed: {str(e)}")
-            # Don't count optional test failures
-    
-    return results
+                issues = []
+                if not result.get("client_valid", False):
+                    issues.append("Client token is not valid")
+                if not result.get("client_enabled", False):
+                    issues.append("Client is not enabled")
+                if not result.get("user_valid", False):
+                    issues.append("User token is not valid")
+                if not result.get("user_enabled", False):
+                    issues.append("User is not enabled")
+                    
+                print(f"⚠️ Authentication issues detected: {', '.join(issues)}")
+                return False
+        else:
+            print(f"❌ Failed to authenticate: {response.text}")
+            return False
+    except Exception as e:
+        print(f"❌ Error during authentication: {str(e)}")
+        return False
 
 def main():
     """Main function to run the script."""
-    parser = argparse.ArgumentParser(description='Test PyRAT API v3 connectivity')
-    parser.add_argument('base_url', help='Base URL of the PyRAT instance (e.g., https://example.com/pyrat/)')
-    parser.add_argument('client_token', help='API-Client-Token (format: API-Client-Id-API-Client-Key)')
-    parser.add_argument('user_token', help='API-User-Token (format: API-User-Id-API-User-Key)')
-    parser.add_argument('--save-spec', help='Save OpenAPI specification to this file')
+    parser = argparse.ArgumentParser(description='Test PyRAT API authentication')
+    parser.add_argument('base_url', help='Base URL of the PyRAT instance')
+    parser.add_argument('client_token', help='API-Client-Token (formatted as API-Client-Id-API-Client-Key)')
+    parser.add_argument('user_token', help='API-User-Token')
     parser.add_argument('--no-verify-ssl', action='store_true', help='Disable SSL certificate verification')
     
     args = parser.parse_args()
     
-    # Add warning for SSL verification
+    # Print warning for insecure connections
     if args.no_verify_ssl:
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         print("⚠️ WARNING: SSL certificate verification disabled. This is insecure!")
     
-    print(f"Testing PyRAT API v3 at {args.base_url}...")
+    print("Testing PyRAT API authentication...")
+    print(f"Base URL: {args.base_url}")
+    print(f"Client token: {args.client_token}")
+    print(f"User token: {args.user_token}")
     
-    try:
-        client = PyRatApiClient(args.base_url, args.client_token, args.user_token, verify_ssl=not args.no_verify_ssl)
-        results = run_tests(client)
-        
-        if args.save_spec:
-            try:
-                spec = client.get_openapi_spec()
-                with open(args.save_spec, 'w') as f:
-                    json.dump(spec, f, indent=2)
-                print(f"\nOpenAPI specification saved to {args.save_spec}")
-            except Exception as e:
-                print(f"\nFailed to save OpenAPI specification: {str(e)}")
-        
-        print(f"\n=== Test Results ===")
-        print(f"Successful tests: {results['success']}")
-        print(f"Failed tests: {results['failure']}")
-        
-        if results['failure'] > 0:
-            sys.exit(1)
-        else:
-            print("\n✅ All required tests passed successfully!")
-            sys.exit(0)
-            
-    except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        sys.exit(1)
+    success = test_pyrat_auth(
+        args.base_url, 
+        args.client_token, 
+        args.user_token, 
+        verify_ssl=not args.no_verify_ssl
+    )
+    
+    if success:
+        print("\n✅ Authentication test passed successfully!")
+        print("You can now integrate with the PyRAT API.")
+    else:
+        print("\n❌ Authentication test failed.")
+        print("Please check:")
+        print("  1. Your client token format (should be API-Client-Id-API-Client-Key)")
+        print("  2. Your user token format")
+        print("  3. That your client and user are enabled in the PyRAT system")
+    
+    sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
     main()
