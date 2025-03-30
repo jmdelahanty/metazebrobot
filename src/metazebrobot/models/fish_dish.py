@@ -13,8 +13,9 @@ class Enclosure(BaseModel):
     """Enclosure information for a fish dish."""
     temperature: float = Field(ge=18, le=30)  # Temperature in Celsius
     light_cycle: LightCycle
-    room: str
-    in_beaker: bool = False
+    room: str = "2E.282"  # Default room
+    in_beaker: bool = False, # Whether the fish are in a beaker
+    vol_water_total: Optional[int] = None  # Total volume of water in the enclosure
 
 
 class Breeding(BaseModel):
@@ -24,13 +25,37 @@ class Breeding(BaseModel):
 
 class QualityCheckData(BaseModel):
     """Data for a quality check."""
-    check_time: str  # Format: "YYYYMMDDhh:mm:ss"
+    check_time: str  # Format: "YYYYMMDDTHH:MM:SS" (ISO 8601)
     fed: bool = False
     feed_type: Optional[str] = None
     water_changed: bool = False
     vol_water_changed: Optional[int] = None
     num_dead: int = 0
     notes: Optional[str] = None
+    
+    @field_validator('check_time')
+    @classmethod
+    def validate_check_time_format(cls, v: str) -> str:
+        """Validate check_time format follows ISO 8601 (YYYYMMDDTHH:MM:SS)."""
+        if v:
+            try:
+                # Check for the 'T' separator
+                if 'T' not in v:
+                    raise ValueError("Missing 'T' separator between date and time")
+                
+                # Split into date and time parts
+                date_part, time_part = v.split('T')
+                
+                # Validate date part (YYYYMMDD)
+                datetime.strptime(date_part, "%Y%m%d")
+                
+                # Validate time part (HH:MM:SS)
+                datetime.strptime(time_part, "%H:%M:%S")
+                
+                return v
+            except ValueError as e:
+                raise ValueError(f"Invalid datetime format: {v}. Expected format: YYYYMMDDTHH:MM:SS. {str(e)}")
+        return v
 
 
 class FishDish(BaseModel):
@@ -38,6 +63,7 @@ class FishDish(BaseModel):
     dish_id: str
     date_created: str  # Format: YYYYMMDD
     cross_id: str
+    dish_number: int = None
     dof: str  # Date of fertilization (YYYYMMDD)
     genotype: str
     sex: Literal["unknown", "M", "F"] = "unknown"
@@ -88,7 +114,8 @@ class FishDish(BaseModel):
         light_duration: str = "14:10",
         dawn_dusk: str = "8:00",
         room: str = "2E.282",
-        in_beaker: bool = False
+        in_beaker: bool = False,
+        vol_water_total: Optional[int] = None,
     ) -> 'FishDish':
         """
         Create a new fish dish with default values.
@@ -106,6 +133,7 @@ class FishDish(BaseModel):
             dish_id=dish_id,
             date_created=today,
             cross_id=cross_id,
+            dish_number=dish_number,
             dof=dof,
             genotype=genotype,
             sex=sex,
@@ -120,13 +148,10 @@ class FishDish(BaseModel):
                     dawn_dusk=dawn_dusk
                 ),
                 room=room,
-                in_beaker=in_beaker
+                in_beaker=in_beaker,
+                vol_water_total=vol_water_total
             ),
             quality_checks={
-                today: {
-                    "check_time": f"{today}00:00:00",
-                    "notes": "Created and checked - normal"
-                }
             },
             status="active"
         )

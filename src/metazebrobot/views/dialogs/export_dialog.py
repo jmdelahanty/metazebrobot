@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from ...utils.export_module import survivability_exporter
-from ...data.data_manager import data_manager
+from metazebrobot.utils.export_module import export_survivability_report, export_survivability_summary # <--- Functions imported directly
+from metazebrobot.data.data_manager import data_manager
 
 logger = logging.getLogger(__name__)
 
@@ -174,8 +174,7 @@ class ExportDialog(QDialog):
             success = True
             
             if export_detailed:
-                logger.info(f"Exporting detailed report to {detailed_path}")
-                if survivability_exporter.export_survivability_report(detailed_path):
+                if export_survivability_report(detailed_path):
                     logger.info(f"Successfully exported detailed report to {detailed_path}")
                 else:
                     logger.error("Failed to export detailed report")
@@ -183,7 +182,7 @@ class ExportDialog(QDialog):
                     
             if export_summary:
                 logger.info(f"Exporting summary report to {summary_path}")
-                if survivability_exporter.export_survivability_summary(summary_path):
+                if export_survivability_summary(summary_path):
                     logger.info(f"Successfully exported summary report to {summary_path}")
                 else:
                     logger.error("Failed to export summary report")

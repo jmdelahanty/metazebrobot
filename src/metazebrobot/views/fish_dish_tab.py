@@ -162,6 +162,15 @@ class FishDishTab(QWidget):
         self.fish_count.setValue(1)  # Default value
         form_layout.addWidget(self.fish_count, row, 3)
         
+        row += 1
+        
+        # Volume of water total
+        form_layout.addWidget(QLabel("Volume Water Total (mL):"), row, 0)
+        self.vol_water_total = QLineEdit()
+        self.vol_water_total.setText("80")  # Default value
+        self.vol_water_total.setPlaceholderText("Enter volume in mL")
+        form_layout.addWidget(self.vol_water_total, row, 1)
+        
         # Add form to group box
         form_group.setLayout(form_layout)
         scroll_layout.addWidget(form_group)
@@ -171,7 +180,6 @@ class FishDishTab(QWidget):
         add_button = QPushButton("Add New Dish")
         add_button.clicked.connect(self.add_fish_dish)
         button_layout.addWidget(add_button)
-        
         clear_button = QPushButton("Clear Form")
         clear_button.clicked.connect(self.clear_fish_dish_form)
         button_layout.addWidget(clear_button)
@@ -333,32 +341,23 @@ class FishDishTab(QWidget):
             
     def show_quality_check_dialog(self, dish_id):
         """
-        Show dialog to add a quality check.
+        Show the quality check dialog for a dish.
         
         Args:
-            dish_id: ID of the dish to update
+            dish_id: ID of the dish
         """
         try:
-            # Get the dish
-            dish = fish_dish_controller.get_dish(dish_id)
-            if not dish:
-                QMessageBox.warning(self, "Error", f"Could not load dish {dish_id}")
-                return
-            
-            # Create dialog
             dialog = QualityCheckDialog(self)
             
-            # Connect signal to save quality check
+            # Connect signals
             dialog.check_saved.connect(lambda check_data: self.save_quality_check(dish_id, check_data))
+            dialog.batch_checks_saved.connect(lambda check_list: self.save_batch_quality_checks(dish_id, check_list))
             
-            # Show dialog (non-modal to allow multiple checks)
-            dialog.setWindowTitle(f"Quality Check - Dish {dish_id}")
-            dialog.show()
-            
+            dialog.exec()
         except Exception as e:
             logger.error(f"Error showing quality check dialog: {str(e)}")
             QMessageBox.critical(self, "Error", f"Error: {str(e)}")
-            
+
     def save_quality_check(self, dish_id, check_data):
         """
         Save a quality check for a dish.
@@ -382,6 +381,55 @@ class FishDishTab(QWidget):
         except Exception as e:
             logger.error(f"Error saving quality check: {str(e)}")
             QMessageBox.critical(self, "Error", f"Error saving quality check: {str(e)}")
+            
+    def save_batch_quality_checks(self, dish_id, check_list):
+        """
+        Save multiple quality checks for a dish.
+        
+        Args:
+            dish_id: ID of the dish
+            check_list: List of quality check data
+        """
+        try:
+            success_count = 0
+            error_messages = []
+            
+            for check_data in check_list:
+                success, message = fish_dish_controller.add_quality_check(
+                    dish_id=dish_id,
+                    **check_data
+                )
+                
+                if success:
+                    success_count += 1
+                else:
+                    error_messages.append(f"Entry {check_data['check_time']}: {message}")
+            
+            # Show result message
+            if success_count == len(check_list):
+                QMessageBox.information(
+                    self, 
+                    "Success", 
+                    f"All {success_count} quality checks saved successfully"
+                )
+            elif success_count > 0:
+                QMessageBox.warning(
+                    self, 
+                    "Partial Success", 
+                    f"Saved {success_count} of {len(check_list)} quality checks.\n\nErrors:\n" + 
+                    "\n".join(error_messages)
+                )
+            else:
+                QMessageBox.critical(
+                    self, 
+                    "Error", 
+                    f"Failed to save any quality checks.\n\nErrors:\n" + 
+                    "\n".join(error_messages)
+                )
+                    
+        except Exception as e:
+            logger.error(f"Error saving batch quality checks: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Error saving batch quality checks: {str(e)}")
             
     def update_dishes_table(self):
         """Update the fish dishes table with sorted and filtered entries."""
@@ -518,6 +566,7 @@ class FishDishTab(QWidget):
         self.dawn_dusk.setText("8:00")
         self.beaker_housing.setChecked(False)
         self.fish_count.setValue(1)
+        self.vol_water_total.setText("80")
         
     def add_fish_dish(self):
         """Add a new fish dish."""
@@ -563,7 +612,8 @@ class FishDishTab(QWidget):
                 light_duration=self.light_duration.text().strip(),
                 dawn_dusk=self.dawn_dusk.text().strip(),
                 room=self.room.text().strip(),
-                in_beaker=self.beaker_housing.isChecked()
+                in_beaker=self.beaker_housing.isChecked(),
+                vol_water_total=int(self.vol_water_total.text().strip()),  
             )
             
             if success:

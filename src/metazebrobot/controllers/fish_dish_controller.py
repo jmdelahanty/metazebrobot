@@ -88,7 +88,8 @@ class FishDishController:
         light_duration: str = "14:10",
         dawn_dusk: str = "8:00",
         room: str = "2E.282",
-        in_beaker: bool = False
+        in_beaker: bool = False,
+        vol_water_total: int = 0
     ) -> Tuple[bool, str, Optional[FishDish]]:
         """
         Create a new fish dish.
@@ -118,7 +119,8 @@ class FishDishController:
                 light_duration=light_duration,
                 dawn_dusk=dawn_dusk,
                 room=room,
-                in_beaker=in_beaker
+                in_beaker=in_beaker,
+                vol_water_total=vol_water_total
             )
             
             # Check if dish already exists
@@ -141,7 +143,7 @@ class FishDishController:
     def add_quality_check(
         self,
         dish_id: str,
-        check_time: str,
+        check_time: str,  # Format should be YYYYMMDDTHH:MM:SS
         fed: bool = False,
         feed_type: Optional[str] = None,
         water_changed: bool = False,
@@ -154,7 +156,7 @@ class FishDishController:
         
         Args:
             dish_id: ID of the dish
-            check_time: Time of the check (YYYYMMDDhh:mm:ss)
+            check_time: Time of the check (YYYYMMDDTHH:MM:SS)
             fed: Whether fish were fed
             feed_type: Type of feed
             water_changed: Whether water was changed

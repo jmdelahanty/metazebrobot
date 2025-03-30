@@ -7,12 +7,8 @@ This script initializes the application, loads configuration, and launches the m
 
 import sys
 import logging
-from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
-
-# Add parent directory to path to allow imports from metazebrobot package
-sys.path.append(str(Path(__file__).parent))
 
 from metazebrobot.utils.config import config
 from metazebrobot.data.data_manager import data_manager
@@ -21,12 +17,15 @@ from metazebrobot.views.main_window import LabInventoryGUI
 
 def setup_logging():
     """Configure application logging."""
+    # Ensure log file path is handled correctly, maybe relative to project root or user dir
+    log_file_path = 'metazebrobot.log' 
+    # Consider making the log file path configurable or placing it in a standard location
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler('metazebrobot.log')
+            logging.FileHandler(log_file_path) 
         ]
     )
 
@@ -50,7 +49,8 @@ def main():
             return 1
         
         # Initialize Qt application
-        app = QApplication(sys.argv)
+        # Pass sys.argv so Qt can process command-line arguments if needed
+        app = QApplication(sys.argv) 
         app.setApplicationName("MetaZebrobot")
         app.setOrganizationName("Zebrafish Lab")
         
@@ -61,12 +61,17 @@ def main():
         
         # Run the application
         logger.info("Application started successfully")
-        return app.exec()
+        # Use app.exec() which returns the exit code
+        return app.exec() 
         
     except Exception as e:
-        logging.error(f"Unhandled exception in main: {str(e)}", exc_info=True)
+        # Use exc_info=True to log the full traceback
+        logging.error(f"Unhandled exception in main: {str(e)}", exc_info=True) 
         return 1
 
 
+# This block allows running 'python -m metazebrobot.cli' directly if needed,
+# but the primary way to run is via the entry point script.
 if __name__ == '__main__':
+    # Exit with the code returned by app.exec() or the error code
     sys.exit(main())
