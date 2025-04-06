@@ -4,20 +4,19 @@ Main window for the MetaZebrobot application.
 This module provides the main application window and coordinates the tabs.
 """
 
-import sys
 import logging
-from pathlib import Path
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QTabWidget, QMessageBox,
-    QSystemTrayIcon, QMenu, QMenuBar, QDialog
+    QSystemTrayIcon, QMenu
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
 
 from ..data.data_manager import data_manager
 from .agarose_tab import AgaroseTab
 from .fish_dish_tab import FishDishTab
 from .dialogs.export_dialog import ExportDialog
+from .cross_tab import CrossTab
 
 logger = logging.getLogger(__name__)
 
@@ -254,9 +253,6 @@ class LabInventoryGUI(QMainWindow):
             agarose_tab = AgaroseTab()
             tabs.addTab(agarose_tab, "Agarose Solutions")
             
-            # Placeholder for other tabs - we'll implement these later
-            # For now, just add empty widgets with labels
-            
             # Fish water tab placeholder
             fish_water_tab = QWidget()
             fish_water_layout = QVBoxLayout(fish_water_tab)
@@ -272,6 +268,10 @@ class LabInventoryGUI(QMainWindow):
             # Fish dishes tab
             fish_dishes_tab = FishDishTab()
             tabs.addTab(fish_dishes_tab, "Fish Dishes")
+
+            # Crosses tab
+            cross_tab = CrossTab()
+            tabs.addTab(cross_tab, "Crosses")
             
         except Exception as e:
             logger.error(f"Error creating tabs: {str(e)}")

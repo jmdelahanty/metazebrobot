@@ -6,9 +6,9 @@ and details specific to transgenic crosses.
 """
 
 from datetime import datetime
-# Removed unused 'validator' import
 from typing import Optional, List, Literal, Dict, Any, Tuple
-from pydantic import BaseModel, Field, field_validator
+# Use computed_field from Pydantic v2 if available
+from pydantic import BaseModel, Field, field_validator, computed_field
 
 # Define allowed cross types using Literal for validation
 CrossType = Literal["Standard", "Transgenic"]
@@ -20,9 +20,37 @@ class Parent(BaseModel):
     genotype: Optional[str] = Field(default=None, description="Genotype of the parent, if known beyond the identifier")
 
 class TransgenicIndicator(BaseModel):
-    """Describes an expected transgenic indicator for a cross."""
-    name: str = Field(..., description="Name of the transgene or indicator, e.g., 'gfap:TRPV1-T2A-GFP'")
-    expected_expression: str = Field(..., description="Expected expression pattern, e.g., 'pan-glial', 'pan-neuronal', 'specific_structure:habenula'")
+    """Describes a specific genetic component, typically a transgene."""
+    # *** REMOVED the old 'name' field that was causing the error ***
+    modification_type: Optional[Literal["tg", "mu", "other"]] = Field(default="tg", description="Type of genetic modification (transgene, mutant, etc.)")
+    promoter_driver: Optional[str] = Field(default=None, description="Promoter/driver element (e.g., 'gfap', 'elavl3')")
+    reporter_effector: str = Field(..., description="The gene/cassette expressed (e.g., 'TRPV1-T2A-GFP', 'jRGECO1b', 'mCherry')")
+    color: Optional[str] = Field(default=None, description="Associated color of the fluorescent indicator (e.g., 'Green', 'Red', 'Cyan')")
+    expected_expression: Optional[str] = Field(default=None, description="Expected expression pattern summary (e.g., 'pan-glial', 'pan-neuronal')")
+
+    # Use Pydantic V2's computed_field to generate a standard notation
+    @computed_field # type: ignore[misc]
+    @property
+    def standard_notation(self) -> str:
+        """Constructs a standard notation string from components."""
+        parts = []
+        if self.promoter_driver:
+            parts.append(f"{self.promoter_driver}:")
+        parts.append(self.reporter_effector)
+        base = "".join(parts)
+
+        # Add prefix/suffix based on type, e.g., tg(...)
+        if self.modification_type == "tg":
+            return f"Tg({base})"
+        elif self.modification_type == "mu":
+             return f"mut({base})" # Adjust notation as needed
+        else:
+            return base
+
+    class Config:
+        # Required for Pydantic V2 when using @computed_field with @property
+        from_attributes = True
+
 
 class AggregateResults(BaseModel):
     """Optional aggregated results after screening all dishes from a cross."""
@@ -40,7 +68,7 @@ class AggregateResults(BaseModel):
                 datetime.strptime(v, "%Y%m%d")
                 return v
             except ValueError:
-                # Completed the error message
+                # Ensure the full error message is present
                 raise ValueError(f"Invalid date format: {v}. Expected format: YYYYMMDD")
         return v # Allow None
 
@@ -54,12 +82,12 @@ class Cross(BaseModel):
     cross_id: str = Field(..., description="Unique identifier for the cross, e.g., '15238'")
     request_date: str = Field(..., description="Date the cross was requested/set up (YYYYMMDD)")
     responsible_requestor: str = Field(..., description="Person who requested or is responsible for the cross")
-    line_strain: str = Field(..., description="Description of the line(s) being crossed, e.g., 'Tgigfap:TRPVL-T2A-GFP; Tgrelev13(RGECO1b)'")
+    line_strain: str = Field(..., description="Overall description of the cross, potentially including multiple components e.g., 'Tg(gfap:TRPV1-T2A-GFP); Tg(elavl3:jRGECO1b)'")
     parents: Tuple[Parent, Parent] = Field(..., description="Tuple containing exactly two parents used in the cross")
     requested_groups: int = Field(..., ge=0, description="Number of dishes/groups requested for this cross")
     cross_type: CrossType = Field(..., description="Type of cross (Standard or Transgenic)")
     notes: Optional[str] = Field(default=None, description="General notes about the cross request or setup")
-    transgenic_details: Optional[TransgenicDetails] = Field(default=None, description="Details specific to transgenic crosses, null otherwise")
+    transgenic_details: Optional[TransgenicDetails] = Field(default=None, description="Structured details for transgenic crosses, null otherwise")
     cross_status: Optional[Literal["Requested", "Performed", "Screening", "Completed", "Archived"]] = Field(default="Requested", description="Overall status of the cross")
 
     @field_validator('request_date', mode='before')
@@ -72,6 +100,7 @@ class Cross(BaseModel):
                 return v
             except ValueError:
                 raise ValueError(f"Invalid date format: {v}. Expected format: YYYYMMDD")
+        # This field is mandatory, so raise error if empty or None (though caught by Pydantic earlier)
         raise ValueError("request_date is required")
 
     @field_validator('parents')
