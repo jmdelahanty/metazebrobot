@@ -21,7 +21,6 @@ class Parent(BaseModel):
 
 class TransgenicIndicator(BaseModel):
     """Describes a specific genetic component, typically a transgene."""
-    # *** REMOVED the old 'name' field that was causing the error ***
     modification_type: Optional[Literal["tg", "mu", "other"]] = Field(default="tg", description="Type of genetic modification (transgene, mutant, etc.)")
     promoter_driver: Optional[str] = Field(default=None, description="Promoter/driver element (e.g., 'gfap', 'elavl3')")
     reporter_effector: str = Field(..., description="The gene/cassette expressed (e.g., 'TRPV1-T2A-GFP', 'jRGECO1b', 'mCherry')")
@@ -54,9 +53,16 @@ class TransgenicIndicator(BaseModel):
 
 class AggregateResults(BaseModel):
     """Optional aggregated results after screening all dishes from a cross."""
+    # --- FIELD ADDED ---
+    total_initially_produced: Optional[int] = Field(
+        default=None,
+        description="Sum of count_screened_this_step from the first screening step of all primary dishes for this cross (calculated later)"
+    )
+    # --- FIELD MODIFIED (Kept original, but note the difference from above) ---
+    total_initial_fish: Optional[int] = Field(default=None, description="Sum of initial_fish_count from all dishes of this cross (initial estimate)") # Kept existing field for now
+    # ---------------------
     total_positive_final: Optional[int] = Field(default=None, description="Sum of final_positive_count from all screened dishes of this cross")
-    total_initially_produced: Optional[int] = Field(default=None, description="Sum of initial_fish_count from all dishes of this cross")
-    yield_percentage: Optional[float] = Field(default=None, description="Calculated percentage of final positive fish from initial total")
+    yield_percentage: Optional[float] = Field(default=None, description="Calculated percentage of final positive fish from initial total (calculated later)") # Definition might need update based on which 'initial total' is used
     date_aggregated: Optional[str] = Field(default=None, description="Date when these aggregate results were calculated (YYYYMMDD)")
 
     @field_validator('date_aggregated', mode='before')
@@ -85,10 +91,17 @@ class Cross(BaseModel):
     line_strain: str = Field(..., description="Overall description of the cross, potentially including multiple components e.g., 'Tg(gfap:TRPV1-T2A-GFP); Tg(elavl3:jRGECO1b)'")
     parents: Tuple[Parent, Parent] = Field(..., description="Tuple containing exactly two parents used in the cross")
     requested_groups: int = Field(..., ge=0, description="Number of dishes/groups requested for this cross")
+    groups_produced: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Actual number of groups/dishes that produced offspring from this cross"
+    )
     cross_type: CrossType = Field(..., description="Type of cross (Standard or Transgenic)")
     notes: Optional[str] = Field(default=None, description="General notes about the cross request or setup")
     transgenic_details: Optional[TransgenicDetails] = Field(default=None, description="Structured details for transgenic crosses, null otherwise")
     cross_status: Optional[Literal["Requested", "Performed", "Screening", "Completed", "Archived"]] = Field(default="Requested", description="Overall status of the cross")
+    # --- FIELD ADDED to link AggregateResults directly if not transgenic ---
+    aggregate_results: Optional[AggregateResults] = Field(default=None, description="Aggregated screening results across all dishes (filled in later, used if not transgenic)") # Consider if this duplicates transgenic_details.aggregate_results
 
     @field_validator('request_date', mode='before')
     @classmethod
@@ -114,18 +127,29 @@ class Cross(BaseModel):
         This validator runs after that initial check and can be used for more complex
         logic if needed in the future.
         """
-        # Example of a potential future check (currently commented out):
-        # if v[0].identifier == v[1].identifier:
-        #     raise ValueError("Parents must have different identifiers.")
+        if len(v) != 2: # Explicit length check for robustness
+             raise ValueError("Exactly two parents are required.")
+        if v[0].identifier == v[1].identifier:
+            raise ValueError("Parents must have different identifiers.")
         return v
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Cross':
         """Create a Cross instance from a dictionary."""
+        # Handle potential nesting of aggregate_results
+        if "transgenic_details" in data and data["transgenic_details"] and "aggregate_results" in data["transgenic_details"]:
+             if "aggregate_results" not in data: # Move it to top level if needed, or decide on single source of truth
+                  # data["aggregate_results"] = data["transgenic_details"]["aggregate_results"]
+                  # Decide if aggregate_results should *only* be under transgenic_details for transgenic crosses
+                  pass
         return cls(**data)
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the model to a dictionary, excluding None values by default."""
-        # Use model_dump for Pydantic v2+
-        return self.model_dump(exclude_none=True)
-
+    def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
+        # Ensure aggregate_results are handled consistently on dump
+        # (May need custom logic depending on where aggregate_results lives)
+        dumped = super().model_dump(*args, **kwargs)
+        # Example: Ensure aggregate_results is present if transgenic_details has it
+        # if dumped.get("transgenic_details") and dumped["transgenic_details"].get("aggregate_results"):
+        #     if "aggregate_results" not in dumped:
+        #         dumped["aggregate_results"] = dumped["transgenic_details"]["aggregate_results"]
+        return dumped

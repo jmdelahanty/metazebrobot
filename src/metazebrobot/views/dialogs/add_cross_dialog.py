@@ -65,6 +65,11 @@ class AddCrossDialog(QDialog):
         self.requested_groups.setValue(1)
         core_layout.addRow("Requested Groups:", self.requested_groups)
 
+        self.groups_produced = QSpinBox()
+        self.groups_produced.setRange(0, 100) # Or ge=0 validation later
+        self.groups_produced.setToolTip("Enter the number of groups that actually produced offspring")
+        core_layout.addRow("Groups Produced:", self.groups_produced) 
+
         self.cross_type = QComboBox()
         self.cross_type.addItems(["Standard", "Transgenic"])
         self.cross_type.currentTextChanged.connect(self.toggle_transgenic_inputs)
@@ -129,8 +134,8 @@ class AddCrossDialog(QDialog):
         self.indicator1_expr.setPlaceholderText("(Optional) e.g., pan-glial")
 
         transgenic_layout1.addRow("Modification Type:", self.indicator1_mod_type)
-        transgenic_layout1.addRow("Promoter/Driver:", self.indicator1_promoter) # Changed label
-        transgenic_layout1.addRow("Reporter/Effector:", self.indicator1_reporter) # Changed label
+        transgenic_layout1.addRow("Promoter/Driver:", self.indicator1_promoter)
+        transgenic_layout1.addRow("Reporter/Effector:", self.indicator1_reporter)
         transgenic_layout1.addRow("Expected Expression:", self.indicator1_expr)
         transgenic_layout1.addRow("Color:", self.indicator1_color)
 
@@ -224,6 +229,7 @@ class AddCrossDialog(QDialog):
         cross_data["responsible_requestor"] = required_fields["Responsible Requestor"]
         cross_data["line_strain"] = required_fields["Line/Strain"]
         cross_data["requested_groups"] = self.requested_groups.value()
+        cross_data["groups_produced"] = self.groups_produced.value()
         cross_data["cross_type"] = self.cross_type.currentText()
         cross_data["cross_status"] = self.cross_status.currentText()
         notes_text = self.notes.toPlainText().strip()

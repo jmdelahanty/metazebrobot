@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class FishDishTab(QWidget):
     """
     Tab for managing fish dishes. Includes functionality to pre-fill
-    dish info based on selected cross.
+    dish info based on selected cross and displays dish lineage.
     """
     # Define a placeholder text for the combobox
     CROSS_PLACEHOLDER = "-- Select Cross --"
@@ -34,7 +34,7 @@ class FishDishTab(QWidget):
         """
         super().__init__(parent)
 
-        self.dish_sort_column = 0
+        self.dish_sort_column = 0 # Default sort by Dish ID
         self.dish_sort_order = Qt.SortOrder.AscendingOrder
 
         self.setup_ui()
@@ -83,7 +83,7 @@ class FishDishTab(QWidget):
         scroll_layout = QVBoxLayout(scroll_widget)
 
         # --- Form section ---
-        form_group = QGroupBox("New Dish Information")
+        form_group = QGroupBox("New Primary Dish Information") # Clarified title
         form_layout = QGridLayout()
         form_layout.setColumnStretch(1, 1)
         form_layout.setColumnStretch(3, 1)
@@ -98,7 +98,7 @@ class FishDishTab(QWidget):
         self.cross_id.setEditable(False)
         self.cross_id.setMinimumContentsLength(10)
         self.cross_id.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        # Connect signal to auto-populate fields (Method defined above now)
+        # Connect signal to auto-populate fields
         self.cross_id.currentTextChanged.connect(self.handle_cross_selection_change)
         form_layout.addWidget(self.cross_id, row, 1)
 
@@ -116,6 +116,18 @@ class FishDishTab(QWidget):
         self.sex = QComboBox()
         self.sex.addItems(["unknown", "M", "F"])
         form_layout.addWidget(self.sex, row, 3)
+
+        row += 1
+        form_layout.addWidget(QLabel("Source Group ID:"), row, 0)
+        self.source_group_id = QLineEdit()
+        self.source_group_id.setPlaceholderText("e.g., 15178-G1 (from aquatics)")
+        form_layout.addWidget(self.source_group_id, row, 1)
+        form_layout.addWidget(QLabel("Initial Fish Count:"), row, 2) # Changed Label
+        self.fish_count = QSpinBox()
+        self.fish_count.setRange(0, 1000)
+        self.fish_count.setValue(1)
+        self.fish_count.setToolTip("Initial estimate for this primary dish.") # Added tooltip
+        form_layout.addWidget(self.fish_count, row, 3)
 
         row += 1
         form_layout.addWidget(QLabel("Date of Fertilization:"), row, 0)
@@ -166,21 +178,17 @@ class FishDishTab(QWidget):
         self.beaker_housing = QCheckBox()
         self.beaker_housing.setChecked(False)
         form_layout.addWidget(self.beaker_housing, row, 1)
-        form_layout.addWidget(QLabel("Number of Fish:"), row, 2)
-        self.fish_count = QSpinBox()
-        self.fish_count.setRange(0, 1000)
-        self.fish_count.setValue(1)
-        form_layout.addWidget(self.fish_count, row, 3)
-
-        row += 1
-        form_layout.addWidget(QLabel("Volume Water Total (mL):"), row, 0)
+        form_layout.addWidget(QLabel("Volume Water Total (mL):"), row, 2) # Moved Label
         self.vol_water_total = QLineEdit()
         self.vol_water_total.setPlaceholderText("e.g., 80")
-        form_layout.addWidget(self.vol_water_total, row, 1)
-        form_layout.addWidget(QLabel("Dish Notes:"), row, 2)
+        form_layout.addWidget(self.vol_water_total, row, 3) # Moved Field
+
+
+        row += 1
+        form_layout.addWidget(QLabel("Dish Notes:"), row, 0)
         self.notes = QLineEdit()
         self.notes.setPlaceholderText("(Optional) General notes for this dish")
-        form_layout.addWidget(self.notes, row, 3)
+        form_layout.addWidget(self.notes, row, 1, 1, 3) # Span notes across columns
         # --- End Form Fields ---
 
         form_group.setLayout(form_layout)
@@ -188,7 +196,7 @@ class FishDishTab(QWidget):
 
         # --- Add/Clear Buttons for Form ---
         button_layout = QHBoxLayout()
-        add_button = QPushButton("Add New Dish")
+        add_button = QPushButton("Add New Primary Dish") # Clarified button text
         add_button.clicked.connect(self.add_fish_dish)
         button_layout.addWidget(add_button)
         clear_button = QPushButton("Clear Form")
@@ -197,7 +205,7 @@ class FishDishTab(QWidget):
         scroll_layout.addLayout(button_layout)
 
         scroll.setWidget(scroll_widget)
-        scroll.setMaximumHeight(400)
+        scroll.setMaximumHeight(450) # Adjusted height potentially
         layout.addWidget(scroll)
 
         # --- Filter/Action Controls ---
@@ -212,6 +220,13 @@ class FishDishTab(QWidget):
         self.status_filter.addItems(["All", "Active Only", "Inactive Only"])
         self.status_filter.currentTextChanged.connect(self.filter_dishes)
         filter_layout.addWidget(self.status_filter)
+        # --- ADDED Filter ---
+        filter_layout.addWidget(QLabel("Population Type:"))
+        self.pop_type_filter = QComboBox()
+        self.pop_type_filter.addItems(["All", "primary", "negative_screened", "positive_screened", "other"]) # Match model
+        self.pop_type_filter.currentTextChanged.connect(self.filter_dishes)
+        filter_layout.addWidget(self.pop_type_filter)
+        # -------------------
         refresh_button = QPushButton("Refresh Table")
         refresh_button.clicked.connect(self.refresh_all) # Connects to refresh_all
         filter_layout.addWidget(refresh_button)
@@ -225,7 +240,7 @@ class FishDishTab(QWidget):
         # --- Dishes table ---
         self.dishes_table = QTableWidget()
         layout.addWidget(self.dishes_table)
-        self.setup_dish_table()
+        self.setup_dish_table() # Call setup method
 
 
     def update_cross_id_dropdown(self):
@@ -238,9 +253,11 @@ class FishDishTab(QWidget):
             self.cross_id.addItem(self.CROSS_PLACEHOLDER)
 
             all_crosses = cross_controller.get_all_crosses()
-            sorted_ids = sorted(all_crosses.keys())
-            for cross_id in sorted_ids:
-                self.cross_id.addItem(cross_id)
+            # Sort by request date descending, then cross ID as tie-breaker
+            sorted_crosses = sorted(all_crosses.values(), key=lambda c: (c.request_date or '00000000', c.cross_id), reverse=True)
+
+            for cross in sorted_crosses:
+                self.cross_id.addItem(cross.cross_id)
 
             index = self.cross_id.findText(current_selection)
             if index != -1:
@@ -250,12 +267,10 @@ class FishDishTab(QWidget):
 
             self.cross_id.blockSignals(False)
             # Manually trigger handler for initial load or if selection was restored
-            # Check if the index is valid before getting text
             if self.cross_id.currentIndex() >= 0:
                  self.handle_cross_selection_change(self.cross_id.currentText())
-            else: # Handle case where combobox might be empty after clear/error
+            else:
                  self.handle_cross_selection_change(self.CROSS_PLACEHOLDER)
-
 
         except Exception as e:
             logger.error(f"Error updating cross ID dropdown: {e}", exc_info=True)
@@ -269,13 +284,13 @@ class FishDishTab(QWidget):
         self.update_cross_id_dropdown()
         self.update_dishes_table()
 
-
+    # --- METHOD UPDATED ---
     def setup_dish_table(self):
-        """Setup the dish table."""
-        self.dishes_table.setColumnCount(7)
+        """Setup the dish table with lineage columns."""
+        self.dishes_table.setColumnCount(9) # Increased column count
         self.dishes_table.setHorizontalHeaderLabels([
             "Dish ID", "Date Created", "Genotype", "Responsible",
-            "Status", "Location", "Fish Count"
+            "Status", "Location", "Fish Count", "Pop. Type", "Parent Dish" # Added new headers
         ])
         self.dishes_table.setAlternatingRowColors(True)
         self.dishes_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -283,15 +298,18 @@ class FishDishTab(QWidget):
         self.dishes_table.verticalHeader().setVisible(False)
         self.dishes_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         header = self.dishes_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.dishes_table.horizontalHeader().sectionClicked.connect(self.handle_header_click)
+
+        # Adjust resize modes
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents) # Default to contents
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive) # Allow Dish ID resize
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch) # Stretch Genotype
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.Interactive) # Allow Parent Dish resize
+
+        self.dishes_table.setSortingEnabled(True) # Enable sorting
+        header.sectionClicked.connect(self.handle_header_click)
         self.dishes_table.cellDoubleClicked.connect(self.handle_dish_cell_double_click)
         self.dishes_table.itemSelectionChanged.connect(self.handle_table_selection_change)
+    # --- END METHOD UPDATE ---
 
 
     @Slot()
@@ -316,7 +334,9 @@ class FishDishTab(QWidget):
             if not dish_id_item: return
             dish_id = dish_id_item.text()
 
-            if column == 4:  # Status column
+            STATUS_COLUMN_INDEX = 4 # Define status column index
+
+            if column == STATUS_COLUMN_INDEX:
                 self.show_termination_dialog(dish_id)
             else:
                 self.show_quality_check_dialog(dish_id)
@@ -357,6 +377,7 @@ class FishDishTab(QWidget):
                  return
 
             dialog = QualityCheckDialog(self)
+            # Connect signals to slots
             dialog.check_saved.connect(lambda check_data: self.save_quality_check(dish_id, check_data))
             dialog.batch_checks_saved.connect(lambda check_list: self.save_batch_quality_checks(dish_id, check_list))
             dialog.exec()
@@ -387,7 +408,7 @@ class FishDishTab(QWidget):
 
             dialog = ScreeningDialog(dish_id=dish_id, parent=self)
             dialog.exec()
-            # Refresh table after screening dialog closes in case status changed
+            # Refresh table after screening dialog closes in case status changed or dishes were derived
             self.update_dishes_table()
 
         except Exception as e:
@@ -400,6 +421,7 @@ class FishDishTab(QWidget):
             success, message = fish_dish_controller.add_quality_check(dish_id=dish_id, **check_data)
             if success:
                 logger.info(f"Quality check saved for dish {dish_id}")
+                # Consider if table needs refresh here (unlikely needed just for QC)
             else:
                 QMessageBox.warning(self, "Error", f"Failed to save quality check: {message}")
         except Exception as e:
@@ -421,7 +443,13 @@ class FishDishTab(QWidget):
                     time_str = check_data.get('check_time', 'N/A')
                     error_messages.append(f"Entry {time_str}: {message}")
 
+            log_msg = f"Batch QC Save for {dish_id}: Saved {success_count}/{total_checks}."
+            if error_messages:
+                log_msg += f" Errors: {'; '.join(error_messages)}"
+            logger.info(log_msg)
+
             if success_count == total_checks:
+                # Maybe skip popup if all successful? Optional.
                 QMessageBox.information(self, "Success", f"All {success_count} quality checks saved successfully")
             elif success_count > 0:
                 QMessageBox.warning(self, "Partial Success",
@@ -435,12 +463,14 @@ class FishDishTab(QWidget):
 
     def update_dishes_table(self):
         """Update the fish dishes table."""
+        logger.debug("Updating dishes table...")
         try:
             all_dishes = fish_dish_controller.get_all_dishes(include_inactive=True)
             filtered_dishes = self.apply_filters(all_dishes)
             sorted_dishes = self.apply_sorting(filtered_dishes)
             self.populate_dishes_table(sorted_dishes)
             self.handle_table_selection_change() # Update button state
+            logger.debug("Dishes table update complete.")
         except Exception as e:
             logger.error(f"Error updating dishes table: {str(e)}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Error updating dishes table: {str(e)}")
@@ -449,72 +479,111 @@ class FishDishTab(QWidget):
     def apply_filters(self, dishes):
         """Apply filters to the dishes."""
         result = dishes
+        # Status Filter
         status_filter = self.status_filter.currentText()
         if status_filter == "Active Only":
             result = fish_dish_controller.filter_dishes(result, lambda dish: dish.status == "active")
         elif status_filter == "Inactive Only":
             result = fish_dish_controller.filter_dishes(result, lambda dish: dish.status == "inactive")
 
+        # Population Type Filter
+        pop_type_filter = self.pop_type_filter.currentText()
+        if pop_type_filter != "All":
+             result = fish_dish_controller.filter_dishes(result, lambda dish: dish.dish_population_type == pop_type_filter)
+
+        # Search Filter
         search_text = self.search_box.text().strip()
         if search_text:
             result = fish_dish_controller.search_dishes(result, search_text, case_sensitive=False)
+
         return result
 
-
+    # --- METHOD UPDATED ---
     def apply_sorting(self, dishes):
-        """Apply sorting to the dishes."""
+        """Apply sorting to the dishes, including new columns."""
         column_to_key = {
-            0: "dish_id", 1: "date_created", 2: "genotype", 3: "responsible",
-            4: "status", 5: "enclosure.room", 6: "fish_count"
+            0: "dish_id",
+            1: "date_created",
+            2: "genotype",
+            3: "responsible",
+            4: "status",
+            5: "enclosure.room", # Example nested sort
+            6: "fish_count",
+            7: "dish_population_type", # Added sort key
+            8: "parent_dish_id" # Added sort key
         }
-        sort_key = column_to_key.get(self.dish_sort_column, "dish_id")
-        return fish_dish_controller.sort_dishes(
-            dishes, sort_key, ascending=(self.dish_sort_order == Qt.SortOrder.AscendingOrder)
-        )
+        sort_key = column_to_key.get(self.dish_sort_column, "dish_id") # Default to dish_id
+        ascending = (self.dish_sort_order == Qt.SortOrder.AscendingOrder)
+        logger.debug(f"Sorting dishes by '{sort_key}', Ascending: {ascending}")
+        return fish_dish_controller.sort_dishes(dishes, sort_key, ascending=ascending)
+    # --- END METHOD UPDATE ---
 
-
+    # --- METHOD UPDATED ---
     def populate_dishes_table(self, dishes):
-        """Populate the dishes table."""
+        """Populate the dishes table, including new columns."""
         selected_dish_id = None
         current_selection = self.dishes_table.selectionModel().selectedRows()
         if current_selection:
             row_index = current_selection[0].row()
-            id_item = self.dishes_table.item(row_index, 0)
-            if id_item:
-                selected_dish_id = id_item.text()
+            # Ensure row index is valid before accessing item
+            if 0 <= row_index < self.dishes_table.rowCount():
+                 id_item = self.dishes_table.item(row_index, 0)
+                 if id_item:
+                     selected_dish_id = id_item.text()
 
+        self.dishes_table.setSortingEnabled(False) # Disable sorting during population
         self.dishes_table.setRowCount(0)
         self.dishes_table.setRowCount(len(dishes))
         new_selection_row = -1
 
         for i, (dish_id, dish) in enumerate(dishes.items()):
             try:
-                self.dishes_table.setItem(i, 0, QTableWidgetItem(dish_id))
-                self.dishes_table.setItem(i, 1, QTableWidgetItem(dish.date_created))
-                self.dishes_table.setItem(i, 2, QTableWidgetItem(dish.genotype))
-                self.dishes_table.setItem(i, 3, QTableWidgetItem(dish.responsible))
-                self.dishes_table.setItem(i, 4, QTableWidgetItem(dish.status))
+                # Existing columns
+                col = 0
+                self.dishes_table.setItem(i, col, QTableWidgetItem(dish_id)); col+=1
+                self.dishes_table.setItem(i, col, QTableWidgetItem(dish.date_created)); col+=1
+                self.dishes_table.setItem(i, col, QTableWidgetItem(dish.genotype)); col+=1
+                self.dishes_table.setItem(i, col, QTableWidgetItem(dish.responsible)); col+=1
+                self.dishes_table.setItem(i, col, QTableWidgetItem(dish.status)); col+=1
                 room = dish.enclosure.room if dish.enclosure else "N/A"
-                self.dishes_table.setItem(i, 5, QTableWidgetItem(room))
-                self.dishes_table.setItem(i, 6, QTableWidgetItem(str(dish.fish_count)))
+                self.dishes_table.setItem(i, col, QTableWidgetItem(room)); col+=1
+                self.dishes_table.setItem(i, col, QTableWidgetItem(str(dish.fish_count))); col+=1
 
+                # New columns
+                pop_type = getattr(dish, 'dish_population_type', 'N/A') # Use getattr for safety
+                self.dishes_table.setItem(i, col, QTableWidgetItem(str(pop_type))); col+=1
+                parent_id = getattr(dish, 'parent_dish_id', None) # Use getattr for safety
+                self.dishes_table.setItem(i, col, QTableWidgetItem(str(parent_id) if parent_id else "")); col+=1
+
+                # Restore selection if needed
                 if dish_id == selected_dish_id:
                     new_selection_row = i
 
+                # Apply styling for inactive dishes
                 if dish.status == "inactive":
-                    for col in range(self.dishes_table.columnCount()):
-                        item = self.dishes_table.item(i, col)
+                    for c in range(self.dishes_table.columnCount()):
+                        item = self.dishes_table.item(i, c)
                         if item:
                             item.setBackground(Qt.GlobalColor.lightGray)
 
             except Exception as e:
                 logger.error(f"Error setting dish table row {i} for dish {dish_id}: {str(e)}", exc_info=True)
+                # Add placeholder for error row
                 self.dishes_table.setItem(i, 0, QTableWidgetItem(dish_id))
-                self.dishes_table.setItem(i, 2, QTableWidgetItem("Error Loading"))
+                self.dishes_table.setItem(i, 2, QTableWidgetItem("Error Loading Data"))
+                # Set background color for error row
+                for c in range(self.dishes_table.columnCount()):
+                     error_item = QTableWidgetItem("Error")
+                     error_item.setBackground(Qt.GlobalColor.red)
+                     self.dishes_table.setItem(i, c, error_item)
 
+
+        self.dishes_table.setSortingEnabled(True) # Re-enable sorting
+
+        # Restore selection if the item still exists
         if new_selection_row != -1:
              self.dishes_table.selectRow(new_selection_row)
-
+    # --- END METHOD UPDATE ---
 
     def filter_dishes(self):
         """Filter dishes based on current filter settings."""
@@ -522,10 +591,8 @@ class FishDishTab(QWidget):
 
     def clear_fish_dish_form(self):
         """Clear all inputs in the fish dish form."""
-        self.cross_id.setCurrentIndex(0)
-        self.genotype.clear()
-        self.parents.clear()
-        self.responsible.clear()
+        self.cross_id.setCurrentIndex(0) # This should trigger handle_cross_selection_change to clear fields
+        # Explicitly clear fields not cleared by cross selection change
         self.dish_number.setValue(1)
         self.dof.setDate(QDate.currentDate())
         self.sex.setCurrentText("unknown")
@@ -535,12 +602,13 @@ class FishDishTab(QWidget):
         self.light_duration.setText("14:10")
         self.dawn_dusk.setText("8:00")
         self.beaker_housing.setChecked(False)
-        self.fish_count.setValue(1)
+        self.fish_count.setValue(0)
         self.vol_water_total.clear()
+        self.source_group_id.clear()
         self.notes.clear()
 
     def add_fish_dish(self):
-        """Add a new fish dish."""
+        """Add a new *primary* fish dish."""
         try:
             cross_id = self.cross_id.currentText()
             if cross_id == self.CROSS_PLACEHOLDER:
@@ -550,6 +618,7 @@ class FishDishTab(QWidget):
             dish_number = self.dish_number.value()
             genotype = self.genotype.text().strip()
             responsible = self.responsible.text().strip()
+            source_group_id_text = self.source_group_id.text().strip() or None
             notes = self.notes.text().strip() or None
 
             if not genotype: return self.show_input_error("Genotype (auto-filled from cross, but currently empty)")
@@ -568,15 +637,17 @@ class FishDishTab(QWidget):
                     QMessageBox.warning(self, "Input Error", "Volume Water Total must be a valid number.")
                     return
 
+            # Call the controller method specifically for primary dishes
             success, message, dish = fish_dish_controller.create_dish(
                 cross_id=cross_id,
                 dish_number=dish_number,
                 genotype=genotype,
                 responsible=responsible,
+                source_group_id=source_group_id_text,
                 dof=dof,
                 sex=self.sex.currentText(),
                 species=self.species.text().strip(),
-                fish_count=self.fish_count.value(),
+                fish_count=self.fish_count.value(), # Initial estimate
                 parents=parents,
                 temperature=self.temperature.value(),
                 light_duration=self.light_duration.text().strip(),
@@ -589,8 +660,14 @@ class FishDishTab(QWidget):
 
             if success:
                 self.update_dishes_table()
-                self.clear_fish_dish_form()
-                QMessageBox.information(self, "Success", f"Added new dish: {message}")
+                # Optionally increment dish number for next entry?
+                self.dish_number.setValue(self.dish_number.value() + 1)
+                # Don't clear cross-related fields
+                self.fish_count.setValue(0)
+                self.vol_water_total.clear()
+                self.source_group_id.clear()
+                self.notes.clear()
+                QMessageBox.information(self, "Success", f"Added new primary dish: {message}")
             else:
                 QMessageBox.warning(self, "Error", f"Failed to add dish: {message}")
 
@@ -600,4 +677,4 @@ class FishDishTab(QWidget):
 
     def show_input_error(self, field_name):
         """Helper to show a standardized input error message."""
-        QMessageBox.warning(self, "Input Error", f"Please enter a value for {field_name}")
+        QMessageBox.warning(self, "Input Error", f"Please enter or select a value for {field_name}")

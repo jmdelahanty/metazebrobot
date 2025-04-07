@@ -1,15 +1,17 @@
 """
 Controller for cross-related operations.
 
-This module contains business logic for managing zebrafish crosses.
+This module contains business logic for managing zebrafish crosses,
+including calculating aggregate results based on screening data.
 """
 
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple, Callable
 
-# Import the Cross model and potentially nested models if needed directly
-from ..models.cross import Cross, Parent, TransgenicDetails, CrossType
+from ..controllers.fish_dish_controller import fish_dish_controller
+from ..models.cross import Cross, Parent, TransgenicDetails, AggregateResults # Import AggregateResults
+from ..models.fish_dish import FishDish, ScreeningStep # Import FishDish and ScreeningStep
 from ..data.data_manager import data_manager
 from pydantic import ValidationError
 
@@ -21,12 +23,11 @@ class CrossController:
     Controller for cross-related operations.
 
     Provides methods for creating, retrieving, updating, sorting,
-    filtering, and searching crosses.
+    filtering, searching crosses, and calculating aggregate results.
     """
 
     def __init__(self):
         """Initialize the controller."""
-        # Initialization logic can go here if needed in the future
         pass
 
     def get_all_crosses(self) -> Dict[str, Cross]:
@@ -109,7 +110,7 @@ class CrossController:
                      return False, message, None
 
             # Convert validated Pydantic model back to dict for saving
-            cross_dict_to_save = new_cross.to_dict() # exclude_none=True by default
+            cross_dict_to_save = new_cross.model_dump(exclude_none=True, mode='json') # Use mode='json'
 
             # Save the cross using DataManager
             if data_manager.save_cross(cross_dict_to_save):
@@ -156,14 +157,44 @@ class CrossController:
                 return False, message, None
 
             # Create a mutable copy and update it
-            updated_data = existing_cross_data.copy()
-            updated_data.update(update_data)
+            # Need deep update for nested fields like aggregate_results
+            # Basic update only works for top-level fields
+            # Consider using a helper for deep updates or Pydantic's update_forward_refs
+            # For simplicity here, we'll assume update_data might contain nested dicts
+            # A more robust way is to load into Pydantic obj, update fields, then dump
 
-            # Re-validate the entire updated data by creating a new Cross object
-            updated_cross = Cross(**updated_data)
+            # Load into Pydantic model first
+            existing_cross_obj = Cross(**existing_cross_data)
+
+            # Update fields - This requires careful handling of nested updates
+            # Example: Updating total_positive_final in aggregate_results
+            # if 'aggregate_results' in update_data and isinstance(update_data['aggregate_results'], dict):
+            #     if existing_cross_obj.aggregate_results:
+            #         existing_cross_obj.aggregate_results = existing_cross_obj.aggregate_results.model_copy(
+            #             update=update_data['aggregate_results']
+            #         )
+            #     else:
+            #          # Need to create AggregateResults if it doesn't exist
+            #          try:
+            #              existing_cross_obj.aggregate_results = AggregateResults(**update_data['aggregate_results'])
+            #          except ValidationError as agg_val_err:
+            #              logger.error(f"Validation error creating AggregateResults during update: {agg_val_err}")
+            #              return False, f"Validation Error for aggregate_results: {agg_val_err}", None
+
+            #     del update_data['aggregate_results'] # Remove from top-level update
+
+            # # Update remaining top-level fields
+            # existing_cross_obj = existing_cross_obj.model_copy(update=update_data)
+
+            # --- Simpler approach: Re-create from merged dict (less safe for nested) ---
+            updated_data_dict = existing_cross_data.copy()
+            updated_data_dict.update(update_data) # Note: This is a shallow update
+            updated_cross = Cross(**updated_data_dict)
+            # --------------------------------------------------------------------
+
 
             # Convert validated object back to dict for saving
-            cross_dict_to_save = updated_cross.to_dict()
+            cross_dict_to_save = updated_cross.model_dump(exclude_none=True, mode='json')
 
             # Save the updated cross
             if data_manager.save_cross(cross_dict_to_save):
@@ -243,16 +274,21 @@ class CrossController:
             """Helper to extract sortable value from Cross object."""
             if hasattr(cross, key):
                 return getattr(cross, key)
-            # Add more complex cases if needed, e.g., sorting by parent identifier
-            # elif key == 'parent1_id': return cross.parents[0].identifier if cross.parents else ''
+            # Handle sorting by nested fields like parent identifiers if needed
+            elif key == 'parent1_id':
+                 return cross.parents[0].identifier if cross.parents and len(cross.parents) > 0 else ''
+            elif key == 'parent2_id':
+                 return cross.parents[1].identifier if cross.parents and len(cross.parents) > 1 else ''
+            # Add more complex cases if needed
             else:
                 logger.warning(f"Attempting to sort crosses by unknown key: {key}. Defaulting to cross_id.")
                 return cross.cross_id # Default fallback
 
         try:
+            # Ensure consistent handling of None values during sorting
             sorted_items = sorted(
                 crosses.items(),
-                key=lambda item: get_sort_value(item[1], sort_key),
+                key=lambda item: (get_sort_value(item[1], sort_key) is None, get_sort_value(item[1], sort_key)),
                 reverse=not ascending
             )
             return dict(sorted_items)
@@ -316,14 +352,20 @@ class CrossController:
                     cross.notes or "",
                     cross.cross_status or ""
                 ]
-                # Add parent identifiers
-                fields_to_check.extend([p.identifier for p in cross.parents])
-                fields_to_check.extend([p.genotype or "" for p in cross.parents])
+                # Add parent identifiers and genotypes
+                if cross.parents:
+                    for p in cross.parents:
+                        fields_to_check.append(p.identifier)
+                        if p.genotype: fields_to_check.append(p.genotype)
 
-                # Add transgenic indicator names/expression if present
-                if cross.transgenic_details:
-                    fields_to_check.extend([ind.name for ind in cross.transgenic_details.indicators])
-                    fields_to_check.extend([ind.expected_expression for ind in cross.transgenic_details.indicators])
+                # Add transgenic indicator details if present
+                if cross.transgenic_details and cross.transgenic_details.indicators:
+                    for ind in cross.transgenic_details.indicators:
+                        if ind.promoter_driver: fields_to_check.append(ind.promoter_driver)
+                        fields_to_check.append(ind.reporter_effector)
+                        if ind.color: fields_to_check.append(ind.color)
+                        if ind.expected_expression: fields_to_check.append(ind.expected_expression)
+                        fields_to_check.append(ind.standard_notation) # Search computed field too
 
                 # Perform search
                 match_found = False
@@ -344,6 +386,184 @@ class CrossController:
 
         return result
 
+    def update_cross_status(self, cross_id: str, new_status: str) -> Tuple[bool, str]:
+        """
+        Update the status of a specific cross.
+
+        Args:
+            cross_id: The ID of the cross to update.
+            new_status: The new status value.
+
+        Returns:
+            Tuple containing:
+            - Success flag (bool)
+            - Message (str)
+        """
+        logger.info(f"Attempting to update status for cross {cross_id} to {new_status}")
+
+        # Validate the new status against the allowed values from the model
+        allowed_statuses = list(Cross.model_fields['cross_status'].annotation.__args__)
+        if new_status not in allowed_statuses:
+            message = f"Invalid status '{new_status}'. Must be one of: {', '.join(allowed_statuses)}"
+            logger.error(message)
+            return False, message
+
+        # Use update_cross method for consistency and validation
+        success, msg, _ = self.update_cross(cross_id, {"cross_status": new_status})
+
+        if success:
+             return True, f"Status updated to {new_status}"
+        else:
+             # msg from update_cross already contains error details
+             return False, msg
+
+    def update_aggregate_results(self, cross_id: str) -> Tuple[bool, str]:
+        """
+        Calculates aggregate results based on screening data for a cross
+        and updates the Cross object.
+
+        Specifically calculates:
+        - total_initially_produced: Sum of count_screened_this_step from the
+          first screening step of all *primary* dishes.
+        - total_positive_final: Sum of final_positive_count from *all*
+          screened dishes (primary and derived) linked to the cross.
+        - yield_percentage: Based on total_positive_final / total_initially_produced.
+        - date_aggregated: Current date.
+
+        Args:
+            cross_id: The ID of the cross to process.
+
+        Returns:
+            Tuple containing:
+            - Success flag (bool)
+            - Message (str)
+        """
+        logger.info(f"Calculating and updating aggregate results for cross {cross_id}")
+
+        try:
+            # 1. Get the target cross object
+            cross = self.get_cross(cross_id)
+            if not cross:
+                return False, f"Cross {cross_id} not found."
+
+            # 2. Get all fish dishes (including inactive for historical data)
+            all_dishes = fish_dish_controller.get_all_dishes(include_inactive=True)
+
+            # 3. Filter dishes belonging to this cross
+            relevant_dishes = [
+                dish for dish in all_dishes.values() if dish.cross_id == cross_id
+            ]
+            if not relevant_dishes:
+                 logger.warning(f"No dishes found for cross {cross_id}. Cannot calculate aggregates.")
+                 # Optionally clear existing aggregates?
+                 # Or just return success with message?
+                 return True, "No dishes found for cross, aggregates not calculated."
+
+
+            # --- Calculate total_initially_produced ---
+            total_initial_prod = 0
+            primary_dishes = [d for d in relevant_dishes if d.dish_population_type == "primary"]
+            logger.debug(f"Found {len(primary_dishes)} primary dishes for cross {cross_id}.")
+
+            for dish in primary_dishes:
+                if dish.screening_results and dish.screening_results.screenings:
+                    # Sort screenings by datetime to ensure we get the first one
+                    try:
+                         sorted_screenings = sorted(
+                             dish.screening_results.screenings,
+                             key=lambda s: datetime.strptime(s.screening_datetime, "%Y%m%dT%H:%M:%S")
+                         )
+                         first_step = sorted_screenings[0]
+                         # Safely access the count
+                         count_in_step = getattr(first_step, 'count_screened_this_step', 0)
+                         if isinstance(count_in_step, int) and count_in_step >= 0:
+                              total_initial_prod += count_in_step
+                              logger.debug(f"Dish {dish.dish_id}: Added {count_in_step} from first screening step.")
+                         else:
+                              logger.warning(f"Dish {dish.dish_id}: Invalid count_screened_this_step ({count_in_step}) in first screening step. Skipping.")
+
+                    except (ValueError, TypeError, IndexError) as sort_err:
+                         logger.warning(f"Dish {dish.dish_id}: Could not process first screening step for initial count. Error: {sort_err}")
+                else:
+                     logger.warning(f"Dish {dish.dish_id}: No screening steps found to determine initial produced count.")
+
+            logger.info(f"Calculated total_initially_produced for cross {cross_id}: {total_initial_prod}")
+
+            # --- Calculate total_positive_final ---
+            total_positive_fin = 0
+            for dish in relevant_dishes: # Iterate through ALL relevant dishes (primary and derived)
+                if dish.screening_results and dish.screening_results.final_positive_count is not None:
+                    if isinstance(dish.screening_results.final_positive_count, int) and dish.screening_results.final_positive_count >= 0:
+                        total_positive_fin += dish.screening_results.final_positive_count
+                        logger.debug(f"Dish {dish.dish_id}: Added {dish.screening_results.final_positive_count} to final positive count.")
+                    else:
+                         logger.warning(f"Dish {dish.dish_id}: Invalid final_positive_count ({dish.screening_results.final_positive_count}). Skipping.")
+
+            logger.info(f"Calculated total_positive_final for cross {cross_id}: {total_positive_fin}")
+
+            # --- Calculate yield_percentage ---
+            yield_perc = None
+            if total_initial_prod > 0:
+                yield_perc = (total_positive_fin / total_initial_prod) * 100.0
+                logger.info(f"Calculated yield_percentage for cross {cross_id}: {yield_perc:.2f}%")
+            else:
+                 logger.warning(f"Cannot calculate yield percentage for cross {cross_id} because total_initially_produced is zero.")
+
+            # --- Prepare AggregateResults update ---
+            today_str = datetime.now().strftime("%Y%m%d")
+            new_aggregate_data = {
+                "total_initially_produced": total_initial_prod,
+                "total_positive_final": total_positive_fin,
+                "yield_percentage": yield_perc,
+                "date_aggregated": today_str
+            }
+
+            # --- Update the Cross object's aggregates ---
+            # Determine where to store: transgenic_details or top-level aggregate_results
+            target_aggregate_obj = None
+            if cross.transgenic_details:
+                 if cross.transgenic_details.aggregate_results is None:
+                      cross.transgenic_details.aggregate_results = AggregateResults(**new_aggregate_data)
+                 else:
+                      # Update existing object
+                      cross.transgenic_details.aggregate_results = cross.transgenic_details.aggregate_results.model_copy(update=new_aggregate_data)
+                 target_aggregate_obj = cross.transgenic_details.aggregate_results
+                 logger.debug(f"Updated aggregate_results within transgenic_details for cross {cross_id}")
+            elif hasattr(cross, 'aggregate_results'): # Check if top-level attribute exists
+                 if cross.aggregate_results is None:
+                      cross.aggregate_results = AggregateResults(**new_aggregate_data)
+                 else:
+                      cross.aggregate_results = cross.aggregate_results.model_copy(update=new_aggregate_data)
+                 target_aggregate_obj = cross.aggregate_results
+                 logger.debug(f"Updated top-level aggregate_results for cross {cross_id}")
+            else:
+                 logger.error(f"Could not determine where to store AggregateResults for cross {cross_id}. Model structure might be inconsistent.")
+                 return False, "Model structure error for storing aggregates."
+
+            # --- Save the updated cross ---
+            if data_manager.save_cross(cross.model_dump(exclude_none=True, mode='json')):
+                # Update cache manually if needed (save_cross might not update cache)
+                if cross_id in data_manager.data_cache.get('crosses', {}):
+                     # Update cache with the new aggregate object
+                     cached_cross_data = data_manager.data_cache['crosses'][cross_id]
+                     if cross.transgenic_details and 'transgenic_details' in cached_cross_data:
+                          if not cached_cross_data['transgenic_details']: # Ensure dict exists
+                               cached_cross_data['transgenic_details'] = {}
+                          cached_cross_data['transgenic_details']['aggregate_results'] = target_aggregate_obj.model_dump()
+                     elif 'aggregate_results' in cached_cross_data:
+                          cached_cross_data['aggregate_results'] = target_aggregate_obj.model_dump()
+                     logger.debug(f"Updated aggregate info in cache for cross {cross_id}")
+
+                logger.info(f"Successfully updated and saved aggregate results for cross {cross_id}")
+                return True, f"Aggregates updated: Initial={total_initial_prod}, Final={total_positive_fin}, Yield={yield_perc:.1f}%" if yield_perc is not None else "Yield=N/A"
+            else:
+                message = f"Failed to save updated aggregate results for cross {cross_id}."
+                logger.error(message)
+                return False, message
+
+        except Exception as e:
+            logger.error(f"Error calculating/updating aggregate results for cross {cross_id}: {str(e)}", exc_info=True)
+            return False, f"An unexpected error occurred: {str(e)}"
 
 # Create a singleton instance for global access
 cross_controller = CrossController()

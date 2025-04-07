@@ -1,8 +1,12 @@
+# src/metazebrobot/models/fish_dish.py
+
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Literal
 from pydantic import BaseModel, Field, field_validator
 
+# Define allowed population types
+DishPopulationType = Literal["primary", "negative_screened", "positive_screened", "other"] # Added more options
 
 class LightCycle(BaseModel):
     """Light cycle information for a fish dish."""
@@ -15,7 +19,7 @@ class Enclosure(BaseModel):
     temperature: float = Field(ge=18, le=30)  # Temperature in Celsius
     light_cycle: LightCycle
     room: str = "2E.282"  # Default room
-    in_beaker: bool = False, # Whether the fish are in a beaker
+    in_beaker: bool = False # Whether the fish are in a beaker
     vol_water_total: Optional[int] = None  # Total volume of water in the enclosure
 
 
@@ -55,7 +59,7 @@ class QualityCheckData(BaseModel):
 
                 return v
             except ValueError as e:
-                raise ValueError(f"Invalid datetime format: {v}. Expected format:<x_bin_880>MMDDTHH:MM:SS. {str(e)}")
+                raise ValueError(f"Invalid datetime format: {v}. Expected format:YYYYMMDDTHH:MM:SS. {str(e)}")
         return v
 
 class ScreeningStep(BaseModel):
@@ -64,8 +68,11 @@ class ScreeningStep(BaseModel):
     dpf_screened: int
     indicator_screened: str # e.g., "GFP", "RGECO1b", "Pigment", "Both/Final"
     criteria: str
-    fish_removed: int = Field(ge=0)
-    fish_remaining_after: int = Field(ge=0)
+    # --- FIELD ADDED ---
+    count_screened_this_step: int = Field(..., ge=0, description="Total number of fish actually screened in this specific step")
+    # --- FIELD KEPT ---
+    number_positive: int = Field(..., ge=0, description="Number of fish positive for the indicator(s) in this step")
+    # ---------------------
     tricaine_used: bool = False
     notes: Optional[str] = None
 
@@ -111,100 +118,103 @@ class FishDish(BaseModel):
     dish_id: str
     date_created: str  # Format: YYYYMMDD
     cross_id: str
-    dish_number: int = None
+    source_group_id: Optional[str] = Field(
+        default=None,
+        description="Identifier for the specific source group/tank provided by aquatics (e.g., '15178-G1')"
+    )
+    dish_number: Optional[int] = None # Now clearly the sub-dish number
     dof: str  # Date of fertilization (YYYYMMDD)
     genotype: str
     sex: Literal["unknown", "M", "F"] = "unknown"
     species: str = "Danio rerio"
     responsible: str # Person managing dish day-to-day
-    fish_count: int = Field(ge=0) # Initial fish count
+    # --- DESCRIPTION CLARIFIED ---
+    fish_count: int = Field(..., ge=0, description="Initial fish count when dish record created (can be an estimate)")
+    # --- FIELDS ADDED ---
+    parent_dish_id: Optional[str] = Field(default=None, description="ID of the dish this one was split from, if any")
+    dish_population_type: DishPopulationType = Field(default="primary", description="Type indicating lineage (e.g., primary, negative_screened)")
+    # -------------------
     breeding: Breeding
     enclosure: Enclosure
     quality_checks: Dict[str, Any] = {}
-    screening_results: Optional[ScreeningResults] = None # To store screening steps/results
-    notes: Optional[str] = None # General notes for the dish itself
+    screening_results: Optional[ScreeningResults] = None
+    notes: Optional[str] = None
     status: Literal["active", "inactive"] = "active"
-    termination_date: Optional[str] = None # Format: YYYYMMDD
+    termination_date: Optional[str] = None
     termination_reason: Optional[str] = None
 
     @field_validator('date_created', 'dof', 'termination_date', mode='before')
     @classmethod
-    def validate_date_format(cls, v: Optional[str], info) -> Optional[str]:
-        """Validate date format (YYYYMMDD) if provided."""
-        field_name = info.field_name if hasattr(info, 'field_name') else 'date field'
-        if v:
+    def validate_yyyymmdd_format(cls, v: Optional[str]) -> Optional[str]:
+        """Validate date format (YYYYMMDD) for multiple fields."""
+        if v: # Only validate if not None
             try:
                 datetime.strptime(v, "%Y%m%d")
                 return v
             except ValueError:
-                raise ValueError(f"Invalid date format for {field_name}: {v}. Expected format: YYYYMMDD")
-        return v
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'FishDish':
-        """Create a FishDish instance from a dictionary."""
-        if 'screening_results' in data and isinstance(data['screening_results'], dict):
-             try:
-                 if 'screenings' in data['screening_results'] and isinstance(data['screening_results']['screenings'], list):
-                     for step in data['screening_results']['screenings']:
-                         if isinstance(step, dict) and 'screening_date' in step and 'screening_datetime' not in step:
-                             # If old format found, convert date to datetime with default time
-                             step['screening_datetime'] = f"{step['screening_date']}T00:00:00"
-                             del step['screening_date'] # Remove old field
-                 data['screening_results'] = ScreeningResults(**data['screening_results'])
-             except Exception as e:
-                 logging.error(f"Error parsing nested screening_results: {e}")
-                 data['screening_results'] = None
-        return cls(**data)
+                raise ValueError(f"Invalid date format: {v}. Expected format: YYYYMMDD")
+        return v # Allow None for optional fields like termination_date
 
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the model to a dictionary."""
-        return self.model_dump(exclude_none=True, mode='json')
-
+    # NOTE: create_new might need updating if derived dishes are created via a different path
     @classmethod
     def create_new(
         cls,
         cross_id: str,
-        dish_number: int,
+        dish_number: int, # Usually for primary dishes
         genotype: str,
         responsible: str,
-        dof: Optional[str] = None,
+        fish_count: int, # This is the initial estimate or calculated count for derived
+        dof: str, # Required DOF
+        dish_id: Optional[str] = None, # Allow overriding dish_id for derived dishes
+        source_group_id: Optional[str] = None,
         sex: str = "unknown",
         species: str = "Danio rerio",
-        fish_count: int = 1, # Represents initial count
-        parents: List[str] = None,
+        parents: Optional[List[str]] = None,
         temperature: float = 28.5,
         light_duration: str = "14:10",
         dawn_dusk: str = "8:00",
         room: str = "2E.282",
         in_beaker: bool = False,
         vol_water_total: Optional[int] = None,
-        notes: Optional[str] = None
+        notes: Optional[str] = None,
+        parent_dish_id: Optional[str] = None,
+        dish_population_type: DishPopulationType = "primary"
     ) -> 'FishDish':
         """
-        Create a new fish dish with default values.
+        Create a new fish dish with default values. Handles primary and derived dishes.
         """
-        if dof is None:
-            dof = datetime.now().strftime("%Y%m%d")
+        try:
+            datetime.strptime(dof, "%Y%m%d")
+        except ValueError:
+             raise ValueError(f"Invalid DOF format: {dof}. Expected YYYYMMDD")
 
         if parents is None:
             parents = []
 
         today = datetime.now().strftime("%Y%m%d")
-        dish_id = f"{cross_id}_{dish_number}"
+
+        # Generate dish_id if not provided (typically for primary)
+        if dish_id is None:
+            if dish_number is None or dish_number <= 0:
+                 raise ValueError("dish_number is required for generating primary dish_id")
+            dish_id = f"{cross_id}_{dish_number}"
+        # Else, use the provided dish_id (for derived dishes)
 
         return cls(
             dish_id=dish_id,
             date_created=today,
             cross_id=cross_id,
-            dish_number=dish_number,
+            source_group_id=source_group_id,
+            dish_number=dish_number if dish_population_type == "primary" else None, # Only store for primary?
             dof=dof,
             genotype=genotype,
             sex=sex,
             species=species,
             responsible=responsible,
-            fish_count=fish_count, # Initial count
+            fish_count=fish_count, # Use provided count
+            parent_dish_id=parent_dish_id, # Added
+            dish_population_type=dish_population_type, # Added
             breeding=Breeding(parents=parents),
             enclosure=Enclosure(
                 temperature=temperature,
@@ -217,28 +227,35 @@ class FishDish(BaseModel):
                 vol_water_total=vol_water_total
             ),
             quality_checks={},
-            screening_results=None, # Initialize as None
-            notes=notes, # Initialize general notes
+            screening_results=None, # Derived dishes start with no screening history
+            notes=notes,
             status="active"
         )
 
     def add_quality_check(self, check_data: QualityCheckData) -> None:
         """
         Add a quality check to the dish.
+        Uses the validated QualityCheckData object.
         """
         check_time = check_data.check_time
+        # Store the validated data as a dictionary
         self.quality_checks[check_time] = check_data.model_dump(exclude_none=True, mode='json')
 
     def add_screening_step(self, step_data: ScreeningStep) -> None:
-        """Add a screening step to the dish's screening results."""
+        """
+        Add a screening step to the dish's screening results.
+        Uses the validated ScreeningStep object.
+        """
         if self.screening_results is None:
             self.screening_results = ScreeningResults(screenings=[])
+        # Append the validated ScreeningStep object directly
         self.screening_results.screenings.append(step_data)
         # Sort screenings by datetime
         try:
+           # Sort using the screening_datetime attribute of the ScreeningStep objects
            self.screening_results.screenings.sort(key=lambda x: datetime.strptime(x.screening_datetime, "%Y%m%dT%H:%M:%S"))
-        except ValueError:
-           logging.warning("Could not sort screening steps by datetime.")
+        except (ValueError, TypeError): # Added TypeError
+           logging.warning(f"Could not sort screening steps by datetime for dish {self.dish_id}.")
 
 
     def finalize_screening(self, final_count: int, date_finalized: str) -> None:
@@ -246,21 +263,23 @@ class FishDish(BaseModel):
         if self.screening_results is None:
             self.screening_results = ScreeningResults(screenings=[])
         try:
+            # Validate date format before assigning
             datetime.strptime(date_finalized, "%Y%m%d")
             self.screening_results.date_finalized = date_finalized
         except ValueError:
-             print(f"Error: Invalid date format '{date_finalized}' for date_finalized. Not setting.")
+             # Raise error to be caught by the controller/caller
+             raise ValueError(f"Invalid date format '{date_finalized}' for date_finalized. Expected YYYYMMDD.")
 
         if final_count >= 0:
             self.screening_results.final_positive_count = final_count
         else:
-             print(f"Error: Invalid final_count '{final_count}'. Must be non-negative.")
+             # Raise error to be caught by the controller/caller
+             raise ValueError(f"Invalid final_count '{final_count}'. Must be non-negative.")
 
     def terminate(self, reason: str) -> None:
         """
-        Terminate the dish.
+        Terminate the dish. Sets status to inactive and records termination date/reason.
         """
         self.status = "inactive"
         self.termination_date = datetime.now().strftime("%Y%m%d")
         self.termination_reason = reason
-

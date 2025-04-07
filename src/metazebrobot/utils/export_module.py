@@ -13,6 +13,9 @@ from datetime import datetime
 
 from ..data.data_manager import data_manager
 from ..data.survival_data_processor import process_survival_data, create_survival_summary
+from ..utils.file_operations import save_json_file
+from ..controllers.cross_controller import cross_controller
+from ..controllers.fish_dish_controller import fish_dish_controller
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +117,154 @@ def get_survivability_data() -> pl.DataFrame:
          return pl.DataFrame([])
 
     return df # Return the raw DataFrame
+
+def export_lineage_json(output_path: str) -> bool:
+    """
+    Exports the lineage data (original parents, crosses, dishes, relationships)
+    as a JSON file suitable for graph visualization.
+
+    Args:
+        output_path: Path to save the JSON file.
+
+    Returns:
+        bool: True if export was successful, False otherwise.
+    """
+    logger.info(f"Exporting lineage data (including parents) to JSON: {output_path}")
+    try:
+        # 1. Gather Data
+        all_crosses = cross_controller.get_all_crosses()
+        all_dishes = fish_dish_controller.get_all_dishes(include_inactive=True)
+
+        if not all_crosses and not all_dishes:
+            logger.warning("No crosses or dishes found. Exporting empty lineage.")
+            return save_json_file(output_path, {"nodes": [], "links": []})
+
+        nodes = []
+        links = []
+        added_node_ids = set()
+
+        # 2. Process Crosses and their Original Parents
+        for cross_id, cross in all_crosses.items():
+            # Add the cross node itself
+            if cross_id not in added_node_ids:
+                nodes.append({
+                    "id": cross_id,
+                    "type": "cross",
+                    "label": f"Cross {cross_id}\n({cross.line_strain})"
+                })
+                added_node_ids.add(cross_id)
+
+            # Process Original Parents (Nodes and Links to Cross)
+            if cross.parents and len(cross.parents) == 2:
+                parent1_id = cross.parents[0].identifier
+                parent2_id = cross.parents[1].identifier
+
+                # Process Parent 1
+                if parent1_id not in added_node_ids:
+                    nodes.append({
+                        "id": parent1_id,
+                        "type": "original_parent",
+                        "label": f"Parent:\n{parent1_id}" # Simplified label
+                    })
+                    added_node_ids.add(parent1_id)
+                # Add link from Parent 1 to Cross
+                links.append({
+                    "source": parent1_id,
+                    "target": cross_id,
+                    # "value": 1, # Optional: value might not be meaningful here
+                    "label": "Parent"
+                })
+
+                # Process Parent 2
+                if parent2_id not in added_node_ids:
+                    nodes.append({
+                        "id": parent2_id,
+                        "type": "original_parent",
+                        "label": f"Parent:\n{parent2_id}" # Simplified label
+                    })
+                    added_node_ids.add(parent2_id)
+                # Add link from Parent 2 to Cross
+                links.append({
+                    "source": parent2_id,
+                    "target": cross_id,
+                    # "value": 1, # Optional
+                    "label": "Parent"
+                })
+            else:
+                logger.warning(f"Cross {cross_id} is missing valid parent information.")
+
+
+        # 3. Process Dishes (Nodes and Links from Cross/Parent Dish) - Logic remains the same
+        for dish_id, dish in all_dishes.items():
+            # Add dish node if not already added
+            if dish_id not in added_node_ids:
+                node_label = f"Dish {dish_id}\n"
+                if dish.dish_population_type != "primary":
+                    node_label += f"({dish.dish_population_type})\n"
+                node_label += f"Count: {dish.fish_count}"
+
+                nodes.append({
+                    "id": dish_id,
+                    "type": dish.dish_population_type,
+                    "label": node_label,
+                    "initial_count": dish.fish_count
+                })
+                added_node_ids.add(dish_id)
+
+            # Add link from parent (Cross or Parent Dish)
+            source_id = None
+            link_label = ""
+            value = dish.fish_count # Value flowing INTO this dish node
+
+            if dish.dish_population_type == "primary":
+                source_id = dish.cross_id
+                link_label = "Primary Dish"
+                # Ensure the cross node exists (should have been added above)
+                if source_id not in added_node_ids:
+                     logger.warning(f"Cross node {source_id} for primary dish {dish_id} not found. Adding.")
+                     # Find cross details to add a better node if possible
+                     cross_info = all_crosses.get(source_id)
+                     cross_label = f"Cross {source_id}"
+                     if cross_info: cross_label += f"\n({cross_info.line_strain})"
+                     nodes.append({"id": source_id, "type": "cross", "label": cross_label})
+                     added_node_ids.add(source_id)
+
+            elif dish.parent_dish_id:
+                source_id = dish.parent_dish_id
+                pop_type_map = {
+                    "negative_screened": "Screened Negatives",
+                    "positive_screened": "Screened Positives",
+                    "other": "Derived (Other)"
+                }
+                link_label = pop_type_map.get(dish.dish_population_type, f"Derived ({dish.dish_population_type})")
+                if source_id not in added_node_ids:
+                     logger.warning(f"Parent dish node {source_id} for derived dish {dish_id} not found. Link may be broken.")
+                     source_id = None # Prevent creating a broken link if parent isn't found
+
+            else:
+                 logger.warning(f"Dish {dish_id} is not primary and has no parent_dish_id. Skipping link creation.")
+
+            # Add the link if a valid source was determined
+            if source_id:
+                links.append({
+                    "source": source_id,
+                    "target": dish_id,
+                    "value": value,
+                    "label": link_label
+                })
+
+        # 4. Format and Save
+        output_data = {"nodes": nodes, "links": links}
+        if save_json_file(output_path, output_data):
+            logger.info(f"Successfully exported lineage JSON with {len(nodes)} nodes and {len(links)} links.")
+            return True
+        else:
+            logger.error(f"Failed to save lineage JSON to {output_path}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Error exporting lineage JSON: {str(e)}", exc_info=True)
+        return False
 
 def export_survivability_report(output_path: str) -> bool:
     """

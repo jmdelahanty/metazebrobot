@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt, Slot
 # Import controller and model
 from ..controllers.cross_controller import cross_controller
 from ..models.cross import Cross, Parent, TransgenicDetails # Import specific models
+from .dialogs.update_cross_status_dialog import UpdateCrossStatusDialog
 
 # Import the new dialog (will be created in the next step)
 from .dialogs.add_cross_dialog import AddCrossDialog
@@ -140,7 +141,49 @@ class CrossTab(QWidget):
         header.sectionClicked.connect(self.handle_header_click)
         # Use currentItemChanged for updating detail view on single click/selection
         self.crosses_table.currentItemChanged.connect(self.handle_selection_change)
-        # self.crosses_table.cellDoubleClicked.connect(self.handle_double_click) # Add if needed later
+        self.crosses_table.cellDoubleClicked.connect(self.handle_cross_cell_double_click)
+
+    @Slot(int, int)
+    def handle_cross_cell_double_click(self, row: int, column: int):
+        """Handle double-clicks on the cross table."""
+        # Define the index for the status column (check your table setup)
+        STATUS_COLUMN_INDEX = 5 # Assuming 'Status' is the 6th column (index 5)
+
+        if column == STATUS_COLUMN_INDEX:
+            try:
+                cross_id_item = self.crosses_table.item(row, 0) # Get item from Cross ID column
+                status_item = self.crosses_table.item(row, STATUS_COLUMN_INDEX) # Get item from Status column
+
+                if not cross_id_item or not status_item:
+                    logger.warning("Could not get cross ID or status item for double-clicked row.")
+                    return
+
+                cross_id = cross_id_item.data(Qt.ItemDataRole.UserRole) # Get ID from UserRole data
+                if not cross_id:
+                    cross_id = cross_id_item.text() # Fallback if UserRole wasn't set
+
+                current_status = status_item.text()
+
+                # --- Show the new dialog ---
+                dialog = UpdateCrossStatusDialog(current_status=current_status, parent=self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    new_status = dialog.get_selected_status()
+                    if new_status != current_status:
+                        logger.info(f"Attempting to update status for cross {cross_id} from '{current_status}' to '{new_status}'")
+                        # Call controller method (to be created in next step)
+                        success, message = cross_controller.update_cross_status(cross_id, new_status)
+
+                        if success:
+                            QMessageBox.information(self, "Success", f"Cross {cross_id} status updated to '{new_status}'.")
+                            self.update_crosses_table() # Refresh table to show change
+                        else:
+                            QMessageBox.warning(self, "Update Failed", f"Could not update status for cross {cross_id}:\n{message}")
+                    else:
+                        logger.debug("Status not changed.")
+
+            except Exception as e:
+                logger.error(f"Error handling cross table double-click: {e}", exc_info=True)
+                QMessageBox.critical(self, "Error", f"An error occurred: {e}")
 
     @Slot(int)
     def handle_header_click(self, column_index: int):
@@ -353,8 +396,8 @@ class CrossTab(QWidget):
                 if cross.transgenic_details:
                     details_html += "<h4>Transgenic Details:</h4><ul>"
                     for indicator in cross.transgenic_details.indicators:
-                        details_html += f"<li><b>Indicator:</b> {indicator.name}<br>" \
-                                        f"&nbsp;&nbsp;<b>Expected Expression:</b> {indicator.expected_expression}</li>"
+                        details_html += f"<li><b>Indicator:</b> {indicator.standard_notation}<br>" \
+                            f"&nbsp;&nbsp;<b>Expected Expression:</b> {indicator.expected_expression or 'N/A'}</li>"
                     details_html += "</ul>"
                     # Add aggregate results if available (optional)
                     if cross.transgenic_details.aggregate_results:

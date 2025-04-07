@@ -13,11 +13,12 @@ from PySide6.QtWidgets import (
     QCheckBox, QTimeEdit, QSizePolicy, QComboBox
 )
 from PySide6.QtCore import Qt, QDate, Slot, QTime
-from PySide6.QtGui import QPixmap, QFont # <<< QFont is needed
+from PySide6.QtGui import QPixmap, QFont
 
 # Import controller, models, and data_manager
 from ...controllers.fish_dish_controller import fish_dish_controller
-from ...models.fish_dish import FishDish
+# Import the specific models required
+from ...models.fish_dish import FishDish, ScreeningStep # Import ScreeningStep
 from ...data.data_manager import data_manager
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 class ScreeningDialog(QDialog):
     """Dialog for viewing and managing screening steps for a fish dish."""
 
-    # Define constants for image size constraints (Increased dimensions)
+    # Define constants for image size constraints
     MAX_IMAGE_WIDTH = 1024
     MAX_IMAGE_HEIGHT = 1024
 
@@ -49,7 +50,7 @@ class ScreeningDialog(QDialog):
 
         self.setWindowTitle(f"Screening Details - Dish: {self.dish_id}")
 
-        # --- Set font size for the entire dialog --- <<< MODIFICATION
+        # --- Set font size for the entire dialog ---
         dialog_font = self.font()
         dialog_font.setPointSize(11) # Set desired point size (e.g., 11)
         self.setFont(dialog_font)
@@ -155,13 +156,17 @@ class ScreeningDialog(QDialog):
         self.step_criteria.setPlaceholderText("Suggested by protocol or brief description")
         add_step_layout.addRow("Criteria:", self.step_criteria)
 
-        self.step_removed = QSpinBox()
-        self.step_removed.setRange(0, 500)
-        add_step_layout.addRow("Fish Removed:", self.step_removed)
+        # --- FIELD ADDED ---
+        self.step_count_screened = QSpinBox()
+        self.step_count_screened.setRange(0, 1000) # Adjust range as needed
+        self.step_count_screened.setToolTip("Enter the total number of fish actually screened in this step.")
+        add_step_layout.addRow("Total Screened This Step:", self.step_count_screened)
+        # --------------------
 
-        self.step_remaining = QSpinBox()
-        self.step_remaining.setRange(0, 500)
-        add_step_layout.addRow("Fish Remaining After:", self.step_remaining)
+        self.step_number_positive = QSpinBox()
+        self.step_number_positive.setRange(0, 1000) # Range should accommodate count_screened
+        self.step_number_positive.setToolTip("Enter the number of fish positive for the indicator(s) in this step.")
+        add_step_layout.addRow("Number Positive:", self.step_number_positive)
 
         self.step_tricaine_used = QCheckBox()
         self.step_tricaine_used.setToolTip("Check if tricaine was used for this screening step")
@@ -175,14 +180,15 @@ class ScreeningDialog(QDialog):
         add_step_button.clicked.connect(self.add_screening_step)
         add_step_layout.addRow(add_step_button)
 
-        add_step_group.setMaximumHeight(300)
+        # Adjust max height if needed due to new field
+        add_step_group.setMaximumHeight(350)
         main_layout.addWidget(add_step_group)
 
         # --- Finalize Screening ---
         finalize_group = QGroupBox("Finalize Screening (Optional)")
         finalize_layout = QFormLayout(finalize_group)
         finalize_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        self.final_count = QSpinBox(); self.final_count.setRange(0, 500); self.final_count.setEnabled(False)
+        self.final_count = QSpinBox(); self.final_count.setRange(0, 1000); self.final_count.setEnabled(False)
         finalize_layout.addRow("Final Positive Count:", self.final_count)
         self.final_date = QDateEdit(); self.final_date.setCalendarPopup(True); self.final_date.setDisplayFormat("yyyy-MM-dd"); self.final_date.setEnabled(False)
         finalize_layout.addRow("Date Finalized:", self.final_date)
@@ -203,10 +209,12 @@ class ScreeningDialog(QDialog):
 
     def setup_steps_table(self):
         """Configure the appearance and columns of the steps table."""
-        self.steps_table.setColumnCount(8)
+        # --- Adjusted column count and labels ---
+        self.steps_table.setColumnCount(8) # Increased column count
         self.steps_table.setHorizontalHeaderLabels([
-            "DateTime", "DPF", "Indicator(s)", "Criteria", "Removed", "Remaining", "Tricaine?", "Notes"
+            "DateTime", "DPF", "Indicator(s)", "Criteria", "Total Screened", "Positive", "Tricaine?", "Notes" # Added Total Screened
         ])
+        # -----------------------------------------
         self.steps_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.steps_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.steps_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -214,11 +222,13 @@ class ScreeningDialog(QDialog):
         self.steps_table.verticalHeader().setVisible(False)
 
         header = self.steps_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        # Adjust resize modes for new column layout
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents) # Resize most cols to contents initially
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive) # Allow resizing DateTime
         self.steps_table.setColumnWidth(0, 160) # Give DateTime more space
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch) # Stretch Criteria
-        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch) # Stretch Notes
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch) # Stretch Notes (now column 7)
+
 
     def load_dish_data(self):
         """Load the dish data, protocols, image map and populate the dialog."""
@@ -249,7 +259,7 @@ class ScreeningDialog(QDialog):
         protocol_data = None
         if dish_genotype in all_protocols: protocol_data = all_protocols[dish_genotype]
         else:
-            normalized_genotype = dish_genotype.replace("; ", ";")
+            normalized_genotype = dish_genotype.replace("; ", ";") # Handle potential variations
             if normalized_genotype in all_protocols: protocol_data = all_protocols[normalized_genotype]
 
         if not protocol_data and "_default" in all_protocols:
@@ -353,16 +363,21 @@ class ScreeningDialog(QDialog):
                      logger.warning(f"Could not parse screening datetime for display: {datetime_str}")
                      display_datetime = datetime_str + " (Invalid Format)"
 
+            # --- Populate table with new structure ---
             self.steps_table.setItem(i, 0, QTableWidgetItem(display_datetime))
             self.steps_table.setItem(i, 1, QTableWidgetItem(str(getattr(step, 'dpf_screened', 'N/A'))))
             self.steps_table.setItem(i, 2, QTableWidgetItem(getattr(step, 'indicator_screened', 'N/A')))
             self.steps_table.setItem(i, 3, QTableWidgetItem(getattr(step, 'criteria', 'N/A')))
-            self.steps_table.setItem(i, 4, QTableWidgetItem(str(getattr(step, 'fish_removed', 0))))
-            self.steps_table.setItem(i, 5, QTableWidgetItem(str(getattr(step, 'fish_remaining_after', 0))))
+            # Add count_screened_this_step
+            self.steps_table.setItem(i, 4, QTableWidgetItem(str(getattr(step, 'count_screened_this_step', 0))))
+            # Get number_positive
+            self.steps_table.setItem(i, 5, QTableWidgetItem(str(getattr(step, 'number_positive', 0))))
             tricaine_val = getattr(step, 'tricaine_used', False)
             tricaine_text = "Yes" if tricaine_val else "No"
+            # Adjust column indices for tricaine and notes
             self.steps_table.setItem(i, 6, QTableWidgetItem(tricaine_text))
             self.steps_table.setItem(i, 7, QTableWidgetItem(getattr(step, 'notes', "") or ""))
+            # -------------------------------------------------------
 
         logger.debug(f"Populated table with {len(steps)} screening steps for dish {self.dish_id}")
 
@@ -505,68 +520,110 @@ class ScreeningDialog(QDialog):
 
     @Slot()
     def add_screening_step(self):
-        """Collect data from the 'Add Step' fields and save it."""
+        """Collect data from the 'Add Step' fields, save it, and prompt for splitting."""
         if not self.dish:
             QMessageBox.warning(self, "Error", "Dish data not loaded.")
             return
 
         indicator = self.step_indicator.text().strip()
         criteria = self.step_criteria.text().strip()
+        count_screened = self.step_count_screened.value() # Get total screened count
+        num_positive = self.step_number_positive.value()
+
+        # Validation
         if not indicator:
              QMessageBox.warning(self, "Input Error", "Indicator(s) Screened cannot be empty.")
              return
         if not criteria:
              QMessageBox.warning(self, "Input Error", "Criteria cannot be empty.")
              return
+        if count_screened <= 0:
+             QMessageBox.warning(self, "Input Error", "Total Screened This Step must be greater than zero.")
+             return
+        if num_positive > count_screened:
+             QMessageBox.warning(self, "Input Error", "Number Positive cannot be greater than Total Screened This Step.")
+             return
+
 
         date_str = self.step_date.date().toString("yyyyMMdd")
         time_str = self.step_time.time().toString("HH:mm:ss")
         screening_datetime_str = f"{date_str}T{time_str}"
 
-        # Calculate DPF again right before saving to ensure it's current
+        # Calculate DPF again right before saving
         current_dpf_value = None
         if self.step_dpf.isEnabled():
             current_dpf_value = self.step_dpf.value()
         else:
-            # Try recalculating if it was disabled
-            self.update_dpf()
+            self.update_dpf() # Try recalculating
             if self.step_dpf.isEnabled():
                  current_dpf_value = self.step_dpf.value()
             else:
                  QMessageBox.warning(self, "Calculation Error", "Could not calculate DPF. Please check the dish DOF and screening date.")
                  return
 
-
+        # Prepare data for controller
         step_data = {
             "screening_datetime": screening_datetime_str,
-            "dpf_screened": current_dpf_value, # Use calculated DPF
+            "dpf_screened": current_dpf_value,
             "indicator_screened": indicator,
             "criteria": criteria,
-            "fish_removed": self.step_removed.value(),
-            "fish_remaining_after": self.step_remaining.value(),
+            "count_screened_this_step": count_screened, # Pass new field
+            "number_positive": num_positive,
             "tricaine_used": self.step_tricaine_used.isChecked(),
             "notes": self.step_notes.text().strip() or None
         }
 
-
-        success, message = fish_dish_controller.add_screening_step(self.dish_id, step_data)
+        # Call controller to add the step
+        success, message, validated_step_obj = fish_dish_controller.add_screening_step(self.dish_id, step_data)
 
         if success:
             QMessageBox.information(self, "Success", "Screening step added successfully.")
-            self.load_dish_data() # Reload data to show the new step
-            self.clear_add_step_fields() # Clear form for next entry
+            self.load_dish_data() # Reload data to show the new step in the table
+            self.clear_add_step_fields() # Clear form
+
+            # --- Splitting Logic ---
+            if validated_step_obj: # Check if we got the step object back
+                negatives_count = validated_step_obj.count_screened_this_step - validated_step_obj.number_positive
+                if negatives_count > 0:
+                    reply = QMessageBox.question(self, 'Create Derived Dish?',
+                                                 f"Screening step added.\n\n"
+                                                 f"Calculated {negatives_count} negative fish "
+                                                 f"(Total: {validated_step_obj.count_screened_this_step}, "
+                                                 f"Positive: {validated_step_obj.number_positive}).\n\n"
+                                                 f"Do you want to create a new dish record for these negatives?",
+                                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                                 QMessageBox.StandardButton.No)
+
+                    if reply == QMessageBox.StandardButton.Yes:
+                        logger.info(f"User chose to create dish for {negatives_count} negatives from dish {self.dish_id}")
+                        # Call the new controller method
+                        derive_success, derive_message, new_dish = fish_dish_controller.create_derived_dish(
+                            parent_dish_id=self.dish_id,
+                            population_type="negative_screened",
+                            originating_screening_step=validated_step_obj
+                        )
+                        if derive_success:
+                             QMessageBox.information(self, "Success", f"Successfully created derived dish: {derive_message}")
+                             # Optionally, refresh the main dish table in the background if possible?
+                        else:
+                             QMessageBox.critical(self, "Error", f"Failed to create derived dish:\n{derive_message}")
+                else:
+                     logger.info("No negative fish calculated, skipping split prompt.")
+            else:
+                 logger.error("Validated screening step object was not returned from controller. Cannot prompt for split.")
+            # --- End Splitting Logic ---
+
         else:
             QMessageBox.critical(self, "Error", f"Failed to add screening step:\n{message}")
 
     def clear_add_step_fields(self):
         """Clear the input fields for adding a new step."""
-        # Don't reset date/time, just clear the specific step fields
-        # self.set_current_datetime() # Optionally reset time, or leave it
+        self.set_current_datetime()
         self.step_indicator.clear(); self.step_indicator.setPlaceholderText("e.g., GFP, Pigment")
         self.step_criteria.clear(); self.step_criteria.setPlaceholderText("Brief description of criteria")
         self.step_notes.clear(); self.step_notes.setPlaceholderText("(Optional) Notes for this step")
-        self.step_removed.setValue(0)
-        self.step_remaining.setValue(0)
+        self.step_count_screened.setValue(0) # Reset new field
+        self.step_number_positive.setValue(0)
         self.step_tricaine_used.setChecked(False)
         # Trigger DPF update and suggestions based on current date/time
         self.update_dpf()
