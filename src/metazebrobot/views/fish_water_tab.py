@@ -501,31 +501,31 @@ class FishWaterTab(QWidget):
         return result
     
     def apply_batch_sorting(self, batches):
-        """Apply sorting to batches."""
+        """Apply sorting to batches with correct field mapping."""
+        # Table columns: "Batch ID", "Source", "Volume (mL)", "Date Prepared", "Prepared By"
         column_to_key = {
-            0: "batch_id",
+            0: "source",  # Batch ID column - we'll use source as the identifier
             1: "source", 
-            2: "volume_liters",
-            3: "date_prepared",
-            4: "ph",
-            5: "conductivity_us",
-            6: "storage_location"
+            2: "volume_prepared_mL",
+            3: "preparation_date",
+            4: "prepared_by"
         }
-        sort_key = column_to_key.get(self.batch_sort_column, "batch_id")
+        sort_key = column_to_key.get(self.batch_sort_column, "source")
         ascending = (self.batch_sort_order == Qt.SortOrder.AscendingOrder)
         return fish_water_controller.sort_batches(batches, sort_key, ascending)
     
     def apply_derivative_sorting(self, derivatives):
-        """Apply sorting to derivatives."""
+        """Apply sorting to derivatives with correct field mapping."""
+        # Table columns: "Derivative ID", "Source Batch", "Type", "Volume (mL)", "Prepared By", "Date Prepared"
         column_to_key = {
-            0: "derivative_id",
-            1: "base_batch_id",
-            2: "volume_taken_liters", 
-            3: "purpose",
-            4: "used_by",
-            5: "date_used"
+            0: "source_batch_id",  # Derivative ID column - use source_batch_id as identifier
+            1: "source_batch_id",
+            2: "type", 
+            3: "volume_prepared_mL",
+            4: "prepared_by",
+            5: "date_prepared"
         }
-        sort_key = column_to_key.get(self.derivative_sort_column, "derivative_id")
+        sort_key = column_to_key.get(self.derivative_sort_column, "source_batch_id")
         ascending = (self.derivative_sort_order == Qt.SortOrder.AscendingOrder)
         return fish_water_controller.sort_derivatives(derivatives, sort_key, ascending)
     

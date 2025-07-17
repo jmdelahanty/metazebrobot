@@ -7,34 +7,13 @@ from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
 
-class FishWaterStorage(BaseModel):
-    """Storage information for fish water derivatives."""
-    location: str = Field(..., description="Storage location")
-
-
-class FishWaterProcessing(BaseModel):
-    """Processing information for fish water derivatives."""
-    filter_type: Optional[str] = Field(None, description="Type of filter used")
-    filter_size: Optional[str] = Field(None, description="Filter size")
-    method: Optional[str] = Field(None, description="Processing method")
-
-
-class FishWaterQualityChecks(BaseModel):
-    """Quality check information for fish water."""
-    visual_inspection: Optional[str] = Field(None, description="Visual inspection results")
-    ph: Optional[float] = Field(None, ge=0, le=14, description="pH level")
-    conductivity: Optional[int] = Field(None, ge=0, description="Conductivity in μS/cm")
-
-
 class FishWaterBatch(BaseModel):
-    """Model for a fish water batch (matches your existing structure)."""
+    """Model for a fish water batch (simplified structure)."""
     source: str = Field(..., description="Source of the water (e.g., Janelia System)")
     preparation_date: str = Field(..., description="Date prepared (YYYY-MM-DD format)")
-    notes: Optional[str] = None
-    
-    # Additional fields for new batches
     volume_prepared_mL: Optional[float] = Field(None, gt=0, description="Volume prepared in mL")
     prepared_by: Optional[str] = Field(None, description="Person who prepared the batch")
+    notes: Optional[str] = None
     
     @field_validator('preparation_date')
     @classmethod
@@ -60,19 +39,7 @@ class FishWaterBatch(BaseModel):
         preparation_date: Optional[str] = None,
         notes: Optional[str] = None
     ) -> 'FishWaterBatch':
-        """
-        Create a new fish water batch.
-        
-        Args:
-            source: Source of the water
-            volume_prepared_mL: Volume prepared in mL
-            prepared_by: Person who prepared the batch
-            preparation_date: Date prepared (defaults to today in YYYY-MM-DD format)
-            notes: Optional notes
-            
-        Returns:
-            A new FishWaterBatch instance
-        """
+        """Create a new fish water batch."""
         if not preparation_date:
             preparation_date = datetime.now().strftime("%Y-%m-%d")
         
@@ -86,15 +53,27 @@ class FishWaterBatch(BaseModel):
 
 
 class FishWaterDerivative(BaseModel):
-    """Model for fish water derivative (matches your existing structure)."""
+    """Model for fish water derivative (flattened structure)."""
     source_batch_id: str = Field(..., description="ID of the source water batch")
     type: str = Field(..., description="Type of derivative (e.g., filtered)")
     date_prepared: str = Field(..., description="Date prepared (YYYYMMDD)")
     prepared_by: str = Field(..., description="Person who prepared the derivative")
     volume_prepared_mL: float = Field(..., gt=0, description="Volume prepared in mL")
-    storage: FishWaterStorage = Field(..., description="Storage information")
-    processing: Optional[FishWaterProcessing] = Field(None, description="Processing information")
-    quality_checks: Optional[FishWaterQualityChecks] = Field(None, description="Quality check results")
+    
+    # Flattened storage fields
+    storage_location: str = Field(..., description="Storage location")
+    
+    # Flattened processing fields (optional)
+    filter_type: Optional[str] = Field(None, description="Type of filter used")
+    filter_size: Optional[str] = Field(None, description="Filter size")
+    processing_method: Optional[str] = Field(None, description="Processing method")
+    
+    # Flattened quality check fields (optional)
+    visual_inspection: Optional[str] = Field(None, description="Visual inspection results")
+    ph: Optional[float] = Field(None, ge=0, le=14, description="pH level")
+    conductivity: Optional[int] = Field(None, ge=0, description="Conductivity in μS/cm")
+    
+    # General notes
     notes: Optional[str] = None
     
     @field_validator('date_prepared')
@@ -120,27 +99,13 @@ class FishWaterDerivative(BaseModel):
         date_prepared: Optional[str] = None,
         filter_type: Optional[str] = "vacuum",
         filter_size: Optional[str] = "20um",
+        processing_method: Optional[str] = None,
         visual_inspection: str = "clear, no particles",
+        ph: Optional[float] = None,
+        conductivity: Optional[int] = None,
         notes: Optional[str] = None
     ) -> 'FishWaterDerivative':
-        """
-        Create a new fish water derivative.
-        
-        Args:
-            source_batch_id: ID of the source water batch
-            derivative_type: Type of derivative (e.g., filtered)
-            volume_prepared_mL: Volume prepared in mL
-            storage_location: Storage location
-            prepared_by: Person who prepared the derivative
-            date_prepared: Date prepared (defaults to today in YYYYMMDD)
-            filter_type: Type of filter used
-            filter_size: Size of filter used
-            visual_inspection: Visual inspection results
-            notes: Optional notes
-            
-        Returns:
-            A new FishWaterDerivative instance
-        """
+        """Create a new fish water derivative."""
         if not date_prepared:
             date_prepared = datetime.now().strftime("%Y%m%d")
         
@@ -150,13 +115,12 @@ class FishWaterDerivative(BaseModel):
             date_prepared=date_prepared,
             prepared_by=prepared_by,
             volume_prepared_mL=volume_prepared_mL,
-            storage=FishWaterStorage(location=storage_location),
-            processing=FishWaterProcessing(
-                filter_type=filter_type,
-                filter_size=filter_size
-            ) if filter_type else None,
-            quality_checks=FishWaterQualityChecks(
-                visual_inspection=visual_inspection
-            ),
+            storage_location=storage_location,
+            filter_type=filter_type,
+            filter_size=filter_size,
+            processing_method=processing_method,
+            visual_inspection=visual_inspection,
+            ph=ph,
+            conductivity=conductivity,
             notes=notes
         )

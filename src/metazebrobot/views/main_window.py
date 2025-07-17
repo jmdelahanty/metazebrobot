@@ -16,6 +16,7 @@ from ..data.data_manager import data_manager
 from .agarose_tab import AgaroseTab
 from .fish_dish_tab import FishDishTab
 from .fish_water_tab import FishWaterTab
+from .poly_l_serine_tab import PolyLSerineTab 
 from .dialogs.export_dialog import ExportDialog
 from .cross_tab import CrossTab
 
@@ -257,11 +258,8 @@ class LabInventoryGUI(QMainWindow):
             # Fish water tab
             fish_water_tab = FishWaterTab()
             tabs.addTab(fish_water_tab, "Fish Water")
-            
-            # Poly-L-Serine tab placeholder
-            pls_tab = QWidget()
-            pls_layout = QVBoxLayout(pls_tab)
-            pls_layout.addWidget(QWidget())  # Placeholder
+            # Poly-L-Serine tab
+            pls_tab = PolyLSerineTab()
             tabs.addTab(pls_tab, "Poly-L-Serine")
             
             # Fish dishes tab
