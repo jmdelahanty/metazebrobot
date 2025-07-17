@@ -16,3 +16,6 @@ __pycache__/
 # Ignore compiled Python files
 *.so
 *.pyc
+# pixi environments
+.pixi
+*.egg-info

@@ -15,6 +15,7 @@ from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
 from ..data.data_manager import data_manager
 from .agarose_tab import AgaroseTab
 from .fish_dish_tab import FishDishTab
+from .fish_water_tab import FishWaterTab
 from .dialogs.export_dialog import ExportDialog
 from .cross_tab import CrossTab
 
@@ -253,10 +254,8 @@ class LabInventoryGUI(QMainWindow):
             agarose_tab = AgaroseTab()
             tabs.addTab(agarose_tab, "Agarose Solutions")
             
-            # Fish water tab placeholder
-            fish_water_tab = QWidget()
-            fish_water_layout = QVBoxLayout(fish_water_tab)
-            fish_water_layout.addWidget(QWidget())  # Placeholder
+            # Fish water tab
+            fish_water_tab = FishWaterTab()
             tabs.addTab(fish_water_tab, "Fish Water")
             
             # Poly-L-Serine tab placeholder
