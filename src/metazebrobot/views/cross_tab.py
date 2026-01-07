@@ -108,10 +108,10 @@ class CrossTab(QWidget):
 
     def setup_cross_table(self):
         """Setup the cross table with columns, sorting, and selection handling."""
-        self.crosses_table.setColumnCount(7)
+        self.crosses_table.setColumnCount(8)
         self.crosses_table.setHorizontalHeaderLabels([
             "Cross ID", "Request Date", "Requestor", "Line/Strain",
-            "Type", "Status", "Req. Groups"
+            "Type", "Status", "Req. Groups", "Prod. Groups"
         ])
 
         # Appearance and behavior
@@ -307,7 +307,8 @@ class CrossTab(QWidget):
             3: "line_strain",
             4: "cross_type",
             5: "cross_status",
-            6: "requested_groups"
+            6: "requested_groups",
+            7: "groups_produced"
         }
         sort_key = column_to_key.get(self.cross_sort_column, "cross_id") # Default to cross_id
         ascending = (self.cross_sort_order == Qt.SortOrder.AscendingOrder)
@@ -335,7 +336,8 @@ class CrossTab(QWidget):
             self.crosses_table.setItem(i, 3, QTableWidgetItem(cross.line_strain))
             self.crosses_table.setItem(i, 4, QTableWidgetItem(cross.cross_type))
             self.crosses_table.setItem(i, 5, QTableWidgetItem(cross.cross_status or 'N/A'))
-            self.crosses_table.setItem(i, 6, QTableWidgetItem(str(cross.requested_groups)))
+            self.crosses_table.setItem(i, 6, QTableWidgetItem(str(cross.requested_groups) if cross.requested_groups is not None else "None"))
+            self.crosses_table.setItem(i, 7, QTableWidgetItem(str(cross.groups_produced) if cross.groups_produced is not None else "None"))
 
             # Store cross_id in the first column item for easy retrieval
             self.crosses_table.item(i, 0).setData(Qt.ItemDataRole.UserRole, cross_id)

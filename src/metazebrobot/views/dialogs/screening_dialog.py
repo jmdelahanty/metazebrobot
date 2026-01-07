@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel,
     QLineEdit, QSpinBox, QPushButton, QDateEdit, QTextEdit, QTableWidget,
     QTableWidgetItem, QMessageBox, QHeaderView, QAbstractItemView, QDialogButtonBox,
-    QCheckBox, QTimeEdit, QSizePolicy, QComboBox
+    QCheckBox, QTimeEdit, QSizePolicy, QComboBox, QScrollArea, QWidget
 )
 from PySide6.QtCore import Qt, QDate, Slot, QTime
 from PySide6.QtGui import QPixmap, QFont
@@ -45,7 +45,7 @@ class ScreeningDialog(QDialog):
         self.current_protocol: Optional[Dict[str, Any]] = None
         self.indicator_images: Dict[str, str] = {}
         # Store the base path for config files relative to this script's location
-        self.config_base_path = Path(__file__).parent.parent.parent.parent / 'config'
+        self.config_base_path = Path(__file__).parent.parent.parent / 'config'
 
 
         self.setWindowTitle(f"Screening Details - Dish: {self.dish_id}")
@@ -62,6 +62,16 @@ class ScreeningDialog(QDialog):
     def setup_ui(self):
         """Set up the user interface."""
         main_layout = QVBoxLayout(self)
+
+        # --- Create scroll area for main content ---
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # Container widget for scrollable content
+        scroll_content = QWidget()
+        content_layout = QVBoxLayout(scroll_content)
 
         # --- Top Area: Protocol Text and Image Side-by-Side ---
         top_area_layout = QHBoxLayout()
@@ -105,8 +115,8 @@ class ScreeningDialog(QDialog):
         top_area_layout.addWidget(self.protocol_group, 1)  # Protocol gets 1 part
         top_area_layout.addWidget(self.image_group, 2)     # Image gets 2 parts (more space)
 
-        main_layout.addLayout(top_area_layout)
-        main_layout.setStretchFactor(top_area_layout, 3)  # Give top area higher priority
+        content_layout.addLayout(top_area_layout)
+        content_layout.setStretchFactor(top_area_layout, 3)  # Give top area higher priority
 
         # --- Existing Steps Table ---
         existing_group = QGroupBox("Existing Screening Steps")
@@ -115,7 +125,7 @@ class ScreeningDialog(QDialog):
         self.setup_steps_table()
         self.steps_table.setMaximumHeight(200)
         existing_layout.addWidget(self.steps_table)
-        main_layout.addWidget(existing_group)
+        content_layout.addWidget(existing_group)
 
         # --- Add New Step Form ---
         add_step_group = QGroupBox("Add New Screening Step")
@@ -168,6 +178,23 @@ class ScreeningDialog(QDialog):
         self.step_number_positive.setToolTip("Enter the number of fish positive for the indicator(s) in this step.")
         add_step_layout.addRow("Number Positive:", self.step_number_positive)
 
+        # --- REMOVAL TRACKING FIELDS ---
+        self.step_removed_pigmented = QSpinBox()
+        self.step_removed_pigmented.setRange(0, 1000)
+        self.step_removed_pigmented.setToolTip("Number of fish removed due to pigmentation.")
+        add_step_layout.addRow("Removed (Pigmented):", self.step_removed_pigmented)
+
+        self.step_removed_negative = QSpinBox()
+        self.step_removed_negative.setRange(0, 1000)
+        self.step_removed_negative.setToolTip("Number of fish removed for being negative for the indicator.")
+        add_step_layout.addRow("Removed (Negative):", self.step_removed_negative)
+
+        self.step_removed_other = QSpinBox()
+        self.step_removed_other.setRange(0, 1000)
+        self.step_removed_other.setToolTip("Number of fish removed for other reasons.")
+        add_step_layout.addRow("Removed (Other):", self.step_removed_other)
+        # --------------------------------
+
         self.step_tricaine_used = QCheckBox()
         self.step_tricaine_used.setToolTip("Check if tricaine was used for this screening step")
         add_step_layout.addRow("Tricaine Used?", self.step_tricaine_used)
@@ -180,9 +207,7 @@ class ScreeningDialog(QDialog):
         add_step_button.clicked.connect(self.add_screening_step)
         add_step_layout.addRow(add_step_button)
 
-        # Adjust max height if needed due to new field
-        add_step_group.setMaximumHeight(350)
-        main_layout.addWidget(add_step_group)
+        content_layout.addWidget(add_step_group)
 
         # --- Finalize Screening ---
         finalize_group = QGroupBox("Finalize Screening (Optional)")
@@ -194,9 +219,13 @@ class ScreeningDialog(QDialog):
         finalize_layout.addRow("Date Finalized:", self.final_date)
         finalize_button = QPushButton("Save Final Results"); finalize_button.clicked.connect(self.finalize_screening)
         finalize_layout.addRow(finalize_button)
-        main_layout.addWidget(finalize_group)
+        content_layout.addWidget(finalize_group)
 
-        # --- Dialog Buttons ---
+        # Set the scroll area's widget
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area, 1)  # Give scroll area stretch priority
+
+        # --- Dialog Buttons (outside scroll area) ---
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         button_box.rejected.connect(self.reject)
         main_layout.addWidget(button_box)
@@ -210,9 +239,10 @@ class ScreeningDialog(QDialog):
     def setup_steps_table(self):
         """Configure the appearance and columns of the steps table."""
         # --- Adjusted column count and labels ---
-        self.steps_table.setColumnCount(8) # Increased column count
+        self.steps_table.setColumnCount(11) # Increased for removal tracking columns
         self.steps_table.setHorizontalHeaderLabels([
-            "DateTime", "DPF", "Indicator(s)", "Criteria", "Total Screened", "Positive", "Tricaine?", "Notes" # Added Total Screened
+            "DateTime", "DPF", "Indicator(s)", "Criteria", "Total Screened", "Positive",
+            "Rm Pigment", "Rm Neg", "Rm Other", "Tricaine?", "Notes"
         ])
         # -----------------------------------------
         self.steps_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -227,7 +257,7 @@ class ScreeningDialog(QDialog):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive) # Allow resizing DateTime
         self.steps_table.setColumnWidth(0, 160) # Give DateTime more space
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch) # Stretch Criteria
-        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch) # Stretch Notes (now column 7)
+        header.setSectionResizeMode(10, QHeaderView.ResizeMode.Stretch) # Stretch Notes (now column 10)
 
 
     def load_dish_data(self):
@@ -321,7 +351,9 @@ class ScreeningDialog(QDialog):
 
         if pixmap.isNull():
             logger.warning(f"Failed to load image: {absolute_image_path}")
-            self.reference_image_label.setText(f"Image not found:\n{relative_image_path}\n(relative to src/config/)")
+            self.reference_image_label.setText(
+                f"Image not found:\n{relative_image_path}\n(relative to metazebrobot/config/)"
+            )
             self.reference_image_label.setWordWrap(True)
         else:
             # Scale pixmap to fit the label's size
@@ -372,11 +404,18 @@ class ScreeningDialog(QDialog):
             self.steps_table.setItem(i, 4, QTableWidgetItem(str(getattr(step, 'count_screened_this_step', 0))))
             # Get number_positive
             self.steps_table.setItem(i, 5, QTableWidgetItem(str(getattr(step, 'number_positive', 0))))
+            # Removal tracking columns
+            rm_pigment = getattr(step, 'number_removed_pigmented', None)
+            self.steps_table.setItem(i, 6, QTableWidgetItem(str(rm_pigment) if rm_pigment is not None else "-"))
+            rm_neg = getattr(step, 'number_removed_negative', None)
+            self.steps_table.setItem(i, 7, QTableWidgetItem(str(rm_neg) if rm_neg is not None else "-"))
+            rm_other = getattr(step, 'number_removed_other', None)
+            self.steps_table.setItem(i, 8, QTableWidgetItem(str(rm_other) if rm_other is not None else "-"))
+            # Tricaine and notes
             tricaine_val = getattr(step, 'tricaine_used', False)
             tricaine_text = "Yes" if tricaine_val else "No"
-            # Adjust column indices for tricaine and notes
-            self.steps_table.setItem(i, 6, QTableWidgetItem(tricaine_text))
-            self.steps_table.setItem(i, 7, QTableWidgetItem(getattr(step, 'notes', "") or ""))
+            self.steps_table.setItem(i, 9, QTableWidgetItem(tricaine_text))
+            self.steps_table.setItem(i, 10, QTableWidgetItem(getattr(step, 'notes', "") or ""))
             # -------------------------------------------------------
 
         logger.debug(f"Populated table with {len(steps)} screening steps for dish {self.dish_id}")
@@ -562,6 +601,11 @@ class ScreeningDialog(QDialog):
                  return
 
         # Prepare data for controller
+        # Get removal tracking values (0 means not entered, None if not applicable)
+        removed_pigmented = self.step_removed_pigmented.value() or None
+        removed_negative = self.step_removed_negative.value() or None
+        removed_other = self.step_removed_other.value() or None
+
         step_data = {
             "screening_datetime": screening_datetime_str,
             "dpf_screened": current_dpf_value,
@@ -569,6 +613,9 @@ class ScreeningDialog(QDialog):
             "criteria": criteria,
             "count_screened_this_step": count_screened, # Pass new field
             "number_positive": num_positive,
+            "number_removed_pigmented": removed_pigmented,
+            "number_removed_negative": removed_negative,
+            "number_removed_other": removed_other,
             "tricaine_used": self.step_tricaine_used.isChecked(),
             "notes": self.step_notes.text().strip() or None
         }
@@ -622,8 +669,12 @@ class ScreeningDialog(QDialog):
         self.step_indicator.clear(); self.step_indicator.setPlaceholderText("e.g., GFP, Pigment")
         self.step_criteria.clear(); self.step_criteria.setPlaceholderText("Brief description of criteria")
         self.step_notes.clear(); self.step_notes.setPlaceholderText("(Optional) Notes for this step")
-        self.step_count_screened.setValue(0) # Reset new field
+        self.step_count_screened.setValue(0)
         self.step_number_positive.setValue(0)
+        # Reset removal tracking fields
+        self.step_removed_pigmented.setValue(0)
+        self.step_removed_negative.setValue(0)
+        self.step_removed_other.setValue(0)
         self.step_tricaine_used.setChecked(False)
         # Trigger DPF update and suggestions based on current date/time
         self.update_dpf()

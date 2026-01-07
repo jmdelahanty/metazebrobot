@@ -1,12 +1,23 @@
 [project]
-dependencies = [] # Consider listing explicit dependencies here too
-description = "Add a short description here"
+dependencies = [
+  "PySide6>=6.8.1,<7",
+  "numpy>=2.2.3,<3",
+  "polars>=1.26.0,<2",
+  "pydantic>=2.10.5,<3",
+]
+description = "Laboratory inventory management for zebrafish research materials and dishes."
 name = "metazebrobot"
 requires-python = ">= 3.11"
 version = "0.1.0"
 
 [project.scripts]
 metazebrobot = "metazebrobot.cli:main"
+
+[project.optional-dependencies]
+api = [
+  "fastapi>=0.110,<1",
+  "uvicorn>=0.23,<1",
+]
 
 [build-system]
 build-backend = "hatchling.build"
@@ -15,6 +26,7 @@ requires = ["hatchling"]
 # Only one instance of this section needed
 [tool.hatch.build]
 packages = ["src/metazebrobot"]
+include = ["src/metazebrobot/config/**"]
 
 # --- Keep your pixi sections below ---
 [tool.pixi.project]
@@ -31,7 +43,7 @@ pyside6 = ">=6.8.1,<7"
 pydantic = ">=2.10.5,<3"
 numpy = ">=2.2.3,<3"
 rich = ">=13.9.4,<14"
-requests = ">=2.32.3,<3"
+requests = ">=2.32.5,<3"
 certifi = ">=2025.1.31,<2026"
 bs4 = ">=4.13.3,<5"
 cryptography = ">=44.0.2,<45"
@@ -40,3 +52,6 @@ lifelines = ">=0.30.0,<0.31"
 polars = ">=1.26.0,<2"
 # It's good practice to also list your build backend here for pixi
 hatchling = "*"
+fastapi = ">=0.128.0,<0.129"
+uvicorn = ">=0.40.0,<0.41"
+pytest = ">=9.0.2,<10"

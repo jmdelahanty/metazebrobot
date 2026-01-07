@@ -111,6 +111,9 @@ class ZebrobotMigrator:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_quality_checks_dish_id ON quality_checks(dish_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_quality_checks_check_time ON quality_checks(check_time)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_materials_type ON materials(material_type)")
+
+        # Unique constraint to prevent duplicate quality checks
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_quality_checks_unique ON quality_checks(dish_id, check_time)")
         
         self.conn.commit()
         

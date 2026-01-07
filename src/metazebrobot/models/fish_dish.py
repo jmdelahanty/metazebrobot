@@ -10,16 +10,16 @@ DishPopulationType = Literal["primary", "negative_screened", "positive_screened"
 
 class LightCycle(BaseModel):
     """Light cycle information for a fish dish."""
-    light_duration: str  # Format: "HH:MM"
-    dawn_dusk: str  # Format: "HH:MM"
+    light_duration: Optional[str] = None  # Format: "HH:MM"
+    dawn_dusk: Optional[str] = None  # Format: "HH:MM"
 
 
 class Enclosure(BaseModel):
     """Enclosure information for a fish dish."""
-    temperature: float = Field(ge=18, le=30)  # Temperature in Celsius
-    light_cycle: LightCycle
-    room: str = "2E.282"  # Default room
-    in_beaker: bool = False # Whether the fish are in a beaker
+    temperature: Optional[float] = Field(default=None, ge=18, le=30)  # Temperature in Celsius
+    light_cycle: Optional[LightCycle] = None
+    room: Optional[str] = "2E.282"  # Default room
+    in_beaker: Optional[bool] = False  # Whether the fish are in a beaker
     vol_water_total: Optional[int] = None  # Total volume of water in the enclosure
 
 
@@ -72,6 +72,10 @@ class ScreeningStep(BaseModel):
     count_screened_this_step: int = Field(..., ge=0, description="Total number of fish actually screened in this specific step")
     # --- FIELD KEPT ---
     number_positive: int = Field(..., ge=0, description="Number of fish positive for the indicator(s) in this step")
+    # --- REMOVAL TRACKING FIELDS ---
+    number_removed_pigmented: Optional[int] = Field(default=None, ge=0, description="Number removed due to pigmentation")
+    number_removed_negative: Optional[int] = Field(default=None, ge=0, description="Number removed for being negative for indicator")
+    number_removed_other: Optional[int] = Field(default=None, ge=0, description="Number removed for other reasons")
     # ---------------------
     tricaine_used: bool = False
     notes: Optional[str] = None
@@ -132,7 +136,7 @@ class FishDish(BaseModel):
     fish_count: int = Field(..., ge=0, description="Initial fish count when dish record created (can be an estimate)")
     # --- FIELDS ADDED ---
     parent_dish_id: Optional[str] = Field(default=None, description="ID of the dish this one was split from, if any")
-    dish_population_type: DishPopulationType = Field(default="primary", description="Type indicating lineage (e.g., primary, negative_screened)")
+    dish_population_type: Optional[DishPopulationType] = Field(default="primary", description="Type indicating lineage (e.g., primary, negative_screened)")
     # -------------------
     breeding: Breeding
     enclosure: Enclosure

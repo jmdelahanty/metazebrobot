@@ -21,25 +21,27 @@ The project follows a Model-View-Controller (MVC) architecture:
 ```
 metazebrobot/
 ├── src/
-│   ├── main.py                     # Application entry point
 │   ├── metazebrobot/
-│       ├── models/                 # Data models
-│       ├── controllers/            # Business logic
-│       ├── views/                  # UI components
-│       ├── data/                   # Data access layer
-│       └── utils/                  # Utility functions
+│   │   ├── cli.py                  # Application entry point
+│   │   ├── config/                 # Packaged JSON + image assets
+│   │   ├── models/                 # Data models
+│   │   ├── controllers/            # Business logic
+│   │   ├── views/                  # UI components
+│   │   ├── data/                   # Data access layer
+│   │   └── utils/                  # Utility functions
+├── bin/                            # Utility scripts
 ├── tests/                          # Test directory
-├── config.json                     # Configuration file
-└── tools/                          # Utility scripts and tools
-    ├── pyrat_query_tool.py         # PyRAT API tank query tool
-    └── get_all_user_ids.py         # PyRAT user mapping tool
+├── config.example.json             # Example user config
+├── pyrat_query_tool.py             # PyRAT API tank query tool
+├── get_all_user_ids.py             # PyRAT user mapping tool
+└── migrate_to_nosql.py             # JSON -> SQLite migration
 ```
 
 ## Installation
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.11+
 - PySide6 (Qt for Python)
 - Pydantic
 - Rich (for console output)
@@ -107,15 +109,57 @@ The analysis notebook is pretty bad, but its a start I guess. Density matters fo
 3. Create UI components in the `views` directory
 4. Update the `main_window.py` to integrate new components
 
+## Configuration
+
+Create a local `config.json` (see `config.example.json`) to point the app at your
+SQLite database. This file is user-specific and should not be committed.
+
+## Read-Only API (FastAPI)
+
+For remote reads (e.g., a rig machine), you can run a small read-only API that
+exposes dish data over HTTP while the SQLite file stays local to the host.
+
+Install API dependencies:
+
+```
+pip install .[api]
+```
+
+Run the service:
+
+```
+METAZEBROBOT_DB_PATH=/path/to/zebrobot.db \
+python -m metazebrobot.api_server --host 0.0.0.0 --port 8000
+```
+
+Example endpoints:
+
+- `GET /health`
+- `GET /dishes?status=active&limit=200&offset=0`
+- `GET /dishes/{dish_id}?include_checks=true`
+
+### systemd service (Ubuntu)
+
+An example unit file is provided at `deploy/metazebrobot-api.service`. Copy it to
+`/etc/systemd/system/`, edit the `User`, `WorkingDirectory`, and
+`METAZEBROBOT_DB_PATH`, then enable it:
+
+```
+sudo cp deploy/metazebrobot-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now metazebrobot-api.service
+```
+
 ## Data Structure
 
-The application uses JSON files for data storage:
+The application uses a SQLite database (`zebrobot.db`) for core data:
 
-- **Materials**: Stored in JSON files in the materials directory
-- **Fish Dishes**: Each dish has its own JSON file in the dishes directory
-- **PyRAT Data**: Query results from PyRAT can be saved as JSON files for analysis
+- **Dishes, crosses, materials, quality checks**: stored in SQLite tables
+- **JSON blobs** are retained in the DB for flexible record storage
+- **PyRAT data** query results can still be exported to JSON for analysis
 
-In the future, having a database instead is very obviously the right move especially as we do this more and more with ever greater numbers of fish, dishes, etc.
+The `migrate_to_nosql.py` script can migrate legacy JSON directories into the
+SQLite database.
 
 ## License
 

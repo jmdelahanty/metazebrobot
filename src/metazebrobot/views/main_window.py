@@ -6,11 +6,9 @@ This module provides the main application window and coordinates the tabs.
 
 import logging
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QTabWidget, QMessageBox,
-    QSystemTrayIcon, QMenu
+    QMainWindow, QWidget, QVBoxLayout, QTabWidget, QMessageBox
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
+from PySide6.QtGui import QAction
 
 from ..data.data_manager import data_manager
 from .agarose_tab import AgaroseTab
@@ -39,10 +37,7 @@ class LabInventoryGUI(QMainWindow):
         
         # Load data first
         self.load_data()
-        
-        # Create system tray icon
-        self.setup_system_tray()
-        
+
         # Initialize UI
         self.init_ui()
         
@@ -64,89 +59,10 @@ class LabInventoryGUI(QMainWindow):
                 f"There was an error loading data: {str(e)}\n\nStarting with empty datasets."
             )
             
-    def setup_system_tray(self):
-        """Setup the system tray icon and menu."""
-        # Create the system tray icon
-        self.tray_icon = QSystemTrayIcon(self)
-        
-        # Create a simple icon
-        icon = self.create_simple_icon()
-        self.tray_icon.setIcon(icon)
-        
-        # Create the menu
-        tray_menu = QMenu()
-        
-        # Add menu items
-        show_action = tray_menu.addAction("Show")
-        show_action.triggered.connect(self.show)
-        
-        hide_action = tray_menu.addAction("Hide")
-        hide_action.triggered.connect(self.hide)
-        
-        quit_action = tray_menu.addAction("Quit")
-        quit_action.triggered.connect(self.close_application)
-        
-        # Set the menu for the tray icon
-        self.tray_icon.setContextMenu(tray_menu)
-        
-        # Show a message when the icon is first displayed
-        self.tray_icon.showMessage(
-            "Lab Inventory",
-            "Application is running in the system tray",
-            QSystemTrayIcon.Information,
-            2000
-        )
-        
-        # Show the icon
-        self.tray_icon.show()
-        
-        # Connect double click to show/hide window
-        self.tray_icon.activated.connect(self.tray_icon_activated)
-        
-    def create_simple_icon(self):
-        """Create a colored square icon."""
-        # Create a pixmap
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
-        
-        # Create a painter
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # Draw a colored square with rounded corners
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(41, 128, 185))  # Nice blue color
-        painter.drawRoundedRect(0, 0, 32, 32, 8, 8)
-        
-        # End painting
-        painter.end()
-        
-        return QIcon(pixmap)
-        
-    def tray_icon_activated(self, reason):
-        """Handle tray icon activation."""
-        if reason == QSystemTrayIcon.DoubleClick:
-            if self.isVisible():
-                self.hide()
-            else:
-                self.show()
-                self.raise_()  # Bring window to front
-                self.activateWindow()
-                
     def closeEvent(self, event):
-        """Override close event to minimize to tray instead of closing."""
-        if self.tray_icon.isVisible():
-            self.hide()
-            self.tray_icon.showMessage(
-                "Lab Inventory",
-                "Application minimized to tray",
-                QSystemTrayIcon.Information,
-                2000
-            )
-            event.ignore()
-        else:
-            self.close_application()
-            event.accept()
+        """Override close event to quit the application."""
+        self.close_application()
+        event.accept()
             
     def close_application(self):
         """Close the application properly."""

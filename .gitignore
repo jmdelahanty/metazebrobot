@@ -1,7 +1,11 @@
 # Ignore logs and data files
 *.log
-*.json
 *.csv
+*.db
+*.db.*
+*.sqlite
+*.sqlite3
+config.json
 
 # Ignore ipynb checkpoints
 .ipynb_checkpoints/

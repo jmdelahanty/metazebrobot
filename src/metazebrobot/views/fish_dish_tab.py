@@ -234,6 +234,10 @@ class FishDishTab(QWidget):
         self.manage_screening_button.setEnabled(False)
         self.manage_screening_button.clicked.connect(self.show_screening_dialog)
         filter_layout.addWidget(self.manage_screening_button)
+        self.terminate_dish_button = QPushButton("Terminate Dish")
+        self.terminate_dish_button.setEnabled(False)
+        self.terminate_dish_button.clicked.connect(self.show_termination_dialog_for_selected)
+        filter_layout.addWidget(self.terminate_dish_button)
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
@@ -314,9 +318,11 @@ class FishDishTab(QWidget):
 
     @Slot()
     def handle_table_selection_change(self):
-        """Enable/disable the screening button based on table selection."""
+        """Enable/disable action buttons based on table selection."""
         selected_items = self.dishes_table.selectedItems()
-        self.manage_screening_button.setEnabled(len(selected_items) > 0)
+        has_selection = len(selected_items) > 0
+        self.manage_screening_button.setEnabled(has_selection)
+        self.terminate_dish_button.setEnabled(has_selection)
 
     def handle_header_click(self, column):
         """Handle clicks on the table header for sorting."""
@@ -368,6 +374,26 @@ class FishDishTab(QWidget):
         except Exception as e:
             logger.error(f"Error showing/updating termination dialog: {str(e)}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Error updating dish status: {str(e)}")
+
+    @Slot()
+    def show_termination_dialog_for_selected(self):
+        """Show termination dialog for the currently selected dish."""
+        selected_rows = self.dishes_table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "No Selection", "Please select a dish from the table first.")
+            return
+
+        try:
+            selected_row = selected_rows[0].row()
+            dish_id_item = self.dishes_table.item(selected_row, 0)
+            if not dish_id_item:
+                QMessageBox.critical(self, "Error", "Could not determine Dish ID for the selected row.")
+                return
+            dish_id = dish_id_item.text()
+            self.show_termination_dialog(dish_id)
+        except Exception as e:
+            logger.error(f"Error showing termination dialog for selected: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Could not open termination dialog: {e}")
 
     def show_quality_check_dialog(self, dish_id):
         """Show the quality check dialog for a dish."""

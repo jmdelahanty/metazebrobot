@@ -11,7 +11,7 @@ from typing import Optional, List, Literal, Dict, Any, Tuple
 from pydantic import BaseModel, Field, field_validator, computed_field
 
 # Define allowed cross types using Literal for validation
-CrossType = Literal["Standard", "Transgenic"]
+CrossType = Literal["Standard", "Transgenic", "unknown"]
 
 class Parent(BaseModel):
     """Represents a parent fish used in a cross."""
@@ -89,8 +89,8 @@ class Cross(BaseModel):
     request_date: str = Field(..., description="Date the cross was requested/set up (YYYYMMDD)")
     responsible_requestor: str = Field(..., description="Person who requested or is responsible for the cross")
     line_strain: str = Field(..., description="Overall description of the cross, potentially including multiple components e.g., 'Tg(gfap:TRPV1-T2A-GFP); Tg(elavl3:jRGECO1b)'")
-    parents: Tuple[Parent, Parent] = Field(..., description="Tuple containing exactly two parents used in the cross")
-    requested_groups: int = Field(..., ge=0, description="Number of dishes/groups requested for this cross")
+    parents: Optional[Tuple[Parent, Parent]] = Field(default=None, description="Tuple containing exactly two parents used in the cross")
+    requested_groups: Optional[int] = Field(default=None, ge=0, description="Number of dishes/groups requested for this cross")
     groups_produced: Optional[int] = Field(
         default=None,
         ge=0,
@@ -99,7 +99,7 @@ class Cross(BaseModel):
     cross_type: CrossType = Field(..., description="Type of cross (Standard or Transgenic)")
     notes: Optional[str] = Field(default=None, description="General notes about the cross request or setup")
     transgenic_details: Optional[TransgenicDetails] = Field(default=None, description="Structured details for transgenic crosses, null otherwise")
-    cross_status: Optional[Literal["Requested", "Performed", "Screening", "Completed", "Archived"]] = Field(default="Requested", description="Overall status of the cross")
+    cross_status: Optional[Literal["Requested", "Performed", "Screening", "Completed", "Archived", "unknown"]] = Field(default="Requested", description="Overall status of the cross")
     # --- FIELD ADDED to link AggregateResults directly if not transgenic ---
     aggregate_results: Optional[AggregateResults] = Field(default=None, description="Aggregated screening results across all dishes (filled in later, used if not transgenic)") # Consider if this duplicates transgenic_details.aggregate_results
 
@@ -118,7 +118,7 @@ class Cross(BaseModel):
 
     @field_validator('parents')
     @classmethod
-    def check_parents_length(cls, v: Tuple[Parent, Parent]) -> Tuple[Parent, Parent]:
+    def check_parents_length(cls, v: Optional[Tuple[Parent, Parent]]) -> Optional[Tuple[Parent, Parent]]:
         """
         Validate the parents tuple.
 
@@ -127,8 +127,10 @@ class Cross(BaseModel):
         This validator runs after that initial check and can be used for more complex
         logic if needed in the future.
         """
-        if len(v) != 2: # Explicit length check for robustness
-             raise ValueError("Exactly two parents are required.")
+        if v is None:
+            return None
+        if len(v) != 2:  # Explicit length check for robustness
+            raise ValueError("Exactly two parents are required.")
         if v[0].identifier == v[1].identifier:
             raise ValueError("Parents must have different identifiers.")
         return v
