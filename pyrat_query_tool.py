@@ -6,18 +6,23 @@ Retrieves tanks from the PyRAT API with flexible filtering options.
 Can filter tanks by responsible user (looking up the ID automatically),
 location, status, and other parameters.
 
+Credentials can be stored securely in your system keyring. Run with
+--setup-credentials to store them once, then use without specifying tokens.
+
 Usage examples:
-  # Get all tanks for a specific user
-  python get_pyrat_tanks.py https://pyrataquatics.janelia.org/aquatic-test/ "client-token" "user-token" --responsible "ahrensm"
-  
-  # Get tanks in a specific rack for a user
-  python get_pyrat_tanks.py https://pyrataquatics.janelia.org/aquatic-test/ "client-token" "user-token" --responsible "ahrensm" --rack "R101.2"
-  
-  # Get tanks with specific status
-  python get_pyrat_tanks.py https://pyrataquatics.janelia.org/aquatic-test/ "client-token" "user-token" --status "open"
-  
+  # First time: store credentials in system keyring
+  python pyrat_query_tool.py --setup-credentials
+
+  # Then query without specifying credentials
+  python pyrat_query_tool.py --responsible "ahrensm"
+  python pyrat_query_tool.py --responsible "ahrensm" --rack "R101.2"
+  python pyrat_query_tool.py --status "open"
+
+  # Or override with explicit credentials
+  python pyrat_query_tool.py --base-url "https://..." --client-token "..." --user-token "..." --responsible "ahrensm"
+
   # Save output to a JSON file
-  python get_pyrat_tanks.py https://pyrataquatics.janelia.org/aquatic-test/ "client-token" "user-token" --responsible "ahrensm" --output tanks.json
+  python pyrat_query_tool.py --responsible "ahrensm" --output tanks.json
 """
 
 import os
@@ -25,12 +30,167 @@ import sys
 import json
 import argparse
 import requests
+import keyring
+import getpass
 from urllib.parse import urljoin
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Tuple
 from rich.console import Console
 from rich import print as rprint
+
+# Keyring service name for storing PyRAT credentials
+KEYRING_SERVICE = "pyrat-api"
+
+
+def setup_credentials(console: Console) -> bool:
+    """
+    Interactively set up PyRAT API credentials in the system keyring.
+
+    Args:
+        console: Rich console for output
+
+    Returns:
+        True if credentials were saved successfully
+    """
+    console.print("\n[bold blue]PyRAT API Credential Setup[/bold blue]")
+    console.print("Credentials will be stored securely in your system keyring.\n")
+
+    # Check for existing credentials
+    existing_url = keyring.get_password(KEYRING_SERVICE, "base_url")
+    if existing_url:
+        console.print(f"[yellow]Existing credentials found for: {existing_url}[/yellow]")
+        overwrite = input("Overwrite existing credentials? [y/N]: ").strip().lower()
+        if overwrite != 'y':
+            console.print("[dim]Setup cancelled.[/dim]")
+            return False
+
+    # Get credentials from user
+    console.print("[dim]Enter your PyRAT API credentials:[/dim]\n")
+
+    base_url = input("Base URL [https://pyrataquatics.janelia.org/aquatic/]: ").strip()
+    if not base_url:
+        base_url = "https://pyrataquatics.janelia.org/aquatic/"
+
+    console.print("[dim]Client token format: ClientId-ClientKey (e.g., myapp123-secretkey456)[/dim]")
+    client_token = getpass.getpass("Client Token: ")
+    if not client_token:
+        console.print("[bold red]Error: Client token is required[/bold red]")
+        return False
+
+    console.print("[dim]User token: Your personal API token from PyRAT[/dim]")
+    user_token = getpass.getpass("User Token: ")
+    if not user_token:
+        console.print("[bold red]Error: User token is required[/bold red]")
+        return False
+
+    # Store in keyring
+    try:
+        keyring.set_password(KEYRING_SERVICE, "base_url", base_url)
+        keyring.set_password(KEYRING_SERVICE, "client_token", client_token)
+        keyring.set_password(KEYRING_SERVICE, "user_token", user_token)
+
+        console.print("\n[bold green]✓ Credentials saved to system keyring![/bold green]")
+        console.print(f"[dim]Service: {KEYRING_SERVICE}[/dim]")
+        console.print(f"[dim]Base URL: {base_url}[/dim]")
+        console.print("\n[cyan]You can now run queries without specifying credentials:[/cyan]")
+        console.print("[dim]  python pyrat_query_tool.py --responsible \"username\"[/dim]\n")
+        return True
+    except Exception as e:
+        console.print(f"[bold red]Error saving credentials: {e}[/bold red]")
+        return False
+
+
+def get_credentials(console: Console,
+                    cli_base_url: Optional[str] = None,
+                    cli_client_token: Optional[str] = None,
+                    cli_user_token: Optional[str] = None) -> Optional[Dict[str, str]]:
+    """
+    Get PyRAT API credentials from CLI args, environment, or keyring.
+
+    Priority order:
+    1. CLI arguments (if all three provided)
+    2. Environment variables (PYRAT_BASE_URL, PYRAT_CLIENT_TOKEN, PYRAT_USER_TOKEN)
+    3. System keyring
+
+    Args:
+        console: Rich console for output
+        cli_base_url: Base URL from CLI args
+        cli_client_token: Client token from CLI args
+        cli_user_token: User token from CLI args
+
+    Returns:
+        Dict with base_url, client_token, user_token or None if not found
+    """
+    # 1. Check CLI arguments
+    if cli_base_url and cli_client_token and cli_user_token:
+        console.print("[dim]Using credentials from command line arguments[/dim]\n")
+        return {
+            "base_url": cli_base_url,
+            "client_token": cli_client_token,
+            "user_token": cli_user_token
+        }
+
+    # 2. Check environment variables
+    env_base_url = os.environ.get("PYRAT_BASE_URL")
+    env_client_token = os.environ.get("PYRAT_CLIENT_TOKEN")
+    env_user_token = os.environ.get("PYRAT_USER_TOKEN")
+
+    if env_base_url and env_client_token and env_user_token:
+        console.print("[dim]Using credentials from environment variables[/dim]\n")
+        return {
+            "base_url": env_base_url,
+            "client_token": env_client_token,
+            "user_token": env_user_token
+        }
+
+    # 3. Check system keyring
+    try:
+        kr_base_url = keyring.get_password(KEYRING_SERVICE, "base_url")
+        kr_client_token = keyring.get_password(KEYRING_SERVICE, "client_token")
+        kr_user_token = keyring.get_password(KEYRING_SERVICE, "user_token")
+
+        if kr_base_url and kr_client_token and kr_user_token:
+            console.print("[dim]Using credentials from system keyring[/dim]\n")
+            return {
+                "base_url": kr_base_url,
+                "client_token": kr_client_token,
+                "user_token": kr_user_token
+            }
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not access keyring: {e}[/yellow]")
+
+    return None
+
+
+def clear_credentials(console: Console) -> bool:
+    """
+    Remove PyRAT API credentials from the system keyring.
+
+    Args:
+        console: Rich console for output
+
+    Returns:
+        True if credentials were cleared successfully
+    """
+    try:
+        # Check if credentials exist
+        existing = keyring.get_password(KEYRING_SERVICE, "base_url")
+        if not existing:
+            console.print("[yellow]No credentials found in keyring[/yellow]")
+            return True
+
+        # Delete each credential
+        keyring.delete_password(KEYRING_SERVICE, "base_url")
+        keyring.delete_password(KEYRING_SERVICE, "client_token")
+        keyring.delete_password(KEYRING_SERVICE, "user_token")
+
+        console.print("[bold green]✓ Credentials removed from system keyring[/bold green]")
+        return True
+    except Exception as e:
+        console.print(f"[bold red]Error clearing credentials: {e}[/bold red]")
+        return False
+
 
 def get_user_id(base_url: str, client_token: str, user_token: str, 
                 identifier: str, verify_ssl: bool = False) -> Optional[int]:
@@ -548,40 +708,105 @@ def print_tank_summary(tanks: List[Dict[str, Any]],
 
 def main() -> None:
     """Main function to run the script."""
-    parser = argparse.ArgumentParser(description='Query PyRAT API for tanks with flexible filtering')
-    parser.add_argument('base_url', help='Base URL of the PyRAT instance')
-    parser.add_argument('client_token', help='API-Client-Token (formatted as API-Client-Id-API-Client-Key)')
-    parser.add_argument('user_token', help='API-User-Token')
-    parser.add_argument('--responsible', help='Responsible person identifier (full name or username)')
-    parser.add_argument('--responsible-id', type=int, help='Responsible person ID (if known)')
-    parser.add_argument('--rack', help='Rack name')
-    parser.add_argument('--room', help='Room name')
-    parser.add_argument('--area', help='Area name')
-    parser.add_argument('--building', help='Building name')
-    parser.add_argument('--status', help='Tank status (open, closed, exported, joined)')
-    parser.add_argument('--strain', help='Strain name')
-    parser.add_argument('--max-age-days', type=int, help='Maximum age of tanks in days')
-    parser.add_argument('--min-age-days', type=int, help='Minimum age of tanks in days')
-    parser.add_argument('--limit', type=int, default=10000, help='Maximum number of results to return')
+    parser = argparse.ArgumentParser(
+        description='Query PyRAT API for tanks with flexible filtering',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Credential sources (checked in order):
+  1. Command line arguments (--base-url, --client-token, --user-token)
+  2. Environment variables (PYRAT_BASE_URL, PYRAT_CLIENT_TOKEN, PYRAT_USER_TOKEN)
+  3. System keyring (run --setup-credentials to store)
+
+Examples:
+  # Set up credentials (one time)
+  %(prog)s --setup-credentials
+
+  # Query tanks
+  %(prog)s --responsible "ahrensm"
+  %(prog)s --responsible "ahrensm" --rack "R101.2" --status "open"
+  %(prog)s --responsible "ahrensm" --output tanks.json
+"""
+    )
+
+    # Credential management
+    cred_group = parser.add_argument_group('credential management')
+    cred_group.add_argument('--setup-credentials', action='store_true',
+                           help='Interactively set up and store API credentials in system keyring')
+    cred_group.add_argument('--clear-credentials', action='store_true',
+                           help='Remove stored credentials from system keyring')
+
+    # Optional credential overrides (no longer positional)
+    cred_group.add_argument('--base-url', help='Base URL of the PyRAT instance')
+    cred_group.add_argument('--client-token', help='API client token (format: ClientId-ClientKey)')
+    cred_group.add_argument('--user-token', help='API-User-Token')
+
+    # Tank filters
+    filter_group = parser.add_argument_group('tank filters')
+    filter_group.add_argument('--responsible', help='Responsible person identifier (full name or username)')
+    filter_group.add_argument('--responsible-id', type=int, help='Responsible person ID (if known)')
+    filter_group.add_argument('--rack', help='Rack name')
+    filter_group.add_argument('--room', help='Room name')
+    filter_group.add_argument('--area', help='Area name')
+    filter_group.add_argument('--building', help='Building name')
+    filter_group.add_argument('--status', help='Tank status (open, closed, exported, joined)')
+    filter_group.add_argument('--strain', help='Strain name')
+    filter_group.add_argument('--max-age-days', type=int, help='Maximum age of tanks in days')
+    filter_group.add_argument('--min-age-days', type=int, help='Minimum age of tanks in days')
+
+    # Output options
+    output_group = parser.add_argument_group('output options')
+    output_group.add_argument('--limit', type=int, default=10000, help='Maximum number of results to return')
+    output_group.add_argument('--output', help='Output file for the results (JSON format)')
+    output_group.add_argument('--verbose', '-v', action='store_true', help='Show detailed output')
+
+    # Other options
     parser.add_argument('--verify-ssl', action='store_true', help='Enable SSL certificate verification')
-    parser.add_argument('--output', help='Output file for the results (JSON format)')
-    parser.add_argument('--user-mapping', default='~/.pyrat_user_mapping.json', help='JSON file containing username:userid mappings')
-    parser.add_argument('--refresh-mapping', action='store_true',help='Refresh user mapping with data from API')
-    parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed output')
-    
+    parser.add_argument('--user-mapping', default='~/.pyrat_user_mapping.json',
+                       help='JSON file containing username:userid mappings')
+    parser.add_argument('--refresh-mapping', action='store_true', help='Refresh user mapping with data from API')
+
     args = parser.parse_args()
-    
+
     # Create rich console
     console = Console()
-    
+
+    # Handle credential management commands
+    if args.setup_credentials:
+        success = setup_credentials(console)
+        sys.exit(0 if success else 1)
+
+    if args.clear_credentials:
+        success = clear_credentials(console)
+        sys.exit(0 if success else 1)
+
+    # Get credentials from available sources
+    credentials = get_credentials(
+        console,
+        cli_base_url=args.base_url,
+        cli_client_token=args.client_token,
+        cli_user_token=args.user_token
+    )
+
+    if not credentials:
+        console.print("[bold red]Error: No credentials found![/bold red]")
+        console.print("\nPlease provide credentials via one of these methods:")
+        console.print("  1. Run [cyan]--setup-credentials[/cyan] to store in system keyring")
+        console.print("  2. Set environment variables: PYRAT_BASE_URL, PYRAT_CLIENT_TOKEN, PYRAT_USER_TOKEN")
+        console.print("  3. Pass [cyan]--base-url[/cyan], [cyan]--client-token[/cyan], [cyan]--user-token[/cyan] arguments")
+        sys.exit(1)
+
+    base_url = credentials["base_url"]
+    client_token = credentials["client_token"]
+    user_token = credentials["user_token"]
+
     # Configure request verification
     verify_ssl = args.verify_ssl
     if not verify_ssl:
         console.print("[yellow]\n⚠️   SSL certificate verification is disabled[/yellow]\n")
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    
-    console.print(f"[bold blue]Connecting to:[/bold blue] {args.base_url}\n")
+
+    console.print(f"[bold blue]Connecting to:[/bold blue] {base_url}\n")
     
     # Initialize filters
     filters = {}
@@ -592,9 +817,9 @@ def main() -> None:
     # Load and potentially update user mapping
     user_mapping = load_and_update_user_mapping(
         user_mapping_path,
-        args.base_url if args.refresh_mapping else None,
-        args.client_token if args.refresh_mapping else None,
-        args.user_token if args.refresh_mapping else None,
+        base_url if args.refresh_mapping else None,
+        client_token if args.refresh_mapping else None,
+        user_token if args.refresh_mapping else None,
         args.refresh_mapping,
         verify_ssl,
         console
@@ -615,7 +840,7 @@ def main() -> None:
             console.print(f"[green]Found user ID {user_id} for {args.responsible} in mapping file[/green]\n")
         else:
             # Fall back to API lookup if not in mapping
-            user_id = get_user_id(args.base_url, args.client_token, args.user_token, args.responsible, verify_ssl)
+            user_id = get_user_id(base_url, client_token, user_token, args.responsible, verify_ssl)
             
             # If found via API, add to mapping and save
             if user_id is not None and args.responsible:
@@ -673,12 +898,13 @@ def main() -> None:
     # Get the tanks
     console.print(f"[bold]Querying tanks from PyRAT API...[/bold]")
     all_tanks = get_tanks(
-        args.base_url, 
-        args.client_token, 
-        args.user_token, 
+        base_url,
+        client_token,
+        user_token,
         filters,
         args.limit,
-        verify_ssl=verify_ssl
+        verify_ssl=verify_ssl,
+        console=console
     )
     
     if all_tanks:

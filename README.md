@@ -71,16 +71,16 @@ The `pyrat_query_tool.py` script provides a flexible way to query the PyRAT API 
 
 ```bash
 # Get all tanks for a specific user
-python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic-test/ "client-token" "user-token" --responsible "delahantyj"
+python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic/ "client-token" "user-token" --responsible "delahantyj"
 
 # Get tanks in a specific rack
-python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic-test/ "client-token" "user-token" --rack "M08"
+python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic/ "client-token" "user-token" --rack "M08"
 
 # Filter by age
-python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic-test/ "client-token" "user-token" --min-age-days 90 --max-age-days 180
+python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic/ "client-token" "user-token" --min-age-days 90 --max-age-days 180
 
 # Save results to a JSON file
-python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic-test/ "client-token" "user-token" --output tanks.json
+python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic/ "client-token" "user-token" --output tanks.json
 ```
 
 Features:
@@ -95,7 +95,7 @@ Features:
 The `get_all_user_ids.py` script creates a mapping between usernames and user IDs:
 
 ```bash
-python get_all_user_ids.py https://pyrataquatics.janelia.org/aquatic-test/ "client-token" "user-token" --output user_mapping.json
+python get_all_user_ids.py https://pyrataquatics.janelia.org/aquatic/ "client-token" "user-token" --output user_mapping.json
 ```
 
 ### Shoddy analysis notebook

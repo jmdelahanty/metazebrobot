@@ -185,6 +185,8 @@ class DataManager:
                     cursor.execute("ALTER TABLE crosses ADD COLUMN notes TEXT")
                 if 'parents' not in crosses_columns:
                     cursor.execute("ALTER TABLE crosses ADD COLUMN parents TEXT")  # JSON array
+                # TODO: If incross queries become common, consider adding an indexed is_incross column
+                # derived from parents length to avoid JSON parsing in SQLite queries.
 
                 # Phase 3: Add remaining columns to dishes table for full flattening
                 # Re-fetch dishes columns after previous changes

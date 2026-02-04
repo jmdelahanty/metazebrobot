@@ -6,6 +6,7 @@ including calculating aggregate results based on screening data.
 """
 
 import logging
+from typing import Literal, get_args, get_origin
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple, Callable
 
@@ -402,9 +403,17 @@ class CrossController:
         logger.info(f"Attempting to update status for cross {cross_id} to {new_status}")
 
         # Validate the new status against the allowed values from the model
-        allowed_statuses = list(Cross.model_fields['cross_status'].annotation.__args__)
+        annotation = Cross.model_fields['cross_status'].annotation
+        allowed_statuses: List[str] = []
+        if get_origin(annotation) is Literal:
+            allowed_statuses = [v for v in get_args(annotation) if isinstance(v, str)]
+        else:
+            for arg in get_args(annotation):
+                if get_origin(arg) is Literal:
+                    allowed_statuses.extend([v for v in get_args(arg) if isinstance(v, str)])
         if new_status not in allowed_statuses:
-            message = f"Invalid status '{new_status}'. Must be one of: {', '.join(allowed_statuses)}"
+            status_list = ", ".join(allowed_statuses) if allowed_statuses else "unknown"
+            message = f"Invalid status '{new_status}'. Must be one of: {status_list}"
             logger.error(message)
             return False, message
 

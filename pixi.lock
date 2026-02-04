@@ -23,6 +23,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/autograd-1.7.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/autograd-gamma-0.5.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/babel-2.17.0-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/backports-1.0-pyhd8ed1ab_5.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/backports.tarfile-1.2.0-pyhcf101f3_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/beautifulsoup4-4.13.3-pyha770c72_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/bleach-6.2.0-pyh29332c3_4.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/bleach-with-css-6.2.0-h82add2a_4.conda
@@ -92,7 +94,11 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/ipython-9.0.2-pyhfb0248b_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ipython_pygments_lexers-1.1.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/isoduration-20.11.0-pyhd8ed1ab_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/jaraco.classes-3.4.0-pyhcf101f3_3.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/jaraco.context-6.1.0-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/jaraco.functools-4.4.0-pyhcf101f3_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/jedi-0.19.2-pyhd8ed1ab_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/jeepney-0.9.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/jinja2-3.1.6-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/json5-0.10.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/jsonpointer-3.0.0-py312h7900ff3_1.conda
@@ -108,6 +114,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/jupyterlab-4.3.6-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/jupyterlab_pygments-0.3.0-pyhd8ed1ab_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/jupyterlab_server-2.27.3-pyhd8ed1ab_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/keyring-25.7.0-pyha804496_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/keyutils-1.6.1-h166bdaf_0.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/linux-64/kiwisolver-1.4.8-py312h84d6215_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/krb5-1.21.3-h659f571_0.conda
@@ -170,6 +177,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/matplotlib-inline-0.1.7-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mistune-3.1.3-pyh29332c3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-10.8.0-pyhcf101f3_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyh9f0ad1d_0.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mysql-common-9.0.1-h266115a_5.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mysql-libs-9.0.1-he0572af_5.conda
@@ -236,6 +244,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/rich-toolkit-0.17.1-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/rpds-py-0.24.0-py312h3b7be25_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/scipy-1.15.2-py312ha707e6e_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/secretstorage-3.4.1-py312h7900ff3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/send2trash-1.8.3-pyh0d859eb_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/setuptools-75.8.2-pyhff2d567_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/shellingham-1.5.4-pyhd8ed1ab_2.conda
@@ -507,6 +516,29 @@ packages:
   - pkg:pypi/babel?source=compressed-mapping
   size: 6938256
   timestamp: 1738490268466
+- conda: https://conda.anaconda.org/conda-forge/noarch/backports-1.0-pyhd8ed1ab_5.conda
+  sha256: e1c3dc8b5aa6e12145423fed262b4754d70fec601339896b9ccf483178f690a6
+  md5: 767d508c1a67e02ae8f50e44cacfadb2
+  depends:
+  - python >=3.9
+  license: BSD-3-Clause
+  license_family: BSD
+  purls: []
+  size: 7069
+  timestamp: 1733218168786
+- conda: https://conda.anaconda.org/conda-forge/noarch/backports.tarfile-1.2.0-pyhcf101f3_2.conda
+  sha256: 25abdb37e186f0d6ac3b774a63c81c5bc4bf554b5096b51343fa5e7c381193b1
+  md5: bea46844deb274b2cc2a3a941745fa73
+  depends:
+  - python >=3.10
+  - backports
+  - python
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/backports-tarfile?source=hash-mapping
+  size: 35739
+  timestamp: 1767290467820
 - conda: https://conda.anaconda.org/conda-forge/noarch/beautifulsoup4-4.13.3-pyha770c72_0.conda
   sha256: 4ce42860292a57867cfc81a5d261fb9886fc709a34eca52164cc8bbf6d03de9f
   md5: 373374a3ed20141090504031dc7b693e
@@ -1431,6 +1463,45 @@ packages:
   - pkg:pypi/isoduration?source=hash-mapping
   size: 19832
   timestamp: 1733493720346
+- conda: https://conda.anaconda.org/conda-forge/noarch/jaraco.classes-3.4.0-pyhcf101f3_3.conda
+  sha256: 3cc991f0f09dfd00d2626e745ba68da03e4f1dcbb7b36dd20f7a7373643cd5d5
+  md5: d59568bad316413c89831456e691de29
+  depends:
+  - python >=3.10
+  - more-itertools
+  - python
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/jaraco-classes?source=hash-mapping
+  size: 14831
+  timestamp: 1767294269456
+- conda: https://conda.anaconda.org/conda-forge/noarch/jaraco.context-6.1.0-pyhcf101f3_0.conda
+  sha256: 04c9f919dcc9edd18f748c47d809479812429af27c43c5562a861df22d5bda6a
+  md5: f34ec3aa0ea911a038d973d97603faf3
+  depends:
+  - python >=3.10
+  - backports.tarfile
+  - python
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/jaraco-context?source=hash-mapping
+  size: 15566
+  timestamp: 1768299702258
+- conda: https://conda.anaconda.org/conda-forge/noarch/jaraco.functools-4.4.0-pyhcf101f3_1.conda
+  sha256: 6a91447b3bb4d7ae94cc0d77ed12617796629aee11111efe7ea43cbd0e113bda
+  md5: aa83cc08626bf6b613a3103942be8951
+  depends:
+  - python >=3.10
+  - more-itertools
+  - python
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/jaraco-functools?source=hash-mapping
+  size: 18744
+  timestamp: 1767294193246
 - conda: https://conda.anaconda.org/conda-forge/noarch/jedi-0.19.2-pyhd8ed1ab_1.conda
   sha256: 92c4d217e2dc68983f724aa983cca5464dcb929c566627b26a2511159667dba8
   md5: a4f4c5dc9b80bc50e0d3dc4e6e8f1bd9
@@ -1442,6 +1513,17 @@ packages:
   - pkg:pypi/jedi?source=hash-mapping
   size: 843646
   timestamp: 1733300981994
+- conda: https://conda.anaconda.org/conda-forge/noarch/jeepney-0.9.0-pyhd8ed1ab_0.conda
+  sha256: 00d37d85ca856431c67c8f6e890251e7cc9e5ef3724a0302b8d4a101f22aa27f
+  md5: b4b91eb14fbe2f850dd2c5fc20676c0d
+  depends:
+  - python >=3.9
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/jeepney?source=hash-mapping
+  size: 40015
+  timestamp: 1740828380668
 - conda: https://conda.anaconda.org/conda-forge/noarch/jinja2-3.1.6-pyhd8ed1ab_0.conda
   sha256: f1ac18b11637ddadc05642e8185a851c7fab5998c6f5470d716812fae943b2af
   md5: 446bd6c8cb26050d528881df495ce646
@@ -1690,6 +1772,25 @@ packages:
   - pkg:pypi/jupyterlab-server?source=hash-mapping
   size: 49449
   timestamp: 1733599666357
+- conda: https://conda.anaconda.org/conda-forge/noarch/keyring-25.7.0-pyha804496_0.conda
+  sha256: 010718b1b1a35ce72782d38e6d6b9495d8d7d0dbea9a3e42901d030ff2189545
+  md5: 9eeb0eaf04fa934808d3e070eebbe630
+  depends:
+  - __linux
+  - importlib-metadata >=4.11.4
+  - importlib_resources
+  - jaraco.classes
+  - jaraco.context
+  - jaraco.functools
+  - jeepney >=0.4.2
+  - python >=3.10
+  - secretstorage >=3.2
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/keyring?source=hash-mapping
+  size: 37717
+  timestamp: 1763320674488
 - conda: https://conda.anaconda.org/conda-forge/linux-64/keyutils-1.6.1-h166bdaf_0.tar.bz2
   sha256: 150c05a6e538610ca7c43beb3a40d65c90537497a4f6a5f4d15ec0451b6f5ebb
   md5: 30186d27e2c9fa62b45fb1476b7200e3
@@ -2460,7 +2561,7 @@ packages:
 - pypi: .
   name: metazebrobot
   version: 0.1.0
-  sha256: 6c01c0457d183b0fecfc9dd9884962d190739e6869eaa2826f20bfe3945f3465
+  sha256: af3a4f21d0cc3611f5da68a2927d54d93828e80c312e8b52b407b91783211e2a
   requires_dist:
   - pyside6>=6.8.1,<7
   - numpy>=2.2.3,<3
@@ -2483,6 +2584,18 @@ packages:
   - pkg:pypi/mistune?source=hash-mapping
   size: 72749
   timestamp: 1742402716323
+- conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-10.8.0-pyhcf101f3_1.conda
+  sha256: 449609f0d250607a300754474350a3b61faf45da183d3071e9720e453c765b8a
+  md5: 32f78e9d06e8593bc4bbf1338da06f5f
+  depends:
+  - python >=3.10
+  - python
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/more-itertools?source=hash-mapping
+  size: 69210
+  timestamp: 1764487059562
 - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyh9f0ad1d_0.tar.bz2
   sha256: f86fb22b58e93d04b6f25e0d811b56797689d598788b59dcb47f59045b568306
   md5: 2ba8498c1018c1e9c61eb99b973dfe19
@@ -3461,6 +3574,21 @@ packages:
   - pkg:pypi/scipy?source=hash-mapping
   size: 17064784
   timestamp: 1739791925628
+- conda: https://conda.anaconda.org/conda-forge/linux-64/secretstorage-3.4.1-py312h7900ff3_0.conda
+  sha256: 021c855a26b670bf0d437a9888ea8e302a454a7d1abd08d0df3b91d2b9b22769
+  md5: 1b7706e1fb4e1c6cdb6eab38d69b2fc0
+  depends:
+  - cryptography >=2.0
+  - dbus
+  - jeepney >=0.6
+  - python >=3.12,<3.13.0a0
+  - python_abi 3.12.* *_cp312
+  license: BSD-3-Clause
+  license_family: BSD
+  purls:
+  - pkg:pypi/secretstorage?source=hash-mapping
+  size: 32525
+  timestamp: 1763045447326
 - conda: https://conda.anaconda.org/conda-forge/noarch/send2trash-1.8.3-pyh0d859eb_1.conda
   sha256: 00926652bbb8924e265caefdb1db100f86a479e8f1066efe395d5552dde54d02
   md5: 938c8de6b9de091997145b3bf25cdbf9

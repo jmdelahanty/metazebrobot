@@ -6,7 +6,7 @@ and details specific to transgenic crosses.
 """
 
 from datetime import datetime
-from typing import Optional, List, Literal, Dict, Any, Tuple
+from typing import Optional, List, Literal, Dict, Any
 # Use computed_field from Pydantic v2 if available
 from pydantic import BaseModel, Field, field_validator, computed_field
 
@@ -89,7 +89,7 @@ class Cross(BaseModel):
     request_date: str = Field(..., description="Date the cross was requested/set up (YYYYMMDD)")
     responsible_requestor: str = Field(..., description="Person who requested or is responsible for the cross")
     line_strain: str = Field(..., description="Overall description of the cross, potentially including multiple components e.g., 'Tg(gfap:TRPV1-T2A-GFP); Tg(elavl3:jRGECO1b)'")
-    parents: Optional[Tuple[Parent, Parent]] = Field(default=None, description="Tuple containing exactly two parents used in the cross")
+    parents: Optional[List[Parent]] = Field(default=None, description="List containing one or two parents used in the cross")
     requested_groups: Optional[int] = Field(default=None, ge=0, description="Number of dishes/groups requested for this cross")
     groups_produced: Optional[int] = Field(
         default=None,
@@ -118,20 +118,18 @@ class Cross(BaseModel):
 
     @field_validator('parents')
     @classmethod
-    def check_parents_length(cls, v: Optional[Tuple[Parent, Parent]]) -> Optional[Tuple[Parent, Parent]]:
+    def check_parents_length(cls, v: Optional[List[Parent]]) -> Optional[List[Parent]]:
         """
-        Validate the parents tuple.
+        Validate the parents list.
 
-        Note: In Pydantic V2, the type hint Tuple[Parent, Parent] primarily enforces
-        that the input must be a tuple containing exactly two valid Parent objects.
-        This validator runs after that initial check and can be used for more complex
-        logic if needed in the future.
+        This validator runs after Pydantic has parsed Parent objects and can be
+        used for additional constraints beyond basic type checking.
         """
         if v is None:
             return None
-        if len(v) != 2:  # Explicit length check for robustness
-            raise ValueError("Exactly two parents are required.")
-        if v[0].identifier == v[1].identifier:
+        if len(v) not in (1, 2):  # Explicit length check for robustness
+            raise ValueError("One or two parents are required.")
+        if len(v) == 2 and v[0].identifier == v[1].identifier:
             raise ValueError("Parents must have different identifiers.")
         return v
 

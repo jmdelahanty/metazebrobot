@@ -14,9 +14,10 @@ from ..data.data_manager import data_manager
 from .agarose_tab import AgaroseTab
 from .fish_dish_tab import FishDishTab
 from .fish_water_tab import FishWaterTab
-from .poly_l_serine_tab import PolyLSerineTab 
+from .poly_l_serine_tab import PolyLSerineTab
 from .dialogs.export_dialog import ExportDialog
 from .cross_tab import CrossTab
+from .pyrat_tanks_tab import PyRATTanksTab
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,13 @@ class LabInventoryGUI(QMainWindow):
             
         # Actually quit the application
         from PySide6.QtCore import QCoreApplication
-        QCoreApplication.quit()
+        from PySide6.QtWidgets import QApplication
+        logger.info("Requesting application quit")
+        app = QApplication.instance()
+        if app:
+            app.quit()
+        QCoreApplication.exit(0)
+        logger.info("Exit requested")
         
     def setup_menu_bar(self):
         """Set up the menu bar."""
@@ -179,18 +186,39 @@ class LabInventoryGUI(QMainWindow):
             tabs.addTab(pls_tab, "Poly-L-Serine")
             
             # Fish dishes tab
-            fish_dishes_tab = FishDishTab()
-            tabs.addTab(fish_dishes_tab, "Fish Dishes")
+            self.fish_dishes_tab = FishDishTab()
+            tabs.addTab(self.fish_dishes_tab, "Fish Dishes")
 
             # Crosses tab
-            cross_tab = CrossTab()
-            tabs.addTab(cross_tab, "Crosses")
-            
+            self.cross_tab = CrossTab()
+            tabs.addTab(self.cross_tab, "Crosses")
+
+            self.cross_tab.crosses_updated.connect(self.fish_dishes_tab.update_cross_id_dropdown)
+
+            # PyRAT Tanks tab
+            self.pyrat_tanks_tab = PyRATTanksTab()
+            self.pyrat_tanks_tab_index = tabs.addTab(self.pyrat_tanks_tab, "PyRAT Tanks")
+            self.tabs = tabs  # Store reference for badge updates
+            self.pyrat_tanks_tab.urgent_count_changed.connect(self._update_pyrat_badge)
+
         except Exception as e:
             logger.error(f"Error creating tabs: {str(e)}")
             QMessageBox.warning(
-                self, 
-                "Tab Creation Error", 
+                self,
+                "Tab Creation Error",
                 f"Error creating tabs: {str(e)}"
             )
             raise
+
+    def _update_pyrat_badge(self, urgent_count: int):
+        """
+        Update the PyRAT Tanks tab text to show urgent count badge.
+
+        Args:
+            urgent_count: Number of tanks with urgent age status.
+        """
+        if urgent_count > 0:
+            tab_text = f"PyRAT Tanks ({urgent_count} urgent)"
+        else:
+            tab_text = "PyRAT Tanks"
+        self.tabs.setTabText(self.pyrat_tanks_tab_index, tab_text)

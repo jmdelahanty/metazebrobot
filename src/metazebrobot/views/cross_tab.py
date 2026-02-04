@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QDateEdit, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView,
     QScrollArea, QTextEdit, QSplitter, QSizePolicy, QDialog # Added QDialog
 )
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, Signal
 
 # Import controller and model
 from ..controllers.cross_controller import cross_controller
@@ -29,6 +29,7 @@ class CrossTab(QWidget):
     """
     Tab for viewing and managing zebrafish crosses.
     """
+    crosses_updated = Signal()
 
     def __init__(self, parent=None):
         """
@@ -223,6 +224,7 @@ class CrossTab(QWidget):
                     if success:
                         QMessageBox.information(self, "Success", f"Cross '{message}' created successfully.")
                         self.update_crosses_table() # Refresh the table
+                        self.crosses_updated.emit()
                     else:
                         logger.error(f"Failed to create cross: {message}")
                         QMessageBox.warning(self, "Creation Failed", f"Could not create cross:\n{message}")
@@ -386,13 +388,16 @@ class CrossTab(QWidget):
                 <h4>Parents:</h4>
                 <ul>
                 """
-                for parent in cross.parents:
-                    details_html += f"<li>{parent.identifier}"
-                    if parent.sex != 'unknown':
-                        details_html += f" ({parent.sex})"
-                    if parent.genotype:
-                         details_html += f" - Genotype: {parent.genotype}"
-                    details_html += "</li>"
+                if cross.parents:
+                    for parent in cross.parents:
+                        details_html += f"<li>{parent.identifier}"
+                        if parent.sex != 'unknown':
+                            details_html += f" ({parent.sex})"
+                        if parent.genotype:
+                             details_html += f" - Genotype: {parent.genotype}"
+                        details_html += "</li>"
+                else:
+                    details_html += "<li>None</li>"
                 details_html += "</ul>"
 
                 if cross.transgenic_details:
@@ -422,4 +427,3 @@ class CrossTab(QWidget):
         except Exception as e:
             logger.error(f"Error updating detail view for row {row}: {e}", exc_info=True)
             self.detail_view.setText(f"Error displaying details: {e}")
-

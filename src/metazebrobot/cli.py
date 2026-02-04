@@ -7,8 +7,10 @@ This script initializes the application, loads configuration, and launches the m
 
 import sys
 import logging
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QGuiApplication, QIcon
 
 from metazebrobot.utils.config import config
 from metazebrobot.data.data_manager import data_manager
@@ -53,6 +55,22 @@ def main():
         app = QApplication(sys.argv) 
         app.setApplicationName("MetaZebrobot")
         app.setOrganizationName("Zebrafish Lab")
+        app.setQuitOnLastWindowClosed(True)
+        QGuiApplication.setDesktopFileName("metazebrobot")
+
+        icon_path = None
+        config_icon_path = config.get_path("app_icon_path")
+        if config_icon_path and config_icon_path.exists():
+            icon_path = config_icon_path
+        else:
+            default_icon_path = Path(__file__).resolve().parent / "config" / "images" / "app_icon.png"
+            if default_icon_path.exists():
+                icon_path = default_icon_path
+
+        if icon_path:
+            app.setWindowIcon(QIcon(str(icon_path)))
+        else:
+            logger.info("No app icon found. Set app_icon_path in config.json or place app_icon.png in config/images.")
         
         # Create and show main window
         logger.info("Initializing main window...")
@@ -62,7 +80,9 @@ def main():
         # Run the application
         logger.info("Application started successfully")
         # Use app.exec() which returns the exit code
-        return app.exec() 
+        exit_code = app.exec()
+        logger.info(f"Application event loop exited with code {exit_code}")
+        return exit_code
         
     except Exception as e:
         # Use exc_info=True to log the full traceback

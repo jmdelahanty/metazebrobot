@@ -155,43 +155,24 @@ def export_lineage_json(output_path: str) -> bool:
                 added_node_ids.add(cross_id)
 
             # Process Original Parents (Nodes and Links to Cross)
-            if cross.parents and len(cross.parents) == 2:
-                parent1_id = cross.parents[0].identifier
-                parent2_id = cross.parents[1].identifier
-
-                # Process Parent 1
-                if parent1_id not in added_node_ids:
-                    nodes.append({
-                        "id": parent1_id,
-                        "type": "original_parent",
-                        "label": f"Parent:\n{parent1_id}" # Simplified label
+            if cross.parents:
+                for parent in cross.parents:
+                    parent_id = parent.identifier
+                    if parent_id not in added_node_ids:
+                        nodes.append({
+                            "id": parent_id,
+                            "type": "original_parent",
+                            "label": f"Parent:\n{parent_id}" # Simplified label
+                        })
+                        added_node_ids.add(parent_id)
+                    links.append({
+                        "source": parent_id,
+                        "target": cross_id,
+                        # "value": 1, # Optional: value might not be meaningful here
+                        "label": "Parent"
                     })
-                    added_node_ids.add(parent1_id)
-                # Add link from Parent 1 to Cross
-                links.append({
-                    "source": parent1_id,
-                    "target": cross_id,
-                    # "value": 1, # Optional: value might not be meaningful here
-                    "label": "Parent"
-                })
-
-                # Process Parent 2
-                if parent2_id not in added_node_ids:
-                    nodes.append({
-                        "id": parent2_id,
-                        "type": "original_parent",
-                        "label": f"Parent:\n{parent2_id}" # Simplified label
-                    })
-                    added_node_ids.add(parent2_id)
-                # Add link from Parent 2 to Cross
-                links.append({
-                    "source": parent2_id,
-                    "target": cross_id,
-                    # "value": 1, # Optional
-                    "label": "Parent"
-                })
             else:
-                logger.warning(f"Cross {cross_id} is missing valid parent information.")
+                logger.warning(f"Cross {cross_id} is missing parent information.")
 
 
         # 3. Process Dishes (Nodes and Links from Cross/Parent Dish) - Logic remains the same

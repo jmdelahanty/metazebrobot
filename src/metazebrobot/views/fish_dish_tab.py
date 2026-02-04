@@ -36,6 +36,7 @@ class FishDishTab(QWidget):
 
         self.dish_sort_column = 0 # Default sort by Dish ID
         self.dish_sort_order = Qt.SortOrder.AscendingOrder
+        self._last_selected_cross_id = self.CROSS_PLACEHOLDER
 
         self.setup_ui()
         self.update_cross_id_dropdown() # Populate dropdown initially
@@ -45,6 +46,9 @@ class FishDishTab(QWidget):
     def handle_cross_selection_change(self, selected_cross_id: str):
         """Auto-populate form fields when a cross ID is selected."""
         logger.debug(f"Cross selection changed to: {selected_cross_id}")
+        if selected_cross_id != self._last_selected_cross_id:
+            self.dish_number.setValue(1)
+            self._last_selected_cross_id = selected_cross_id
         if selected_cross_id == self.CROSS_PLACEHOLDER or not selected_cross_id:
             # Clear auto-filled fields if placeholder is selected
             self.genotype.clear()
@@ -56,7 +60,7 @@ class FishDishTab(QWidget):
             cross = cross_controller.get_cross(selected_cross_id)
             if cross:
                 self.genotype.setText(cross.line_strain or "") # Use line_strain for genotype
-                parent_str = ", ".join([p.identifier for p in cross.parents])
+                parent_str = ", ".join([p.identifier for p in cross.parents]) if cross.parents else ""
                 self.parents.setText(parent_str)
                 self.responsible.setText(cross.responsible_requestor or "")
             else:
@@ -258,7 +262,15 @@ class FishDishTab(QWidget):
 
             all_crosses = cross_controller.get_all_crosses()
             # Sort by request date descending, then cross ID as tie-breaker
-            sorted_crosses = sorted(all_crosses.values(), key=lambda c: (c.request_date or '00000000', c.cross_id), reverse=True)
+            active_crosses = [
+                c for c in all_crosses.values()
+                if (c.cross_status or "").lower() != "archived"
+            ]
+            sorted_crosses = sorted(
+                active_crosses,
+                key=lambda c: (c.request_date or '00000000', c.cross_id),
+                reverse=True
+            )
 
             for cross in sorted_crosses:
                 self.cross_id.addItem(cross.cross_id)

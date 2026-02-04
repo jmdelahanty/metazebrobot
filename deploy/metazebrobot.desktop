@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=MetaZebrobot
+Comment=Zebrafish lab inventory and tracking
+Exec=/home/delahantyj@hhmi.org/gitrepos/metazebrobot/bin/launch_metazebrobot.sh
+Path=/home/delahantyj@hhmi.org/gitrepos/metazebrobot
+Icon=/home/delahantyj@hhmi.org/gitrepos/metazebrobot/src/metazebrobot/config/images/app_icon.png
+Terminal=false
+Categories=Science;Education;Biology;
+StartupWMClass=cli.py

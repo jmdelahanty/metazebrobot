@@ -9,7 +9,7 @@ from typing import Dict, Optional, List, Any
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel,
     QLineEdit, QComboBox, QSpinBox, QPushButton, QDateEdit, QTextEdit,
-    QMessageBox, QScrollArea, QWidget
+    QMessageBox, QScrollArea, QWidget, QCheckBox
 )
 from PySide6.QtCore import Qt, QDate
 
@@ -83,8 +83,9 @@ class AddCrossDialog(QDialog):
 
 
         # --- Parents Details ---
-        parents_group = QGroupBox("Parents (Exactly 2 Required)")
-        parents_layout = QHBoxLayout(parents_group)
+        parents_group = QGroupBox("Parents (1-2 Required)")
+        parents_layout = QVBoxLayout(parents_group)
+        parents_row_layout = QHBoxLayout()
         parent1_group = QGroupBox("Parent 1")
         parent1_layout = QFormLayout(parent1_group)
         self.parent1_id = QLineEdit()
@@ -96,11 +97,11 @@ class AddCrossDialog(QDialog):
         parent1_layout.addRow("Identifier:", self.parent1_id)
         parent1_layout.addRow("Sex:", self.parent1_sex)
         parent1_layout.addRow("Genotype:", self.parent1_genotype)
-        parents_layout.addWidget(parent1_group)
-        parent2_group = QGroupBox("Parent 2")
-        parent2_layout = QFormLayout(parent2_group)
+        parents_row_layout.addWidget(parent1_group)
+        self.parent2_group = QGroupBox("Parent 2")
+        parent2_layout = QFormLayout(self.parent2_group)
         self.parent2_id = QLineEdit()
-        self.parent2_id.setPlaceholderText("e.g., M18:C9 (4541)")
+        self.parent2_id.setPlaceholderText("(Optional) e.g., M18:C9 (4541)")
         self.parent2_sex = QComboBox()
         self.parent2_sex.addItems(["unknown", "M", "F"])
         self.parent2_genotype = QLineEdit()
@@ -108,7 +109,12 @@ class AddCrossDialog(QDialog):
         parent2_layout.addRow("Identifier:", self.parent2_id)
         parent2_layout.addRow("Sex:", self.parent2_sex)
         parent2_layout.addRow("Genotype:", self.parent2_genotype)
-        parents_layout.addWidget(parent2_group)
+        parents_row_layout.addWidget(self.parent2_group)
+        parents_layout.addLayout(parents_row_layout)
+        self.incross_checkbox = QCheckBox("Incross (single parent tank)")
+        self.incross_checkbox.setToolTip("Check for incrosses where only one parent tank is recorded.")
+        self.incross_checkbox.stateChanged.connect(self.toggle_incross)
+        parents_layout.addWidget(self.incross_checkbox)
         form_container_layout.addWidget(parents_group)
 
 
@@ -203,6 +209,15 @@ class AddCrossDialog(QDialog):
         is_transgenic = (cross_type_text == "Transgenic")
         self.transgenic_group.setVisible(is_transgenic)
 
+    def toggle_incross(self, state: int):
+        """Enable/disable Parent 2 inputs when incross is selected."""
+        is_incross = (state == Qt.CheckState.Checked)
+        self.parent2_group.setEnabled(not is_incross)
+        if is_incross:
+            self.parent2_id.clear()
+            self.parent2_genotype.clear()
+            self.parent2_sex.setCurrentText("unknown")
+
     def get_cross_data(self) -> Optional[Dict[str, Any]]:
         """
         Collect data from the form fields and structure it
@@ -216,12 +231,21 @@ class AddCrossDialog(QDialog):
             "Responsible Requestor": self.responsible_requestor.text().strip(),
             "Line/Strain": self.line_strain.text().strip(),
             "Parent 1 Identifier": self.parent1_id.text().strip(),
-            "Parent 2 Identifier": self.parent2_id.text().strip(),
         }
         for name, value in required_fields.items():
             if not value:
                 QMessageBox.warning(self, "Input Error", f"'{name}' field cannot be empty.")
                 return None
+        parent2_id = "" if self.incross_checkbox.isChecked() else self.parent2_id.text().strip()
+        parent2_genotype = "" if self.incross_checkbox.isChecked() else self.parent2_genotype.text().strip()
+        parent2_sex = "unknown" if self.incross_checkbox.isChecked() else self.parent2_sex.currentText()
+        if not parent2_id and (parent2_genotype or parent2_sex != "unknown"):
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                "Parent 2 Identifier is required if Parent 2 details are provided."
+            )
+            return None
 
         # --- Collect Core Data ---
         cross_data["cross_id"] = required_fields["Cross ID"]
@@ -242,13 +266,16 @@ class AddCrossDialog(QDialog):
                 "identifier": required_fields["Parent 1 Identifier"],
                 "sex": self.parent1_sex.currentText(),
                 "genotype": self.parent1_genotype.text().strip() or None,
-            },
-            {
-                "identifier": required_fields["Parent 2 Identifier"],
-                "sex": self.parent2_sex.currentText(),
-                "genotype": self.parent2_genotype.text().strip() or None,
             }
         ]
+        if parent2_id:
+            parents.append(
+                {
+                    "identifier": parent2_id,
+                    "sex": parent2_sex,
+                    "genotype": parent2_genotype or None,
+                }
+            )
         cross_data["parents"] = parents
 
         # --- Collect Transgenic Data (if applicable) ---
@@ -306,4 +333,3 @@ class AddCrossDialog(QDialog):
 
         logger.debug(f"Collected data from AddCrossDialog: {cross_data}")
         return cross_data
-
