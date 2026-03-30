@@ -310,7 +310,7 @@ class FishDishTab(QWidget):
         ])
         self.dishes_table.setAlternatingRowColors(True)
         self.dishes_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.dishes_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.dishes_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.dishes_table.verticalHeader().setVisible(False)
         self.dishes_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         header = self.dishes_table.horizontalHeader()
@@ -331,10 +331,19 @@ class FishDishTab(QWidget):
     @Slot()
     def handle_table_selection_change(self):
         """Enable/disable action buttons based on table selection."""
-        selected_items = self.dishes_table.selectedItems()
-        has_selection = len(selected_items) > 0
-        self.manage_screening_button.setEnabled(has_selection)
+        selected_rows = self.dishes_table.selectionModel().selectedRows()
+        num_selected = len(selected_rows)
+        has_selection = num_selected > 0
+
+        # Screening only works for single selection
+        self.manage_screening_button.setEnabled(num_selected == 1)
         self.terminate_dish_button.setEnabled(has_selection)
+
+        # Update button text to reflect selection count
+        if num_selected > 1:
+            self.terminate_dish_button.setText(f"Terminate {num_selected} Dishes")
+        else:
+            self.terminate_dish_button.setText("Terminate Dish")
 
     def handle_header_click(self, column):
         """Handle clicks on the table header for sorting."""
@@ -389,20 +398,60 @@ class FishDishTab(QWidget):
 
     @Slot()
     def show_termination_dialog_for_selected(self):
-        """Show termination dialog for the currently selected dish."""
+        """Show termination dialog for the currently selected dish(es)."""
         selected_rows = self.dishes_table.selectionModel().selectedRows()
         if not selected_rows:
             QMessageBox.warning(self, "No Selection", "Please select a dish from the table first.")
             return
 
         try:
-            selected_row = selected_rows[0].row()
-            dish_id_item = self.dishes_table.item(selected_row, 0)
-            if not dish_id_item:
-                QMessageBox.critical(self, "Error", "Could not determine Dish ID for the selected row.")
+            # Collect all selected dish IDs
+            dish_ids = []
+            for index in selected_rows:
+                dish_id_item = self.dishes_table.item(index.row(), 0)
+                if dish_id_item:
+                    dish_ids.append(dish_id_item.text())
+
+            if not dish_ids:
+                QMessageBox.critical(self, "Error", "Could not determine Dish IDs for the selected rows.")
                 return
-            dish_id = dish_id_item.text()
-            self.show_termination_dialog(dish_id)
+
+            # Single dish: use existing dialog with pre-filled data
+            if len(dish_ids) == 1:
+                self.show_termination_dialog(dish_ids[0])
+                return
+
+            # Batch: show dialog in batch mode
+            dialog = TerminationDialog(self, batch_dish_ids=dish_ids)
+
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                update_data = dialog.get_data()
+                successes = []
+                failures = []
+
+                for dish_id in dish_ids:
+                    success, message = fish_dish_controller.update_dish_status(
+                        dish_id=dish_id, **update_data
+                    )
+                    if success:
+                        successes.append(dish_id)
+                    else:
+                        failures.append(f"{dish_id}: {message}")
+
+                self.update_dishes_table()
+
+                if failures:
+                    QMessageBox.warning(
+                        self, "Partial Success",
+                        f"Updated {len(successes)} of {len(dish_ids)} dishes.\n\n"
+                        f"Failures:\n" + "\n".join(failures)
+                    )
+                else:
+                    QMessageBox.information(
+                        self, "Success",
+                        f"Successfully updated {len(successes)} dishes."
+                    )
+
         except Exception as e:
             logger.error(f"Error showing termination dialog for selected: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Could not open termination dialog: {e}")

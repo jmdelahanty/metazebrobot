@@ -2,10 +2,12 @@
 Termination dialog for fish dishes.
 
 This dialog is used to update the status of a fish dish, particularly for terminating it.
+Supports both single-dish and batch termination modes.
 """
 
 import logging
 from datetime import datetime
+from typing import List, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QComboBox, QDateEdit, QLineEdit, QPushButton
@@ -17,17 +19,37 @@ logger = logging.getLogger(__name__)
 
 class TerminationDialog(QDialog):
     """Dialog for updating fish dish status."""
-    
-    def __init__(self, parent=None):
-        """Initialize the dialog."""
+
+    def __init__(self, parent=None, batch_dish_ids: Optional[List[str]] = None):
+        """Initialize the dialog.
+
+        Args:
+            parent: Parent widget.
+            batch_dish_ids: If provided, enables batch mode for these dish IDs.
+        """
         super().__init__(parent)
-        self.setWindowTitle("Update Dish Status")
+        self.batch_dish_ids = batch_dish_ids
+        if batch_dish_ids and len(batch_dish_ids) > 1:
+            self.setWindowTitle(f"Terminate {len(batch_dish_ids)} Dishes")
+        else:
+            self.setWindowTitle("Update Dish Status")
         self.setMinimumWidth(400)
         self.setup_ui()
 
     def setup_ui(self):
         """Set up the user interface."""
         layout = QVBoxLayout(self)
+
+        # Batch mode header showing affected dishes
+        if self.batch_dish_ids and len(self.batch_dish_ids) > 1:
+            header = QLabel(f"The following {len(self.batch_dish_ids)} dishes will be updated:")
+            header.setStyleSheet("font-weight: bold; margin-bottom: 4px;")
+            layout.addWidget(header)
+            dishes_label = QLabel(", ".join(self.batch_dish_ids))
+            dishes_label.setWordWrap(True)
+            dishes_label.setStyleSheet("color: #555; margin-bottom: 8px;")
+            layout.addWidget(dishes_label)
+
         form_layout = QFormLayout()
 
         # Status selection
@@ -63,6 +85,10 @@ class TerminationDialog(QDialog):
         button_box.addWidget(save_button)
         button_box.addWidget(cancel_button)
         layout.addLayout(button_box)
+
+        # Default to "inactive" in batch mode
+        if self.batch_dish_ids and len(self.batch_dish_ids) > 1:
+            self.status.setCurrentText("inactive")
 
     def handle_status_change(self, status):
         """
