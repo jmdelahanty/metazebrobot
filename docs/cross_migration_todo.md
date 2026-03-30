@@ -20,7 +20,7 @@ Tracks the remaining items needed before local crosses can be removed in favor o
 **Decision:** On-demand computation. The number of dishes per cross is small (1-3 typical), so there's no performance concern. No extra table needed.
 
 **Action items:**
-- [ ] Extract aggregate calculation logic from `cross_controller.update_aggregate_results()` into a standalone function (e.g., in `fish_dish_controller`) that takes a `cross_id` and computes results from dishes on the fly
+- [x] Extract aggregate calculation logic into `fish_dish_controller.compute_aggregate_results(cross_id)` — computes on demand from dishes, no Cross dependency
 - [ ] Update any UI that displays aggregates to call the new function instead of reading from the Cross object
 - [ ] Remove aggregate storage fields from the Cross model and `crosses` table when the full migration happens
 

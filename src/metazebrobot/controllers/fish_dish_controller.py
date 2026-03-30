@@ -595,6 +595,74 @@ class FishDishController:
 
         return result
 
+    def compute_aggregate_results(self, cross_id: str) -> Optional[AggregateResults]:
+        """
+        Compute aggregate screening results on demand for a given cross_id.
+
+        Calculates from dish data without depending on the local Cross model:
+        - total_initially_produced: Sum of count_screened_this_step from the
+          first screening step of all primary dishes.
+        - total_positive_final: Sum of final_positive_count from all
+          screened dishes (primary and derived).
+        - yield_percentage: (total_positive_final / total_initially_produced) * 100.
+
+        Args:
+            cross_id: The crossing ID to compute aggregates for.
+
+        Returns:
+            AggregateResults object, or None if no dishes found for the cross.
+        """
+        try:
+            all_dishes = self.get_all_dishes(include_inactive=True)
+            relevant_dishes = [
+                dish for dish in all_dishes.values() if dish.cross_id == cross_id
+            ]
+            if not relevant_dishes:
+                logger.warning(f"No dishes found for cross {cross_id}.")
+                return None
+
+            # total_initially_produced: first screening step of primary dishes
+            total_initial_prod = 0
+            primary_dishes = [d for d in relevant_dishes if d.dish_population_type == "primary"]
+
+            for dish in primary_dishes:
+                if dish.screening_results and dish.screening_results.screenings:
+                    try:
+                        sorted_screenings = sorted(
+                            dish.screening_results.screenings,
+                            key=lambda s: datetime.strptime(s.screening_datetime, "%Y%m%dT%H:%M:%S")
+                        )
+                        first_step = sorted_screenings[0]
+                        count = getattr(first_step, 'count_screened_this_step', 0)
+                        if isinstance(count, int) and count >= 0:
+                            total_initial_prod += count
+                    except (ValueError, TypeError, IndexError) as e:
+                        logger.warning(f"Dish {dish.dish_id}: Could not process first screening step: {e}")
+
+            # total_positive_final: all dishes (primary + derived)
+            total_positive_fin = 0
+            for dish in relevant_dishes:
+                if dish.screening_results and dish.screening_results.final_positive_count is not None:
+                    count = dish.screening_results.final_positive_count
+                    if isinstance(count, int) and count >= 0:
+                        total_positive_fin += count
+
+            # yield_percentage
+            yield_perc = None
+            if total_initial_prod > 0:
+                yield_perc = (total_positive_fin / total_initial_prod) * 100.0
+
+            return AggregateResults(
+                total_initially_produced=total_initial_prod,
+                total_positive_final=total_positive_fin,
+                yield_percentage=yield_perc,
+                date_aggregated=datetime.now().strftime("%Y%m%d")
+            )
+
+        except Exception as e:
+            logger.error(f"Error computing aggregate results for cross {cross_id}: {e}", exc_info=True)
+            return None
+
 
 # Create a singleton instance for global access
 fish_dish_controller = FishDishController()
