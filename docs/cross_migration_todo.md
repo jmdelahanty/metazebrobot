@@ -47,8 +47,8 @@ Tracks the remaining items needed before local crosses can be removed in favor o
 
 **Action items:**
 - [ ] Re-key `transgenic_indicators` table from `cross_id` to `crossing_id` when migration happens
-- [ ] Decide if indicators should be populated manually (current approach) or seeded by a one-time parse of `strain_name` with manual review
-- [ ] Ensure the UI for adding/editing indicators works against PyRAT crossings instead of local crosses
+- [x] Seed indicators from `strain_name` parse with user review — `TransgenicIndicatorDialog` loads existing from DB or parses strain_name to pre-fill, user reviews/edits before saving
+- [x] UI works against PyRAT crossings — "Edit Indicators" button on crossings tab opens dialog, saves to `crossing_transgenic_indicators` table (no FK to local crosses)
 
 ---
 

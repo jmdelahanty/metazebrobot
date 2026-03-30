@@ -32,6 +32,7 @@ from PySide6.QtGui import QColor, QBrush
 from ..controllers.pyrat_tanks_controller import pyrat_tanks_controller
 from ..models.pyrat_crossing import PyRATCrossing
 from ..utils.pyrat_crossings_worker import PyRATCrossingsWorker
+from .dialogs.transgenic_indicator_dialog import TransgenicIndicatorDialog
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,12 @@ class PyRATCrossingsTab(QWidget):
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_crossings)
         filter_layout.addWidget(self.refresh_button)
+
+        # Edit Indicators button
+        self.edit_indicators_button = QPushButton("Edit Indicators")
+        self.edit_indicators_button.setEnabled(False)
+        self.edit_indicators_button.clicked.connect(self.show_indicator_dialog)
+        filter_layout.addWidget(self.edit_indicators_button)
 
         main_layout.addLayout(filter_layout)
 
@@ -375,8 +382,10 @@ class PyRATCrossingsTab(QWidget):
         """Update detail view when selection changes."""
         if current:
             self.update_detail_view(current.row())
+            self.edit_indicators_button.setEnabled(True)
         else:
             self.detail_view.clear()
+            self.edit_indicators_button.setEnabled(False)
 
     def populate_table(self, crossings: List[PyRATCrossing]):
         """Fill the table with crossing data."""
@@ -508,6 +517,22 @@ class PyRATCrossingsTab(QWidget):
         """
 
         self.detail_view.setHtml(details_html)
+
+    @Slot()
+    def show_indicator_dialog(self):
+        """Open the transgenic indicator dialog for the selected crossing."""
+        current_row = self.crossings_table.currentRow()
+        if current_row < 0 or current_row >= len(self.filtered_crossings):
+            QMessageBox.warning(self, "No Selection", "Please select a crossing first.")
+            return
+
+        crossing = self.filtered_crossings[current_row]
+        dialog = TransgenicIndicatorDialog(
+            crossing_id=str(crossing.crossing_id),
+            strain_name=crossing.strain_name or "",
+            parent=self,
+        )
+        dialog.exec()
 
     def update_stats_label(self):
         """Update the summary statistics label."""

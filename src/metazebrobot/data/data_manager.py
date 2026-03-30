@@ -163,6 +163,24 @@ class DataManager:
                     ON transgenic_indicators(cross_id)
                 """)
 
+                # Crossing-level transgenic indicators (keyed by PyRAT crossing_id, no FK to crosses)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS crossing_transgenic_indicators (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        crossing_id TEXT NOT NULL,
+                        modification_type TEXT DEFAULT 'tg',
+                        promoter_driver TEXT,
+                        reporter_effector TEXT NOT NULL,
+                        color TEXT,
+                        expected_expression TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_crossing_tg_indicators_crossing_id
+                    ON crossing_transgenic_indicators(crossing_id)
+                """)
+
                 # Add aggregate columns to crosses table (if not exist)
                 cursor.execute("PRAGMA table_info(crosses)")
                 crosses_columns = {row[1] for row in cursor.fetchall()}
@@ -693,6 +711,89 @@ class DataManager:
 
         except Exception as e:
             logger.error(f"Error loading transgenic indicators for cross {cross_id}: {e}")
+            return []
+
+    def save_crossing_indicators(self, crossing_id: str, indicators: List[Dict[str, Any]]) -> bool:
+        """Save transgenic indicators for a PyRAT crossing.
+
+        Replaces all existing indicators for the given crossing_id.
+
+        Args:
+            crossing_id: The PyRAT crossing ID.
+            indicators: List of indicator dicts with keys: modification_type,
+                        promoter_driver, reporter_effector, color, expected_expression.
+
+        Returns:
+            True if saved successfully.
+        """
+        if not self.is_initialized:
+            return False
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN TRANSACTION")
+                cursor.execute("DELETE FROM crossing_transgenic_indicators WHERE crossing_id = ?", (crossing_id,))
+
+                for ind in indicators:
+                    cursor.execute("""
+                        INSERT INTO crossing_transgenic_indicators
+                        (crossing_id, modification_type, promoter_driver, reporter_effector,
+                         color, expected_expression)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        crossing_id,
+                        ind.get('modification_type', 'tg'),
+                        ind.get('promoter_driver'),
+                        ind.get('reporter_effector'),
+                        ind.get('color'),
+                        ind.get('expected_expression')
+                    ))
+
+                conn.commit()
+                logger.info(f"Saved {len(indicators)} indicators for crossing {crossing_id}")
+                return True
+
+        except Exception as e:
+            logger.error(f"Error saving crossing indicators for {crossing_id}: {e}")
+            return False
+
+    def get_crossing_indicators(self, crossing_id: str) -> List[Dict[str, Any]]:
+        """Get transgenic indicators for a PyRAT crossing.
+
+        Args:
+            crossing_id: The PyRAT crossing ID.
+
+        Returns:
+            List of indicator dicts.
+        """
+        if not self.is_initialized:
+            return []
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT modification_type, promoter_driver, reporter_effector,
+                           color, expected_expression
+                    FROM crossing_transgenic_indicators
+                    WHERE crossing_id = ?
+                    ORDER BY id ASC
+                """, (crossing_id,))
+
+                indicators = []
+                for row in cursor.fetchall():
+                    indicators.append({
+                        'modification_type': row['modification_type'],
+                        'promoter_driver': row['promoter_driver'],
+                        'reporter_effector': row['reporter_effector'],
+                        'color': row['color'],
+                        'expected_expression': row['expected_expression']
+                    })
+                return indicators
+
+        except Exception as e:
+            logger.error(f"Error loading crossing indicators for {crossing_id}: {e}")
             return []
 
     def save_cross(self, cross_data: Dict[str, Any]) -> bool:
