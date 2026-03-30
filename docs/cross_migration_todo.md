@@ -73,8 +73,8 @@ Verified against live API response for crossing 15178. PyRAT parent tanks includ
 - `tank_label` is unreliable (sometimes null, sometimes unrelated notes) — do not depend on it
 
 **Action items:**
-- [ ] Add `location_rack_name`, `location_room_name`, `tank_position` to `CrossingTank` model
-- [ ] Add these fields to `TANK_KEYS` in `PyRATCrossingsWorker`
-- [ ] Add a computed property on `CrossingTank` for a human-readable identifier (e.g., `f"#{tank_id}_{location_rack_name}>{tank_position}"`)
-- [ ] Update crossing detail view to display parent rack/position and strain
+- [x] Add `location_rack_name`, `location_room_name`, `tank_position` to `CrossingTank` model
+- [x] Add these fields to `TANK_KEYS` in `PyRATCrossingsWorker`
+- [x] Add a computed property on `CrossingTank` for a human-readable identifier (`location_display`, e.g., `#5182_M11>E1`)
+- [x] Update crossing detail view to display parent rack/position and strain
 - [ ] Update dish auto-fill to pull parent identifiers from PyRAT parent tanks when migration happens

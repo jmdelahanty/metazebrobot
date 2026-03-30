@@ -454,9 +454,9 @@ class PyRATCrossingsTab(QWidget):
         if crossing.parent_tanks:
             for tank in crossing.parent_tanks:
                 parents_html += f"""
-                <li>Tank {tank.tank_id}: {tank.total_fish} fish
+                <li>{tank.location_display}: {tank.total_fish} fish
                     ({tank.number_of_male}M/{tank.number_of_female}F/{tank.number_of_unknown}U)
-                    - {tank.strain_name or 'N/A'}</li>
+                    — {tank.strain_name or 'N/A'}</li>
                 """
         else:
             parents_html = "<li>None</li>"
@@ -466,9 +466,9 @@ class PyRATCrossingsTab(QWidget):
         if crossing.child_tanks:
             for tank in crossing.child_tanks:
                 children_html += f"""
-                <li>Tank {tank.tank_id}: {tank.total_fish} fish
+                <li>{tank.location_display}: {tank.total_fish} fish
                     ({tank.number_of_male}M/{tank.number_of_female}F/{tank.number_of_unknown}U)
-                    - Status: {tank.status or 'N/A'}</li>
+                    — Status: {tank.status or 'N/A'}</li>
                 """
         else:
             children_html = "<li>None (not yet raised)</li>"

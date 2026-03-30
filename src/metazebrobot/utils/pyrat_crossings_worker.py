@@ -43,7 +43,8 @@ class PyRATCrossingsWorker(QThread):
     TANK_KEYS = [
         'tank_id', 'tank_label', 'status', 'strain_name',
         'number_of_male', 'number_of_female', 'number_of_unknown',
-        'alive_count', 'date_of_birth'
+        'alive_count', 'date_of_birth',
+        'location_rack_name', 'location_room_name', 'tank_position'
     ]
 
     def __init__(

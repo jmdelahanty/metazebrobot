@@ -28,11 +28,26 @@ class CrossingTank(BaseModel):
     alive_count: Optional[int] = Field(default=None, description="Number alive")
     date_of_birth: Optional[str] = Field(default=None, description="Date of birth")
 
+    # Location fields
+    location_rack_name: Optional[str] = Field(default=None, description="Rack name (e.g., M11)")
+    location_room_name: Optional[str] = Field(default=None, description="Room name")
+    tank_position: Optional[str] = Field(default=None, description="Position on rack (e.g., E1)")
+
     @computed_field
     @property
     def total_fish(self) -> int:
         """Total number of fish in the tank."""
         return self.number_of_male + self.number_of_female + self.number_of_unknown
+
+    @computed_field
+    @property
+    def location_display(self) -> str:
+        """Human-readable identifier like #5182_M11>E1."""
+        rack = self.location_rack_name
+        pos = self.tank_position
+        if rack and pos:
+            return f"#{self.tank_id}_{rack}>{pos}"
+        return f"#{self.tank_id}"
 
 
 class PyRATCrossing(BaseModel):
@@ -181,6 +196,9 @@ class PyRATCrossing(BaseModel):
                 number_of_unknown=tank_dict.get('number_of_unknown', 0) or 0,
                 alive_count=tank_dict.get('alive_count'),
                 date_of_birth=tank_dict.get('date_of_birth'),
+                location_rack_name=tank_dict.get('location_rack_name'),
+                location_room_name=tank_dict.get('location_room_name'),
+                tank_position=tank_dict.get('tank_position'),
             ))
 
         child_tanks = []
@@ -195,6 +213,9 @@ class PyRATCrossing(BaseModel):
                 number_of_unknown=tank_dict.get('number_of_unknown', 0) or 0,
                 alive_count=tank_dict.get('alive_count'),
                 date_of_birth=tank_dict.get('date_of_birth'),
+                location_rack_name=tank_dict.get('location_rack_name'),
+                location_room_name=tank_dict.get('location_room_name'),
+                tank_position=tank_dict.get('tank_position'),
             ))
 
         return cls(
