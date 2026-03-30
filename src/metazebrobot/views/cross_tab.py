@@ -17,6 +17,7 @@ from PySide6.QtCore import Qt, Slot, Signal
 
 # Import controller and model
 from ..controllers.cross_controller import cross_controller
+from ..controllers.fish_dish_controller import fish_dish_controller
 from ..models.cross import Cross, Parent, TransgenicDetails # Import specific models
 from .dialogs.update_cross_status_dialog import UpdateCrossStatusDialog
 
@@ -406,14 +407,14 @@ class CrossTab(QWidget):
                         details_html += f"<li><b>Indicator:</b> {indicator.standard_notation}<br>" \
                             f"&nbsp;&nbsp;<b>Expected Expression:</b> {indicator.expected_expression or 'N/A'}</li>"
                     details_html += "</ul>"
-                    # Add aggregate results if available (optional)
-                    if cross.transgenic_details.aggregate_results:
-                         agg = cross.transgenic_details.aggregate_results
-                         details_html += "<h5>Aggregate Results:</h5>"
-                         details_html += f"<p>&nbsp;&nbsp;Total Initial: {agg.total_initially_produced or 'N/A'}<br>" \
-                                         f"&nbsp;&nbsp;Total Final Positive: {agg.total_positive_final or 'N/A'}<br>" \
-                                         f"&nbsp;&nbsp;Yield: {agg.yield_percentage:.1f}%" if agg.yield_percentage is not None else "N/A" \
-                                         f"<br>&nbsp;&nbsp;Date Aggregated: {agg.date_aggregated or 'N/A'}</p>"
+                # Add aggregate screening results (computed on demand from dish data)
+                agg = fish_dish_controller.compute_aggregate_results(cross.cross_id)
+                if agg:
+                    yield_str = f"{agg.yield_percentage:.1f}%" if agg.yield_percentage is not None else "N/A"
+                    details_html += "<h4>Screening Aggregates:</h4>"
+                    details_html += f"<p>&nbsp;&nbsp;Total Initially Produced: {agg.total_initially_produced}<br>" \
+                                    f"&nbsp;&nbsp;Total Positive Final: {agg.total_positive_final}<br>" \
+                                    f"&nbsp;&nbsp;Yield: {yield_str}</p>"
 
 
                 if cross.notes:

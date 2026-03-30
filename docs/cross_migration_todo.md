@@ -21,7 +21,7 @@ Tracks the remaining items needed before local crosses can be removed in favor o
 
 **Action items:**
 - [x] Extract aggregate calculation logic into `fish_dish_controller.compute_aggregate_results(cross_id)` — computes on demand from dishes, no Cross dependency
-- [ ] Update any UI that displays aggregates to call the new function instead of reading from the Cross object
+- [x] Update any UI that displays aggregates to call `fish_dish_controller.compute_aggregate_results()` — both `cross_tab.py` and `pyrat_crossings_tab.py` now compute on demand
 - [ ] Remove aggregate storage fields from the Cross model and `crosses` table when the full migration happens
 
 ---

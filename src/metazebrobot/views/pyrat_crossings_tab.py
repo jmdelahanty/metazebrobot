@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Slot, Signal, QSettings
 from PySide6.QtGui import QColor, QBrush
 
+from ..controllers.fish_dish_controller import fish_dish_controller
 from ..controllers.pyrat_tanks_controller import pyrat_tanks_controller
 from ..models.pyrat_crossing import PyRATCrossing
 from ..utils.pyrat_crossings_worker import PyRATCrossingsWorker
@@ -516,6 +517,19 @@ class PyRATCrossingsTab(QWidget):
         <h4>Responsible</h4>
         <p>{crossing.responsible_fullname or 'N/A'}</p>
         """
+
+        # Add aggregate screening results (computed on demand from dish data)
+        agg = fish_dish_controller.compute_aggregate_results(str(crossing.crossing_id))
+        if agg:
+            yield_str = f"{agg.yield_percentage:.1f}%" if agg.yield_percentage is not None else "N/A"
+            details_html += f"""
+            <h4>Screening Aggregates</h4>
+            <p>
+                <b>Total Initially Produced:</b> {agg.total_initially_produced}<br>
+                <b>Total Positive Final:</b> {agg.total_positive_final}<br>
+                <b>Yield:</b> {yield_str}
+            </p>
+            """
 
         self.detail_view.setHtml(details_html)
 
