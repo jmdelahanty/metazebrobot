@@ -270,8 +270,9 @@ class PyRATCrossingsTab(QWidget):
         self.progress_bar.hide()
         self.refresh_button.setEnabled(True)
 
-        # Parse crossings
+        # Parse crossings and cache on controller for other tabs to access
         self.crossings = pyrat_tanks_controller.parse_crossings(crossings_data)
+        pyrat_tanks_controller.cached_crossings = self.crossings
 
         # Update filter dropdowns with available values
         self.update_filter_dropdowns()

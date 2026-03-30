@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QDate, Signal, Slot
 
 from ..controllers.fish_dish_controller import fish_dish_controller
-from ..controllers.cross_controller import cross_controller
+from ..controllers.pyrat_tanks_controller import pyrat_tanks_controller
 from ..models.fish_dish import FishDish
 from .dialogs.quality_check_dialog import QualityCheckDialog
 from .dialogs.termination_dialog import TerminationDialog
@@ -57,21 +57,21 @@ class FishDishTab(QWidget):
             return
 
         try:
-            cross = cross_controller.get_cross(selected_cross_id)
-            if cross:
-                self.genotype.setText(cross.line_strain or "") # Use line_strain for genotype
-                parent_str = ", ".join([p.identifier for p in cross.parents]) if cross.parents else ""
+            crossing = pyrat_tanks_controller.get_crossing_by_id(selected_cross_id)
+            if crossing:
+                self.genotype.setText(crossing.strain_name or "")
+                parent_str = ", ".join(
+                    [t.location_display for t in crossing.parent_tanks]
+                ) if crossing.parent_tanks else ""
                 self.parents.setText(parent_str)
-                self.responsible.setText(cross.responsible_requestor or "")
+                self.responsible.setText(crossing.responsible_fullname or "")
             else:
-                # Cross not found (might happen if list is stale), clear fields
-                logger.warning(f"Selected cross ID '{selected_cross_id}' not found by controller.")
+                logger.warning(f"Selected crossing ID '{selected_cross_id}' not found in cache.")
                 self.genotype.clear()
                 self.parents.clear()
                 self.responsible.clear()
         except Exception as e:
-             logger.error(f"Error fetching details for cross {selected_cross_id}: {e}", exc_info=True)
-             # Clear fields on error
+             logger.error(f"Error fetching details for crossing {selected_cross_id}: {e}", exc_info=True)
              self.genotype.clear()
              self.parents.clear()
              self.responsible.clear()
@@ -252,28 +252,32 @@ class FishDishTab(QWidget):
 
 
     def update_cross_id_dropdown(self):
-        """Fetches crosses and populates the Cross ID dropdown."""
-        logger.debug("Updating Cross ID dropdown...")
+        """Populates the Cross ID dropdown from cached PyRAT crossings."""
+        logger.debug("Updating Cross ID dropdown from PyRAT crossings...")
         try:
             current_selection = self.cross_id.currentText()
             self.cross_id.blockSignals(True)
             self.cross_id.clear()
             self.cross_id.addItem(self.CROSS_PLACEHOLDER)
 
-            all_crosses = cross_controller.get_all_crosses()
-            # Sort by request date descending, then cross ID as tie-breaker
-            active_crosses = [
-                c for c in all_crosses.values()
-                if (c.cross_status or "").lower() != "archived"
+            crossings = pyrat_tanks_controller.cached_crossings
+            if not crossings:
+                logger.info("No cached crossings available. Refresh PyRAT Crossings tab first.")
+
+            # Sort by date_of_record descending, then crossing_id as tie-breaker
+            # Exclude discarded crossings
+            active_crossings = [
+                c for c in crossings
+                if (c.status or "").lower() != "discarded"
             ]
-            sorted_crosses = sorted(
-                active_crosses,
-                key=lambda c: (c.request_date or '00000000', c.cross_id),
+            sorted_crossings = sorted(
+                active_crossings,
+                key=lambda c: (c.date_of_record or '', c.crossing_id),
                 reverse=True
             )
 
-            for cross in sorted_crosses:
-                self.cross_id.addItem(cross.cross_id)
+            for crossing in sorted_crossings:
+                self.cross_id.addItem(str(crossing.crossing_id))
 
             index = self.cross_id.findText(current_selection)
             if index != -1:

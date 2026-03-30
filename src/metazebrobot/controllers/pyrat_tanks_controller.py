@@ -38,6 +38,23 @@ class PyRATTanksController:
     def __init__(self):
         """Initialize the controller."""
         self._user_mapping: Optional[Dict[str, int]] = None
+        self._cached_crossings: List[PyRATCrossing] = []
+
+    @property
+    def cached_crossings(self) -> List[PyRATCrossing]:
+        """Return cached crossings from the last API fetch."""
+        return self._cached_crossings
+
+    @cached_crossings.setter
+    def cached_crossings(self, crossings: List[PyRATCrossing]):
+        self._cached_crossings = crossings
+
+    def get_crossing_by_id(self, crossing_id: str) -> Optional[PyRATCrossing]:
+        """Look up a crossing by ID from the cache."""
+        for c in self._cached_crossings:
+            if str(c.crossing_id) == str(crossing_id):
+                return c
+        return None
 
     def get_user_mapping(self) -> Dict[str, int]:
         """

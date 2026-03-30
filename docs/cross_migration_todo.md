@@ -77,4 +77,4 @@ Verified against live API response for crossing 15178. PyRAT parent tanks includ
 - [x] Add these fields to `TANK_KEYS` in `PyRATCrossingsWorker`
 - [x] Add a computed property on `CrossingTank` for a human-readable identifier (`location_display`, e.g., `#5182_M11>E1`)
 - [x] Update crossing detail view to display parent rack/position and strain
-- [ ] Update dish auto-fill to pull parent identifiers from PyRAT parent tanks when migration happens
+- [x] Update dish auto-fill to pull parent identifiers from PyRAT parent tanks — `handle_cross_selection_change()` uses `crossing.parent_tanks[].location_display`
