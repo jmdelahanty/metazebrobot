@@ -64,8 +64,8 @@ class PyRATTanksTab(QWidget):
         self.tanks: List[PyRATTank] = []
         self.filtered_tanks: List[PyRATTank] = []
         self.age_status_counts: Dict[str, int] = {}
-        self.sort_column = 0
-        self.sort_order = Qt.SortOrder.AscendingOrder
+        self.sort_column = 8  # Age (days) column
+        self.sort_order = Qt.SortOrder.DescendingOrder  # Oldest first (most urgent)
         self.worker: Optional[PyRATWorker] = None
 
         # QSettings for filter persistence
@@ -471,7 +471,8 @@ class PyRATTanksTab(QWidget):
                 if item:
                     item.setBackground(QBrush(bg_color))
 
-        self.tanks_table.setSortingEnabled(True)
+        # Keep sorting disabled - we handle sorting ourselves in handle_header_click
+        # Qt's built-in sorting treats numbers as strings ("100" < "30")
 
     def get_age_status_color(self, age_status: str) -> QColor:
         """Get background color for age status."""
