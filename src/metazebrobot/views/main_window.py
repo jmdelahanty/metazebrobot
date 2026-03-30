@@ -18,6 +18,7 @@ from .poly_l_serine_tab import PolyLSerineTab
 from .dialogs.export_dialog import ExportDialog
 from .cross_tab import CrossTab
 from .pyrat_tanks_tab import PyRATTanksTab
+from .pyrat_crossings_tab import PyRATCrossingsTab
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,10 @@ class LabInventoryGUI(QMainWindow):
             self.pyrat_tanks_tab_index = tabs.addTab(self.pyrat_tanks_tab, "PyRAT Tanks")
             self.tabs = tabs  # Store reference for badge updates
             self.pyrat_tanks_tab.urgent_count_changed.connect(self._update_pyrat_badge)
+
+            # PyRAT Crossings tab
+            self.pyrat_crossings_tab = PyRATCrossingsTab()
+            tabs.addTab(self.pyrat_crossings_tab, "PyRAT Crossings")
 
         except Exception as e:
             logger.error(f"Error creating tabs: {str(e)}")

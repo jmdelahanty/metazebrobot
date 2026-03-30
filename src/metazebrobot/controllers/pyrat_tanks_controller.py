@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Any, Callable, Tuple
 import keyring
 
 from ..models.pyrat_tank import PyRATTank, AgeStatus
+from ..models.pyrat_crossing import PyRATCrossing
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +348,225 @@ class PyRATTanksController:
             if status in counts:
                 counts[status] += 1
         return counts
+
+    # =========================================================================
+    # Crossing-related methods
+    # =========================================================================
+
+    def parse_crossings(self, raw_crossings: List[Dict[str, Any]]) -> List[PyRATCrossing]:
+        """
+        Parse raw API dictionaries into PyRATCrossing model objects.
+
+        Args:
+            raw_crossings: List of raw crossing dictionaries from the API.
+
+        Returns:
+            List of validated PyRATCrossing objects.
+        """
+        result: List[PyRATCrossing] = []
+        for crossing_data in raw_crossings:
+            try:
+                crossing = PyRATCrossing.from_api_dict(crossing_data)
+                result.append(crossing)
+            except Exception as e:
+                crossing_id = crossing_data.get("crossing_id", "unknown")
+                logger.error(f"Error parsing crossing {crossing_id}: {e}")
+        return result
+
+    def filter_crossings(
+        self,
+        crossings: List[PyRATCrossing],
+        filter_func: Callable[[PyRATCrossing], bool],
+    ) -> List[PyRATCrossing]:
+        """
+        Filter crossings based on a filter function.
+
+        Args:
+            crossings: List of PyRATCrossing objects to filter.
+            filter_func: Function that returns True for crossings to keep.
+
+        Returns:
+            Filtered list of crossings.
+        """
+        try:
+            return [c for c in crossings if filter_func(c)]
+        except Exception as e:
+            logger.error(f"Error filtering crossings: {e}")
+            return crossings
+
+    def filter_crossings_by_status(
+        self, crossings: List[PyRATCrossing], status: str
+    ) -> List[PyRATCrossing]:
+        """Filter crossings by status (recorded, set-up, raised, discarded)."""
+        if not status or status == "All":
+            return crossings
+        return self.filter_crossings(crossings, lambda c: c.status == status)
+
+    def filter_crossings_by_strain(
+        self, crossings: List[PyRATCrossing], strain: str
+    ) -> List[PyRATCrossing]:
+        """Filter crossings by strain name."""
+        if not strain or strain == "All":
+            return crossings
+        return self.filter_crossings(
+            crossings, lambda c: c.strain_name == strain or c.strain_name_with_id == strain
+        )
+
+    def search_crossings(
+        self,
+        crossings: List[PyRATCrossing],
+        search_text: str,
+        case_sensitive: bool = False,
+    ) -> List[PyRATCrossing]:
+        """
+        Search crossings for text in various fields.
+
+        Args:
+            crossings: List of PyRATCrossing objects to search.
+            search_text: Text to search for.
+            case_sensitive: Whether to perform case-sensitive search.
+
+        Returns:
+            List of crossings matching the search.
+        """
+        if not search_text:
+            return crossings
+
+        result: List[PyRATCrossing] = []
+        search_lower = search_text if case_sensitive else search_text.lower()
+
+        for crossing in crossings:
+            try:
+                # Fields to search within
+                fields_to_check = [
+                    str(crossing.crossing_id),
+                    crossing.strain_name or "",
+                    crossing.strain_name_with_id or "",
+                    crossing.description or "",
+                    crossing.responsible_fullname or "",
+                    crossing.status or "",
+                ]
+
+                # Perform search
+                for field_value in fields_to_check:
+                    check_value = field_value if case_sensitive else field_value.lower()
+                    if search_lower in check_value:
+                        result.append(crossing)
+                        break
+
+            except Exception as e:
+                logger.error(f"Error searching crossing {crossing.crossing_id}: {e}")
+
+        return result
+
+    def sort_crossings(
+        self,
+        crossings: List[PyRATCrossing],
+        sort_key: str,
+        ascending: bool = True,
+    ) -> List[PyRATCrossing]:
+        """
+        Sort crossings by a specific key.
+
+        Args:
+            crossings: List of PyRATCrossing objects to sort.
+            sort_key: Attribute name to sort by.
+            ascending: Sort direction.
+
+        Returns:
+            Sorted list of crossings.
+        """
+
+        def get_sort_value(crossing: PyRATCrossing, key: str) -> Any:
+            """Extract sortable value from crossing."""
+            if hasattr(crossing, key):
+                value = getattr(crossing, key)
+                if value is None:
+                    if key in ("crossing_id", "raised_count", "requested_groups"):
+                        return -1 if ascending else float("inf")
+                    return ""
+                return value
+            return ""
+
+        try:
+            return sorted(
+                crossings,
+                key=lambda c: get_sort_value(c, sort_key),
+                reverse=not ascending,
+            )
+        except Exception as e:
+            logger.error(f"Error sorting crossings by '{sort_key}': {e}")
+            return crossings
+
+    def get_unique_crossing_values(
+        self, crossings: List[PyRATCrossing], field: str
+    ) -> List[str]:
+        """
+        Get unique values for a field from the crossing list.
+
+        Args:
+            crossings: List of crossings.
+            field: Field name to extract unique values from.
+
+        Returns:
+            Sorted list of unique non-empty values.
+        """
+        values = set()
+        for crossing in crossings:
+            value = getattr(crossing, field, None)
+            if value:
+                values.add(str(value))
+        return sorted(values)
+
+    def count_crossings_by_status(
+        self, crossings: List[PyRATCrossing]
+    ) -> Dict[str, int]:
+        """
+        Count crossings by status.
+
+        Args:
+            crossings: List of crossings.
+
+        Returns:
+            Dictionary with counts for each status.
+        """
+        counts = {"recorded": 0, "set-up": 0, "raised": 0, "discarded": 0}
+        for crossing in crossings:
+            status = crossing.status
+            if status in counts:
+                counts[status] += 1
+        return counts
+
+    def get_crossing_stats(
+        self, crossings: List[PyRATCrossing]
+    ) -> Dict[str, Any]:
+        """
+        Get summary statistics for crossings.
+
+        Args:
+            crossings: List of crossings.
+
+        Returns:
+            Dictionary with various statistics.
+        """
+        total = len(crossings)
+        status_counts = self.count_crossings_by_status(crossings)
+
+        # Calculate performance stats for crossings with valid data
+        performances = [c.performance for c in crossings if c.performance is not None]
+        avg_performance = sum(performances) / len(performances) if performances else None
+
+        total_requested = sum(c.requested_groups or 0 for c in crossings)
+        total_raised = sum(c.raised_count for c in crossings)
+
+        return {
+            "total": total,
+            "status_counts": status_counts,
+            "total_requested": total_requested,
+            "total_raised": total_raised,
+            "avg_performance": avg_performance,
+            "crossings_with_performance": len(performances),
+        }
 
 
 # Create singleton instance
