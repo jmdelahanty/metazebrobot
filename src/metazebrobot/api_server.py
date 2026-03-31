@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, Form, HTTPException, Query, Request
+from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -64,12 +64,42 @@ def _open_readonly_connection(db_path: Path, busy_timeout_ms: int):
 async def lifespan(app: FastAPI):
     db_path = app.state.db_path
     if db_path:
-        # Point data_manager at the same database
+        # Point data_manager at the database.
+        # We can't call data_manager.initialize() directly because it
+        # reads database_path from the desktop app's config which isn't
+        # available in the API server context.
         data_manager.database_path = db_path
         data_manager._is_initialized = True
         data_manager.config_dir = _PACKAGE_DIR / "config"
+
+        # Ensure schema is up to date (screening_step_images table etc.)
+        with data_manager.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS screening_step_images (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dish_id TEXT NOT NULL,
+                    screening_datetime TEXT NOT NULL,
+                    image_filename TEXT NOT NULL,
+                    image_type TEXT DEFAULT 'screening',
+                    caption TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_screening_images_dish_datetime
+                ON screening_step_images(dish_id, screening_datetime)
+            """)
+            conn.commit()
+
         data_manager.load_all_data()
         logger.info(f"data_manager initialised with {db_path}")
+
+        # Ensure screening images directory exists
+        images_dir = db_path.parent / "screening_images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        app.state.screening_images_dir = images_dir
+        logger.info(f"Screening images directory: {images_dir}")
     yield
 
 
@@ -89,6 +119,15 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     _config_images_dir = _PACKAGE_DIR / "config" / "images"
     if _config_images_dir.is_dir():
         app.mount("/images", StaticFiles(directory=str(_config_images_dir)), name="images")
+    # Serve uploaded screening images (directory created in lifespan)
+    if app.state.db_path:
+        _screening_images_dir = app.state.db_path.parent / "screening_images"
+        _screening_images_dir.mkdir(parents=True, exist_ok=True)
+        app.mount(
+            "/screening-images",
+            StaticFiles(directory=str(_screening_images_dir)),
+            name="screening_images",
+        )
 
     # Controller instance for write endpoints
     fish_dish_ctrl = FishDishController()
@@ -270,6 +309,13 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             name: f"/{path}" for name, path in raw_images.items()
         }
 
+        # Gather uploaded images per screening step
+        step_images = {}
+        for s in steps:
+            imgs = data_manager.get_screening_images(dish_id, s.screening_datetime)
+            if imgs:
+                step_images[s.screening_datetime] = imgs
+
         return templates.TemplateResponse("screening/screening_form.html", {
             "request": request,
             "dish": dish,
@@ -280,6 +326,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "finalized": finalized,
             "final_count": final_count,
             "indicator_images": indicator_images,
+            "step_images": step_images,
         })
 
     @app.get("/screening/{dish_id}/steps-table", response_class=HTMLResponse)
@@ -368,6 +415,76 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             url=f"/screening/{dish_id}",
             status_code=303,
         )
+
+    # ------------------------------------------------------------------
+    # Screening images
+    # ------------------------------------------------------------------
+
+    @app.post("/screening/{dish_id}/steps/{screening_datetime}/images", response_class=HTMLResponse)
+    async def upload_screening_image(
+        request: Request,
+        dish_id: str,
+        screening_datetime: str,
+        file: UploadFile = ...,
+        caption: Optional[str] = Form(default=None),
+    ):
+        """Upload an image for a screening step."""
+        # Validate file type
+        allowed = {"image/jpeg", "image/png"}
+        if file.content_type not in allowed:
+            return templates.TemplateResponse("screening/_flash_message.html", {
+                "request": request,
+                "message": f"Invalid file type: {file.content_type}. Only JPEG and PNG are accepted.",
+                "level": "error",
+            })
+
+        # Determine save path
+        images_dir: Path = app.state.screening_images_dir
+        dish_dir = images_dir / dish_id
+        dish_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename: {screening_datetime}_{sequence}.{ext}
+        ext = "jpg" if file.content_type == "image/jpeg" else "png"
+        existing = list(dish_dir.glob(f"{screening_datetime}_*"))
+        seq = len(existing) + 1
+        filename = f"{screening_datetime}_{seq:03d}.{ext}"
+
+        # Save file
+        dest = dish_dir / filename
+        contents = await file.read()
+        dest.write_bytes(contents)
+
+        # Record in database
+        data_manager.save_screening_image(
+            dish_id=dish_id,
+            screening_datetime=screening_datetime,
+            image_filename=filename,
+            caption=caption,
+        )
+
+        # Return updated gallery
+        images = data_manager.get_screening_images(dish_id, screening_datetime)
+        return templates.TemplateResponse("screening/_image_gallery.html", {
+            "request": request,
+            "dish_id": dish_id,
+            "screening_datetime": screening_datetime,
+            "images": images,
+        })
+
+    @app.get("/screening/{dish_id}/steps/{screening_datetime}/images", response_class=HTMLResponse)
+    def screening_image_gallery(
+        request: Request,
+        dish_id: str,
+        screening_datetime: str,
+    ):
+        """HTMX partial — image gallery for a screening step."""
+        images = data_manager.get_screening_images(dish_id, screening_datetime)
+        return templates.TemplateResponse("screening/_image_gallery.html", {
+            "request": request,
+            "dish_id": dish_id,
+            "screening_datetime": screening_datetime,
+            "images": images,
+        })
 
     return app
 

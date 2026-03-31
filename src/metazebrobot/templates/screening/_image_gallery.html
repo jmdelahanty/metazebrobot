@@ -1,0 +1,33 @@
+<div class="image-gallery">
+    {% if images %}
+    <div class="gallery-grid">
+        {% for img in images %}
+        <figure class="gallery-thumb">
+            <img src="/screening-images/{{ dish_id }}/{{ img.image_filename }}"
+                 alt="{{ img.caption or img.image_filename }}">
+            {% if img.caption %}
+            <figcaption>{{ img.caption }}</figcaption>
+            {% endif %}
+        </figure>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <form
+        hx-post="/screening/{{ dish_id }}/steps/{{ screening_datetime }}/images"
+        hx-target="closest .image-gallery"
+        hx-swap="outerHTML"
+        hx-encoding="multipart/form-data"
+    >
+        <div class="grid">
+            <label>
+                <input type="file" name="file" accept="image/jpeg,image/png" capture="environment">
+            </label>
+            <label>
+                Caption
+                <input type="text" name="caption" placeholder="e.g. GFP expression">
+            </label>
+        </div>
+        <button type="submit" class="outline">Upload Image</button>
+    </form>
+</div>

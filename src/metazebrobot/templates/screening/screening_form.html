@@ -42,6 +42,23 @@
     {% include "screening/_steps_table.html" %}
 </div>
 
+{# Image galleries per step #}
+{% if steps %}
+<h3>Step Images</h3>
+{% for s in steps %}
+<details{% if loop.last %} open{% endif %}>
+    <summary>{{ s.screening_datetime }} — {{ s.indicator_screened }}</summary>
+    <div
+        hx-get="/screening/{{ dish.dish_id }}/steps/{{ s.screening_datetime }}/images"
+        hx-trigger="revealed"
+        hx-swap="innerHTML"
+    >
+        Loading images...
+    </div>
+</details>
+{% endfor %}
+{% endif %}
+
 {% if finalized %}
 <article>
     <header>Screening Finalized</header>

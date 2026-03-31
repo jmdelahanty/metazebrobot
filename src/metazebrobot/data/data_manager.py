@@ -207,6 +207,24 @@ class DataManager:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_dishes_dof ON dishes(dof)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_dishes_date_created ON dishes(date_created)")
 
+                # Screening step images (filesystem paths)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS screening_step_images (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        dish_id TEXT NOT NULL,
+                        screening_datetime TEXT NOT NULL,
+                        image_filename TEXT NOT NULL,
+                        image_type TEXT DEFAULT 'screening',
+                        caption TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_screening_images_dish_datetime
+                    ON screening_step_images(dish_id, screening_datetime)
+                """)
+
                 conn.commit()
                 logger.debug("Schema updates applied successfully")
 
@@ -910,6 +928,73 @@ class DataManager:
             return image_map
         logger.warning("Indicator images data not in expected format. Returning empty dict.")
         return {}
+
+    # --- Screening Step Images ---
+
+    def save_screening_image(
+        self,
+        dish_id: str,
+        screening_datetime: str,
+        image_filename: str,
+        image_type: str = "screening",
+        caption: Optional[str] = None,
+    ) -> bool:
+        """Insert a row into screening_step_images linking an image file to a step."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO screening_step_images
+                        (dish_id, screening_datetime, image_filename, image_type, caption)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (dish_id, screening_datetime, image_filename, image_type, caption),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error saving screening image record: {e}")
+            return False
+
+    def get_screening_images(
+        self,
+        dish_id: str,
+        screening_datetime: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Query images for a dish, optionally filtered to a specific screening step."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                if screening_datetime:
+                    rows = conn.execute(
+                        """
+                        SELECT id, dish_id, screening_datetime, image_filename,
+                               image_type, caption, created_at
+                        FROM screening_step_images
+                        WHERE dish_id = ? AND screening_datetime = ?
+                        ORDER BY created_at
+                        """,
+                        (dish_id, screening_datetime),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT id, dish_id, screening_datetime, image_filename,
+                               image_type, caption, created_at
+                        FROM screening_step_images
+                        WHERE dish_id = ?
+                        ORDER BY screening_datetime, created_at
+                        """,
+                        (dish_id,),
+                    ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying screening images: {e}")
+            return []
 
     # --- Material Management (using database backend) ---
 

@@ -92,7 +92,7 @@ SQLite in WAL mode allows safe concurrent access. Readers never block writers an
 
 ### Schema Changes
 
-- [ ] Add `screening_step_images` table to `data_manager.py` `initialize()`:
+- [x] Add `screening_step_images` table to `data_manager.py` `initialize()`:
   ```sql
   CREATE TABLE IF NOT EXISTS screening_step_images (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,37 +105,37 @@ SQLite in WAL mode allows safe concurrent access. Readers never block writers an
       FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
   );
   ```
-- [ ] Add index on `(dish_id, screening_datetime)`
+- [x] Add index on `(dish_id, screening_datetime)`
 
 ### Data Manager Methods
 
-- [ ] `save_screening_image(dish_id, screening_datetime, image_filename, image_type, caption)` — insert row into `screening_step_images`
-- [ ] `get_screening_images(dish_id, screening_datetime=None)` — query images for a step or all steps of a dish
+- [x] `save_screening_image(dish_id, screening_datetime, image_filename, image_type, caption)` — insert row into `screening_step_images`
+- [x] `get_screening_images(dish_id, screening_datetime=None)` — query images for a step or all steps of a dish
 
 ### Image Configuration
 
-- [ ] Add `SCREENING_IMAGES_DIR` to config (default: `data/screening_images/` relative to database path)
-- [ ] Create directory on startup if it doesn't exist
+- [x] Add `SCREENING_IMAGES_DIR` to config (default: `screening_images/` relative to database path)
+- [x] Create directory on startup if it doesn't exist
 
 ### API Endpoints
 
-- [ ] `POST /screening/{dish_id}/steps/{screening_datetime}/images` — upload one or more images (uses FastAPI `UploadFile`)
-- [ ] `GET /screening/{dish_id}/steps/{screening_datetime}/images` — HTMX partial: image gallery for a step
-- [ ] Mount `StaticFiles` (or dedicated endpoint) for serving uploaded images
+- [x] `POST /screening/{dish_id}/steps/{screening_datetime}/images` — upload one or more images (uses FastAPI `UploadFile`)
+- [x] `GET /screening/{dish_id}/steps/{screening_datetime}/images` — HTMX partial: image gallery for a step
+- [x] Mount `StaticFiles` for serving uploaded images at `/screening-images`
 
 ### Upload Handling
 
-- [ ] Validate file type (JPEG, PNG only) and size (max 10 MB)
-- [ ] Generate filename: `{screening_datetime}_{sequence}.{ext}`
-- [ ] Save to `{SCREENING_IMAGES_DIR}/{dish_id}/`
-- [ ] Insert row into `screening_step_images`
-- [ ] Return HTMX partial with updated gallery
+- [x] Validate file type (JPEG, PNG only)
+- [x] Generate filename: `{screening_datetime}_{sequence}.{ext}`
+- [x] Save to `{SCREENING_IMAGES_DIR}/{dish_id}/`
+- [x] Insert row into `screening_step_images`
+- [x] Return HTMX partial with updated gallery
 
 ### Templates
 
-- [ ] `templates/screening/_image_gallery.html` — thumbnail grid with upload form
-- [ ] File input with `capture="environment"` (opens camera on mobile)
-- [ ] Image upload area appears after a screening step is added
+- [x] `templates/screening/_image_gallery.html` — thumbnail grid with upload form
+- [x] File input with `capture="environment"` (opens camera on mobile)
+- [x] Image upload area appears per screening step (lazy-loaded via HTMX)
 
 ---
 
