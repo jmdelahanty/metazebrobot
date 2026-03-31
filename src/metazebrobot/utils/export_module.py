@@ -14,8 +14,8 @@ from datetime import datetime
 from ..data.data_manager import data_manager
 from ..data.survival_data_processor import process_survival_data, create_survival_summary
 from ..utils.file_operations import save_json_file
-from ..controllers.cross_controller import cross_controller
 from ..controllers.fish_dish_controller import fish_dish_controller
+from ..controllers.pyrat_tanks_controller import pyrat_tanks_controller
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ def get_survivability_data() -> pl.DataFrame:
 
 def export_lineage_json(output_path: str) -> bool:
     """
-    Exports the lineage data (original parents, crosses, dishes, relationships)
+    Exports the lineage data (PyRAT crossings, parent tanks, dishes, relationships)
     as a JSON file suitable for graph visualization.
 
     Args:
@@ -129,55 +129,50 @@ def export_lineage_json(output_path: str) -> bool:
     Returns:
         bool: True if export was successful, False otherwise.
     """
-    logger.info(f"Exporting lineage data (including parents) to JSON: {output_path}")
+    logger.info(f"Exporting lineage data to JSON: {output_path}")
     try:
         # 1. Gather Data
-        all_crosses = cross_controller.get_all_crosses()
+        crossings = pyrat_tanks_controller.cached_crossings
         all_dishes = fish_dish_controller.get_all_dishes(include_inactive=True)
 
-        if not all_crosses and not all_dishes:
-            logger.warning("No crosses or dishes found. Exporting empty lineage.")
+        if not crossings and not all_dishes:
+            logger.warning("No crossings or dishes found. Exporting empty lineage.")
             return save_json_file(output_path, {"nodes": [], "links": []})
 
         nodes = []
         links = []
         added_node_ids = set()
 
-        # 2. Process Crosses and their Original Parents
-        for cross_id, cross in all_crosses.items():
-            # Add the cross node itself
-            if cross_id not in added_node_ids:
+        # 2. Process PyRAT crossings and their parent tanks
+        for crossing in crossings:
+            crossing_id = str(crossing.crossing_id)
+            if crossing_id not in added_node_ids:
                 nodes.append({
-                    "id": cross_id,
+                    "id": crossing_id,
                     "type": "cross",
-                    "label": f"Cross {cross_id}\n({cross.line_strain})"
+                    "label": f"Crossing {crossing_id}\n({crossing.strain_name or 'N/A'})"
                 })
-                added_node_ids.add(cross_id)
+                added_node_ids.add(crossing_id)
 
-            # Process Original Parents (Nodes and Links to Cross)
-            if cross.parents:
-                for parent in cross.parents:
-                    parent_id = parent.identifier
+            # Process parent tanks
+            if crossing.parent_tanks:
+                for tank in crossing.parent_tanks:
+                    parent_id = tank.location_display
                     if parent_id not in added_node_ids:
                         nodes.append({
                             "id": parent_id,
                             "type": "original_parent",
-                            "label": f"Parent:\n{parent_id}" # Simplified label
+                            "label": f"Parent:\n{parent_id}"
                         })
                         added_node_ids.add(parent_id)
                     links.append({
                         "source": parent_id,
-                        "target": cross_id,
-                        # "value": 1, # Optional: value might not be meaningful here
+                        "target": crossing_id,
                         "label": "Parent"
                     })
-            else:
-                logger.warning(f"Cross {cross_id} is missing parent information.")
 
-
-        # 3. Process Dishes (Nodes and Links from Cross/Parent Dish) - Logic remains the same
+        # 3. Process Dishes (Nodes and Links from Crossing/Parent Dish)
         for dish_id, dish in all_dishes.items():
-            # Add dish node if not already added
             if dish_id not in added_node_ids:
                 node_label = f"Dish {dish_id}\n"
                 if dish.dish_population_type != "primary":
@@ -192,23 +187,20 @@ def export_lineage_json(output_path: str) -> bool:
                 })
                 added_node_ids.add(dish_id)
 
-            # Add link from parent (Cross or Parent Dish)
             source_id = None
             link_label = ""
-            value = dish.fish_count # Value flowing INTO this dish node
+            value = dish.fish_count
 
             if dish.dish_population_type == "primary":
                 source_id = dish.cross_id
                 link_label = "Primary Dish"
-                # Ensure the cross node exists (should have been added above)
-                if source_id not in added_node_ids:
-                     logger.warning(f"Cross node {source_id} for primary dish {dish_id} not found. Adding.")
-                     # Find cross details to add a better node if possible
-                     cross_info = all_crosses.get(source_id)
-                     cross_label = f"Cross {source_id}"
-                     if cross_info: cross_label += f"\n({cross_info.line_strain})"
-                     nodes.append({"id": source_id, "type": "cross", "label": cross_label})
-                     added_node_ids.add(source_id)
+                if source_id and source_id not in added_node_ids:
+                    crossing = pyrat_tanks_controller.get_crossing_by_id(source_id)
+                    cross_label = f"Crossing {source_id}"
+                    if crossing:
+                        cross_label += f"\n({crossing.strain_name or 'N/A'})"
+                    nodes.append({"id": source_id, "type": "cross", "label": cross_label})
+                    added_node_ids.add(source_id)
 
             elif dish.parent_dish_id:
                 source_id = dish.parent_dish_id
@@ -219,13 +211,9 @@ def export_lineage_json(output_path: str) -> bool:
                 }
                 link_label = pop_type_map.get(dish.dish_population_type, f"Derived ({dish.dish_population_type})")
                 if source_id not in added_node_ids:
-                     logger.warning(f"Parent dish node {source_id} for derived dish {dish_id} not found. Link may be broken.")
-                     source_id = None # Prevent creating a broken link if parent isn't found
+                    logger.warning(f"Parent dish node {source_id} for derived dish {dish_id} not found.")
+                    source_id = None
 
-            else:
-                 logger.warning(f"Dish {dish_id} is not primary and has no parent_dish_id. Skipping link creation.")
-
-            # Add the link if a valid source was determined
             if source_id:
                 links.append({
                     "source": source_id,

@@ -2,12 +2,31 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple, Union, Callable
 
+from pydantic import BaseModel, Field, field_validator
+
 # Import the updated models
 from ..models.fish_dish import FishDish, QualityCheckData, ScreeningStep, ScreeningResults, DishPopulationType
-# Import AggregateResults for type hinting if needed later
-from ..models.cross import AggregateResults
 from ..data.data_manager import data_manager
 from pydantic import ValidationError
+
+
+class AggregateResults(BaseModel):
+    """Aggregated screening results computed on demand from dish data."""
+    total_initially_produced: Optional[int] = Field(default=None)
+    total_positive_final: Optional[int] = Field(default=None)
+    yield_percentage: Optional[float] = Field(default=None)
+    date_aggregated: Optional[str] = Field(default=None)
+
+    @field_validator('date_aggregated', mode='before')
+    @classmethod
+    def validate_date_format(cls, v: Optional[str]) -> Optional[str]:
+        if v:
+            try:
+                datetime.strptime(v, "%Y%m%d")
+                return v
+            except ValueError:
+                raise ValueError(f"Invalid date format: {v}. Expected format: YYYYMMDD")
+        return v
 
 logger = logging.getLogger(__name__)
 

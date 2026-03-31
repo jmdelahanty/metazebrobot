@@ -16,7 +16,6 @@ from .fish_dish_tab import FishDishTab
 from .fish_water_tab import FishWaterTab
 from .poly_l_serine_tab import PolyLSerineTab
 from .dialogs.export_dialog import ExportDialog
-from .cross_tab import CrossTab
 from .pyrat_tanks_tab import PyRATTanksTab
 from .pyrat_crossings_tab import PyRATCrossingsTab
 
@@ -189,12 +188,6 @@ class LabInventoryGUI(QMainWindow):
             # Fish dishes tab
             self.fish_dishes_tab = FishDishTab()
             tabs.addTab(self.fish_dishes_tab, "Fish Dishes")
-
-            # Crosses tab
-            self.cross_tab = CrossTab()
-            tabs.addTab(self.cross_tab, "Crosses")
-
-            self.cross_tab.crosses_updated.connect(self.fish_dishes_tab.update_cross_id_dropdown)
 
             # PyRAT Tanks tab
             self.pyrat_tanks_tab = PyRATTanksTab()

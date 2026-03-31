@@ -44,7 +44,6 @@ class DataManager:
             'poly_l_serine_bottles': {},
             'poly_l_serine_derivatives': {},
             'fish_dishes': {},
-            'crosses': {},
             'screening_protocols': {},
             'indicator_images': {}
         }
@@ -86,7 +85,7 @@ class DataManager:
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
                 tables = [row[0] for row in cursor.fetchall()]
-                expected_tables = ['crosses', 'dishes', 'quality_checks', 'materials']
+                expected_tables = ['dishes', 'quality_checks', 'materials']
 
                 missing_tables = [t for t in expected_tables if t not in tables]
                 if missing_tables:
@@ -144,26 +143,7 @@ class DataManager:
                 if 'screening_date_finalized' not in existing_columns:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN screening_date_finalized TEXT")
 
-                # Phase 2: Create transgenic_indicators table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS transgenic_indicators (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        cross_id TEXT NOT NULL,
-                        modification_type TEXT DEFAULT 'tg',
-                        promoter_driver TEXT,
-                        reporter_effector TEXT NOT NULL,
-                        color TEXT,
-                        expected_expression TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (cross_id) REFERENCES crosses(cross_id)
-                    )
-                """)
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_transgenic_indicators_cross_id
-                    ON transgenic_indicators(cross_id)
-                """)
-
-                # Crossing-level transgenic indicators (keyed by PyRAT crossing_id, no FK to crosses)
+                # Crossing-level transgenic indicators (keyed by PyRAT crossing_id)
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS crossing_transgenic_indicators (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -181,33 +161,7 @@ class DataManager:
                     ON crossing_transgenic_indicators(crossing_id)
                 """)
 
-                # Add aggregate columns to crosses table (if not exist)
-                cursor.execute("PRAGMA table_info(crosses)")
-                crosses_columns = {row[1] for row in cursor.fetchall()}
-
-                if 'agg_total_initially_produced' not in crosses_columns:
-                    cursor.execute("ALTER TABLE crosses ADD COLUMN agg_total_initially_produced INTEGER")
-                if 'agg_total_positive_final' not in crosses_columns:
-                    cursor.execute("ALTER TABLE crosses ADD COLUMN agg_total_positive_final INTEGER")
-                if 'agg_yield_percentage' not in crosses_columns:
-                    cursor.execute("ALTER TABLE crosses ADD COLUMN agg_yield_percentage REAL")
-                if 'agg_date_aggregated' not in crosses_columns:
-                    cursor.execute("ALTER TABLE crosses ADD COLUMN agg_date_aggregated TEXT")
-
-                # Phase 4: Add remaining columns to crosses table for full flattening
-                if 'requested_groups' not in crosses_columns:
-                    cursor.execute("ALTER TABLE crosses ADD COLUMN requested_groups INTEGER")
-                if 'groups_produced' not in crosses_columns:
-                    cursor.execute("ALTER TABLE crosses ADD COLUMN groups_produced INTEGER")
-                if 'notes' not in crosses_columns:
-                    cursor.execute("ALTER TABLE crosses ADD COLUMN notes TEXT")
-                if 'parents' not in crosses_columns:
-                    cursor.execute("ALTER TABLE crosses ADD COLUMN parents TEXT")  # JSON array
-                # TODO: If incross queries become common, consider adding an indexed is_incross column
-                # derived from parents length to avoid JSON parsing in SQLite queries.
-
-                # Phase 3: Add remaining columns to dishes table for full flattening
-                # Re-fetch dishes columns after previous changes
+                # Add remaining columns to dishes table for full flattening
                 cursor.execute("PRAGMA table_info(dishes)")
                 existing_columns = {row[1] for row in cursor.fetchall()}
 
@@ -252,9 +206,6 @@ class DataManager:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_dishes_responsible ON dishes(responsible)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_dishes_dof ON dishes(dof)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_dishes_date_created ON dishes(date_created)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_crosses_cross_type ON crosses(cross_type)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_crosses_cross_status ON crosses(cross_status)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_crosses_responsible_requestor ON crosses(responsible_requestor)")
 
                 conn.commit()
                 logger.debug("Schema updates applied successfully")
@@ -294,7 +245,7 @@ class DataManager:
     def load_all_data(self) -> bool:
         """
         Load static configuration data (protocols, images).
-        Dynamic data (dishes, crosses, materials) is loaded on-demand from database.
+        Dynamic data (dishes, materials) is loaded on-demand from database.
 
         Returns:
             bool: True if static data was loaded successfully
@@ -326,28 +277,6 @@ class DataManager:
             success = False
 
         return success
-
-    def _load_crosses_to_cache(self) -> bool:
-        """Load crosses from database to cache."""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT cross_id, data FROM crosses")
-                
-                crosses = {}
-                for row in cursor.fetchall():
-                    cross_id = row['cross_id']
-                    cross_data = json.loads(row['data'])
-                    crosses[cross_id] = cross_data
-                
-                self.data_cache['crosses'] = crosses
-                logger.debug(f"Loaded {len(crosses)} crosses to cache.")
-                return True
-                
-        except Exception as e:
-            logger.error(f"Error loading crosses to cache: {e}", exc_info=True)
-            self.data_cache['crosses'] = {}
-            return False
 
     def _load_dishes_to_cache(self) -> bool:
         """Load dishes from database to cache."""
@@ -639,80 +568,6 @@ class DataManager:
             logger.error(f"Error loading screening steps for dish {dish_id}: {e}")
             return []
 
-    def _save_transgenic_indicators(self, cursor, cross_id: str, transgenic_details: Optional[Dict[str, Any]]):
-        """Save transgenic indicators for a cross to the normalized table."""
-        # Delete existing indicators for this cross
-        cursor.execute("DELETE FROM transgenic_indicators WHERE cross_id = ?", (cross_id,))
-
-        if not transgenic_details:
-            return
-
-        # Insert indicators
-        indicators = transgenic_details.get('indicators', [])
-        for indicator in indicators:
-            cursor.execute("""
-                INSERT INTO transgenic_indicators
-                (cross_id, modification_type, promoter_driver, reporter_effector,
-                 color, expected_expression)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                cross_id,
-                indicator.get('modification_type', 'tg'),
-                indicator.get('promoter_driver'),
-                indicator.get('reporter_effector'),
-                indicator.get('color'),
-                indicator.get('expected_expression')
-            ))
-
-        # Update the cross's aggregate columns if present
-        aggregate_results = transgenic_details.get('aggregate_results')
-        if aggregate_results:
-            cursor.execute("""
-                UPDATE crosses
-                SET agg_total_initially_produced = ?,
-                    agg_total_positive_final = ?,
-                    agg_yield_percentage = ?,
-                    agg_date_aggregated = ?
-                WHERE cross_id = ?
-            """, (
-                aggregate_results.get('total_initially_produced'),
-                aggregate_results.get('total_positive_final'),
-                aggregate_results.get('yield_percentage'),
-                aggregate_results.get('date_aggregated'),
-                cross_id
-            ))
-
-    def get_transgenic_indicators(self, cross_id: str) -> List[Dict[str, Any]]:
-        """Get all transgenic indicators for a cross from the normalized table."""
-        if not self.is_initialized:
-            return []
-
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT modification_type, promoter_driver, reporter_effector,
-                           color, expected_expression
-                    FROM transgenic_indicators
-                    WHERE cross_id = ?
-                    ORDER BY id ASC
-                """, (cross_id,))
-
-                indicators = []
-                for row in cursor.fetchall():
-                    indicators.append({
-                        'modification_type': row['modification_type'],
-                        'promoter_driver': row['promoter_driver'],
-                        'reporter_effector': row['reporter_effector'],
-                        'color': row['color'],
-                        'expected_expression': row['expected_expression']
-                    })
-                return indicators
-
-        except Exception as e:
-            logger.error(f"Error loading transgenic indicators for cross {cross_id}: {e}")
-            return []
-
     def save_crossing_indicators(self, crossing_id: str, indicators: List[Dict[str, Any]]) -> bool:
         """Save transgenic indicators for a PyRAT crossing.
 
@@ -796,84 +651,6 @@ class DataManager:
             logger.error(f"Error loading crossing indicators for {crossing_id}: {e}")
             return []
 
-    def save_cross(self, cross_data: Dict[str, Any]) -> bool:
-        """Save a single cross to database.
-
-        All database operations are wrapped in a transaction - if any operation
-        fails, all changes are rolled back to maintain data integrity.
-        """
-        if not self.is_initialized:
-            logger.error("DataManager not initialized.")
-            return False
-
-        cross_id = cross_data.get('cross_id')
-        if not cross_id:
-            logger.error("Cannot save cross: missing 'cross_id'")
-            return False
-
-        # Extract aggregate results (can be at top-level or in transgenic_details)
-        aggregate_results = cross_data.get('aggregate_results')
-        transgenic_details = cross_data.get('transgenic_details')
-        if transgenic_details and transgenic_details.get('aggregate_results'):
-            aggregate_results = transgenic_details.get('aggregate_results')
-
-        conn = None
-        try:
-            conn = sqlite3.connect(str(self.database_path))
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys = ON")
-            cursor = conn.cursor()
-
-            # Begin explicit transaction
-            cursor.execute("BEGIN TRANSACTION")
-
-            # Extract parents list
-            parents = cross_data.get('parents', [])
-
-            cursor.execute("""
-                INSERT OR REPLACE INTO crosses
-                (cross_id, request_date, responsible_requestor, line_strain,
-                 cross_type, cross_status, requested_groups, groups_produced,
-                 notes, parents, data,
-                 agg_total_initially_produced, agg_total_positive_final,
-                 agg_yield_percentage, agg_date_aggregated, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, (
-                cross_id,
-                cross_data.get('request_date'),
-                cross_data.get('responsible_requestor'),
-                cross_data.get('line_strain'),
-                cross_data.get('cross_type'),
-                cross_data.get('cross_status'),
-                cross_data.get('requested_groups'),
-                cross_data.get('groups_produced'),
-                cross_data.get('notes'),
-                json.dumps(parents) if parents else None,
-                json.dumps(cross_data),  # Keep JSON for backward compatibility during transition
-                aggregate_results.get('total_initially_produced') if aggregate_results else None,
-                aggregate_results.get('total_positive_final') if aggregate_results else None,
-                aggregate_results.get('yield_percentage') if aggregate_results else None,
-                aggregate_results.get('date_aggregated') if aggregate_results else None
-            ))
-
-            # Save transgenic indicators (within same transaction)
-            self._save_transgenic_indicators(cursor, cross_id, transgenic_details)
-
-            # Commit transaction - all or nothing
-            conn.commit()
-
-            logger.info(f"Successfully saved cross {cross_id} to database")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error saving cross {cross_id}: {e}", exc_info=True)
-            if conn:
-                conn.rollback()
-            return False
-        finally:
-            if conn:
-                conn.close()
-
     def load_single_dish(self, dish_id: str) -> Optional[Dict[str, Any]]:
         """Load a single dish by ID from database.
 
@@ -956,81 +733,6 @@ class DataManager:
             logger.error(f"Error loading dish {dish_id}: {e}", exc_info=True)
             return None
 
-    def load_single_cross(self, cross_id: str) -> Optional[Dict[str, Any]]:
-        """Load a single cross by ID from database.
-
-        Loads cross data primarily from flattened columns, supplemented with
-        normalized transgenic_indicators data.
-        Falls back to JSON column for any fields not yet in columns.
-        """
-        if not self.is_initialized:
-            logger.error("DataManager not initialized.")
-            return None
-
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT cross_id, request_date, responsible_requestor, line_strain,
-                           cross_type, cross_status, requested_groups, groups_produced,
-                           notes, parents, data,
-                           agg_total_initially_produced, agg_total_positive_final,
-                           agg_yield_percentage, agg_date_aggregated
-                    FROM crosses WHERE cross_id = ?
-                """, (cross_id,))
-                row = cursor.fetchone()
-
-                if row:
-                    # Start with JSON data as base (for backward compatibility)
-                    cross_data = json.loads(row['data']) if row['data'] else {}
-
-                    # Override with flattened column values (columns are authoritative)
-                    cross_data['cross_id'] = row['cross_id']
-                    cross_data['request_date'] = row['request_date']
-                    cross_data['responsible_requestor'] = row['responsible_requestor']
-                    cross_data['line_strain'] = row['line_strain']
-                    cross_data['cross_type'] = row['cross_type']
-                    cross_data['cross_status'] = row['cross_status']
-                    cross_data['requested_groups'] = row['requested_groups']
-                    cross_data['groups_produced'] = row['groups_produced']
-                    cross_data['notes'] = row['notes']
-
-                    # Reconstruct parents from flattened column
-                    if row['parents']:
-                        cross_data['parents'] = json.loads(row['parents'])
-
-                    # Load transgenic indicators from normalized table
-                    indicators = self.get_transgenic_indicators(cross_id)
-
-                    # If we have normalized transgenic data, use it
-                    if indicators:
-                        if cross_data.get('transgenic_details') is None:
-                            cross_data['transgenic_details'] = {}
-                        cross_data['transgenic_details']['indicators'] = indicators
-
-                    # If we have normalized aggregate data, use it
-                    if row['agg_total_initially_produced'] is not None:
-                        aggregate_results = {
-                            'total_initially_produced': row['agg_total_initially_produced'],
-                            'total_positive_final': row['agg_total_positive_final'],
-                            'yield_percentage': row['agg_yield_percentage'],
-                            'date_aggregated': row['agg_date_aggregated']
-                        }
-                        # Store in transgenic_details if it exists, otherwise at top level
-                        if cross_data.get('transgenic_details') is not None:
-                            cross_data['transgenic_details']['aggregate_results'] = aggregate_results
-                        else:
-                            cross_data['aggregate_results'] = aggregate_results
-
-                    return cross_data
-                else:
-                    logger.warning(f"Cross {cross_id} not found in database")
-                    return None
-
-        except Exception as e:
-            logger.error(f"Error loading cross {cross_id}: {e}", exc_info=True)
-            return None
-
     def update_dish_quality_check(self, dish_id: str, check_data: Dict[str, Any]) -> bool:
         """Update quality checks for a dish."""
         logger.debug(f"Updating quality check for dish {dish_id}")
@@ -1061,7 +763,7 @@ class DataManager:
         required_keys = [
             'agarose_bottles', 'agarose_solutions', 'fish_water_sources',
             'fish_water_derivatives', 'poly_l_serine_bottles',
-            'poly_l_serine_derivatives', 'fish_dishes', 'crosses',
+            'poly_l_serine_derivatives', 'fish_dishes',
             'screening_protocols', 'indicator_images'
         ]
 
@@ -1189,65 +891,6 @@ class DataManager:
                 return dishes
         except Exception as e:
             logger.error(f"Error loading dishes from database: {e}")
-            return {}
-
-    def get_crosses(self) -> Dict[str, Any]:
-        """Get all crosses from database in a single bulk query."""
-        if not self.is_initialized:
-            return {}
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                # Single bulk query for all crosses
-                cursor.execute("""
-                    SELECT cross_id, request_date, responsible_requestor, line_strain,
-                           cross_type, cross_status, requested_groups, groups_produced,
-                           notes, parents, data,
-                           agg_total_initially_produced, agg_total_positive_final,
-                           agg_yield_percentage, agg_date_aggregated
-                    FROM crosses
-                """)
-
-                crosses = {}
-                for row in cursor.fetchall():
-                    cross_id = row['cross_id']
-
-                    # Start with JSON data as base (for backward compatibility)
-                    cross_data = json.loads(row['data']) if row['data'] else {}
-
-                    # Override with flattened column values (columns are authoritative)
-                    cross_data['cross_id'] = cross_id
-                    cross_data['request_date'] = row['request_date']
-                    cross_data['responsible_requestor'] = row['responsible_requestor']
-                    cross_data['line_strain'] = row['line_strain']
-                    cross_data['cross_type'] = row['cross_type']
-                    cross_data['cross_status'] = row['cross_status']
-                    cross_data['requested_groups'] = row['requested_groups']
-                    cross_data['groups_produced'] = row['groups_produced']
-                    cross_data['notes'] = row['notes']
-
-                    # Reconstruct parents from flattened column
-                    if row['parents']:
-                        cross_data['parents'] = json.loads(row['parents'])
-
-                    # Include aggregate results if available
-                    if row['agg_total_initially_produced'] is not None:
-                        aggregate_results = {
-                            'total_initially_produced': row['agg_total_initially_produced'],
-                            'total_positive_final': row['agg_total_positive_final'],
-                            'yield_percentage': row['agg_yield_percentage'],
-                            'date_aggregated': row['agg_date_aggregated']
-                        }
-                        if cross_data.get('transgenic_details') is not None:
-                            cross_data['transgenic_details']['aggregate_results'] = aggregate_results
-                        else:
-                            cross_data['aggregate_results'] = aggregate_results
-
-                    crosses[cross_id] = cross_data
-
-                return crosses
-        except Exception as e:
-            logger.error(f"Error loading crosses from database: {e}")
             return {}
 
     def get_screening_protocols(self) -> Dict[str, Dict[str, Any]]:
@@ -1473,112 +1116,6 @@ class DataManager:
 
         return (dishes_processed, steps_migrated)
 
-    def migrate_transgenic_data_to_normalized_table(self) -> Tuple[int, int]:
-        """
-        Migrate transgenic_details data from JSON column to normalized tables.
-
-        Returns:
-            Tuple of (crosses_processed, indicators_migrated)
-        """
-        if not self.is_initialized:
-            logger.error("DataManager not initialized.")
-            return (0, 0)
-
-        crosses_processed = 0
-        indicators_migrated = 0
-
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-
-                # Get all crosses with their JSON data
-                cursor.execute("SELECT cross_id, data FROM crosses")
-                crosses = cursor.fetchall()
-
-                for row in crosses:
-                    cross_id = row['cross_id']
-                    try:
-                        cross_data = json.loads(row['data'])
-                        transgenic_details = cross_data.get('transgenic_details')
-
-                        if transgenic_details:
-                            # Check if already migrated
-                            cursor.execute(
-                                "SELECT COUNT(*) FROM transgenic_indicators WHERE cross_id = ?",
-                                (cross_id,)
-                            )
-                            existing_count = cursor.fetchone()[0]
-
-                            if existing_count == 0:
-                                # Migrate transgenic indicators
-                                indicators = transgenic_details.get('indicators', [])
-                                for indicator in indicators:
-                                    cursor.execute("""
-                                        INSERT OR IGNORE INTO transgenic_indicators
-                                        (cross_id, modification_type, promoter_driver,
-                                         reporter_effector, color, expected_expression)
-                                        VALUES (?, ?, ?, ?, ?, ?)
-                                    """, (
-                                        cross_id,
-                                        indicator.get('modification_type', 'tg'),
-                                        indicator.get('promoter_driver'),
-                                        indicator.get('reporter_effector'),
-                                        indicator.get('color'),
-                                        indicator.get('expected_expression')
-                                    ))
-                                    indicators_migrated += 1
-
-                                # Update aggregate columns
-                                aggregate_results = transgenic_details.get('aggregate_results')
-                                if aggregate_results:
-                                    cursor.execute("""
-                                        UPDATE crosses
-                                        SET agg_total_initially_produced = ?,
-                                            agg_total_positive_final = ?,
-                                            agg_yield_percentage = ?,
-                                            agg_date_aggregated = ?
-                                        WHERE cross_id = ?
-                                    """, (
-                                        aggregate_results.get('total_initially_produced'),
-                                        aggregate_results.get('total_positive_final'),
-                                        aggregate_results.get('yield_percentage'),
-                                        aggregate_results.get('date_aggregated'),
-                                        cross_id
-                                    ))
-
-                        # Also check for top-level aggregate_results (non-transgenic crosses)
-                        aggregate_results = cross_data.get('aggregate_results')
-                        if aggregate_results and not transgenic_details:
-                            cursor.execute("""
-                                UPDATE crosses
-                                SET agg_total_initially_produced = ?,
-                                    agg_total_positive_final = ?,
-                                    agg_yield_percentage = ?,
-                                    agg_date_aggregated = ?
-                                WHERE cross_id = ?
-                            """, (
-                                aggregate_results.get('total_initially_produced'),
-                                aggregate_results.get('total_positive_final'),
-                                aggregate_results.get('yield_percentage'),
-                                aggregate_results.get('date_aggregated'),
-                                cross_id
-                            ))
-
-                        crosses_processed += 1
-
-                    except Exception as e:
-                        logger.warning(f"Error migrating cross {cross_id}: {e}")
-                        continue
-
-                conn.commit()
-                logger.info(f"Migration complete: {crosses_processed} crosses processed, "
-                           f"{indicators_migrated} indicators migrated")
-
-        except Exception as e:
-            logger.error(f"Migration failed: {e}", exc_info=True)
-
-        return (crosses_processed, indicators_migrated)
-
     def migrate_dishes_to_flattened_columns(self) -> Tuple[int, int]:
         """
         Migrate dish data from JSON column to flattened columns.
@@ -1665,72 +1202,6 @@ class DataManager:
 
         return (dishes_processed, dishes_updated)
 
-    def migrate_crosses_to_flattened_columns(self) -> Tuple[int, int]:
-        """
-        Migrate cross data from JSON column to flattened columns.
-
-        This extracts data (requested_groups, groups_produced, notes, parents)
-        from the JSON column and populates the dedicated flattened columns.
-
-        Returns:
-            Tuple of (crosses_processed, crosses_updated)
-        """
-        if not self.is_initialized:
-            logger.error("DataManager not initialized.")
-            return (0, 0)
-
-        crosses_processed = 0
-        crosses_updated = 0
-
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-
-                # Get all crosses with their JSON data
-                cursor.execute("SELECT cross_id, data FROM crosses")
-                crosses = cursor.fetchall()
-
-                for row in crosses:
-                    cross_id = row['cross_id']
-                    try:
-                        cross_data = json.loads(row['data']) if row['data'] else {}
-
-                        # Extract data for flattened columns
-                        parents = cross_data.get('parents', []) or []
-
-                        # Update flattened columns
-                        cursor.execute("""
-                            UPDATE crosses
-                            SET requested_groups = COALESCE(requested_groups, ?),
-                                groups_produced = COALESCE(groups_produced, ?),
-                                notes = COALESCE(notes, ?),
-                                parents = COALESCE(parents, ?)
-                            WHERE cross_id = ?
-                        """, (
-                            cross_data.get('requested_groups'),
-                            cross_data.get('groups_produced'),
-                            cross_data.get('notes'),
-                            json.dumps(parents) if parents else None,
-                            cross_id
-                        ))
-
-                        if cursor.rowcount > 0:
-                            crosses_updated += 1
-
-                        crosses_processed += 1
-
-                    except Exception as e:
-                        logger.warning(f"Error migrating cross {cross_id}: {e}")
-                        continue
-
-                conn.commit()
-                logger.info(f"Crosses flattening complete: {crosses_processed} crosses processed, "
-                           f"{crosses_updated} crosses updated")
-
-        except Exception as e:
-            logger.error(f"Crosses flattening migration failed: {e}", exc_info=True)
-
-        return (crosses_processed, crosses_updated)
 
 
 # Create a singleton instance for global access
