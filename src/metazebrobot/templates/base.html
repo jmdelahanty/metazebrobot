@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}MetaZebrobot{% endblock %}</title>
+    <link rel="stylesheet" href="/static/pico.min.css">
+    <script src="/static/htmx.min.js"></script>
+    <style>
+        .flash { padding: 0.75rem 1rem; border-radius: var(--pico-border-radius); margin-bottom: 1rem; }
+        .flash-success { background: var(--pico-ins-color); }
+        .flash-error { background: var(--pico-del-color); }
+        .screening-steps-table { font-size: 0.9rem; }
+        .protocol-box { background: var(--pico-card-background-color); border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius); padding: 1rem; margin-bottom: 1rem; }
+        .indicator-images { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; }
+        .indicator-thumb { margin: 0; max-width: 160px; }
+        .indicator-thumb img { border-radius: var(--pico-border-radius); max-height: 120px; width: auto; }
+        .indicator-thumb figcaption { font-size: 0.8rem; text-align: center; }
+    </style>
+</head>
+<body>
+    <nav class="container-fluid">
+        <ul>
+            <li><strong>MetaZebrobot</strong></li>
+        </ul>
+        <ul>
+            <li><a href="/screening/">Screening</a></li>
+            <li><a href="/health">API Health</a></li>
+        </ul>
+    </nav>
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

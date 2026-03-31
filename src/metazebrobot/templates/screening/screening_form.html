@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Screen — {{ dish.dish_id }}{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>{{ dish.dish_id }}</h2>
+    <p>{{ dish.genotype }} &mdash; {{ dish.fish_count }} fish &mdash; DPF {{ dpf if dpf is not none else "?" }}</p>
+</hgroup>
+
+{# Protocol guidance #}
+{% if protocol %}
+<details class="protocol-box" open>
+    <summary><strong>Screening Protocol</strong></summary>
+    <ol>
+        {% for step in protocol.steps %}
+        <li{% if current_step and step == current_step %} style="font-weight:bold"{% endif %}>
+            <strong>DPF {{ step.dpf_range[0] }}{% if step.dpf_range[0] != step.dpf_range[1] %}-{{ step.dpf_range[1] }}{% endif %}:</strong>
+            {{ step.indicators | join(", ") }}
+            — {{ step.criteria_suggestion }}
+            {% if step.notes_suggestion %}<br><small>{{ step.notes_suggestion }}</small>{% endif %}
+            {% if indicator_images %}
+            <div class="indicator-images">
+                {% for ind in step.indicators %}
+                {% if ind in indicator_images %}
+                <figure class="indicator-thumb">
+                    <img src="{{ indicator_images[ind] }}" alt="{{ ind }}">
+                    <figcaption>{{ ind }}</figcaption>
+                </figure>
+                {% endif %}
+                {% endfor %}
+            </div>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ol>
+</details>
+{% endif %}
+
+{# Existing steps #}
+<h3>Screening Steps</h3>
+<div id="steps-table">
+    {% include "screening/_steps_table.html" %}
+</div>
+
+{% if finalized %}
+<article>
+    <header>Screening Finalized</header>
+    <p><strong>Final positive count:</strong> {{ final_count }}</p>
+</article>
+{% else %}
+
+{# Add step form #}
+<details open>
+    <summary><strong>Add Screening Step</strong></summary>
+    <form
+        hx-post="/screening/{{ dish.dish_id }}/steps"
+        hx-target="#steps-table"
+        hx-swap="innerHTML"
+    >
+        <div class="grid">
+            <label>
+                Date/Time
+                <input type="hidden" name="screening_datetime" id="screening_datetime">
+                <input type="datetime-local" id="datetime_picker"
+                       onchange="document.getElementById('screening_datetime').value = formatDT(this.value)">
+            </label>
+            <label>
+                DPF Screened
+                <input type="number" name="dpf_screened" min="0" value="{{ dpf if dpf is not none else '' }}" required>
+            </label>
+        </div>
+
+        <div class="grid">
+            <label>
+                Indicator
+                <input type="text" name="indicator_screened"
+                       value="{{ current_step.indicators | join(', ') if current_step and current_step.indicators else '' }}"
+                       required>
+            </label>
+            <label>
+                Criteria
+                <input type="text" name="criteria"
+                       value="{{ current_step.criteria_suggestion if current_step else '' }}"
+                       required>
+            </label>
+        </div>
+
+        <div class="grid">
+            <label>
+                Count Screened
+                <input type="number" name="count_screened_this_step" min="0" required>
+            </label>
+            <label>
+                Number Positive
+                <input type="number" name="number_positive" min="0" required>
+            </label>
+        </div>
+
+        <details>
+            <summary>Removal Details</summary>
+            <div class="grid">
+                <label>
+                    Removed (Pigmented)
+                    <input type="number" name="number_removed_pigmented" min="0">
+                </label>
+                <label>
+                    Removed (Negative)
+                    <input type="number" name="number_removed_negative" min="0">
+                </label>
+                <label>
+                    Removed (Other)
+                    <input type="number" name="number_removed_other" min="0">
+                </label>
+            </div>
+        </details>
+
+        <label>
+            <input type="checkbox" name="tricaine_used" value="true">
+            Tricaine used
+        </label>
+
+        <label>
+            Notes
+            <textarea name="notes" rows="2">{{ current_step.notes_suggestion if current_step else '' }}</textarea>
+        </label>
+
+        <button type="submit">Add Step</button>
+    </form>
+</details>
+
+{# Finalize form #}
+<details>
+    <summary><strong>Finalize Screening</strong></summary>
+    <form method="post" action="/screening/{{ dish.dish_id }}/finalize">
+        <div class="grid">
+            <label>
+                Final Positive Count
+                <input type="number" name="final_positive_count" min="0" required>
+            </label>
+            <label>
+                Date Finalized (YYYYMMDD)
+                <input type="text" name="date_finalized" pattern="\d{8}"
+                       placeholder="e.g. 20260330" required>
+            </label>
+        </div>
+        <button type="submit" class="secondary">Finalize Screening</button>
+    </form>
+</details>
+
+{% endif %}
+
+<p><a href="/screening/">&larr; Back to dish list</a></p>
+
+<script>
+function formatDT(val) {
+    // Convert "2026-03-30T14:30" to "20260330T14:30:00"
+    if (!val) return "";
+    const [date, time] = val.split("T");
+    const d = date.replace(/-/g, "");
+    const t = time.length === 5 ? time + ":00" : time;
+    return d + "T" + t;
+}
+</script>
+{% endblock %}

@@ -232,6 +232,8 @@ class DataManager:
             conn = sqlite3.connect(str(self.database_path))
             conn.row_factory = sqlite3.Row  # Enable dict-like access to rows
             conn.execute("PRAGMA foreign_keys = ON")  # Enable foreign key constraints
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA busy_timeout = 3000")
             yield conn
         except Exception as e:
             if conn:

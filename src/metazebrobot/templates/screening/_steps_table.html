@@ -1,0 +1,43 @@
+{% if flash_message is defined and flash_message %}
+<div class="flash flash-{{ flash_level }}" role="alert">
+    {{ flash_message }}
+</div>
+{% endif %}
+
+{% if steps %}
+<figure>
+<table class="screening-steps-table" role="grid">
+    <thead>
+        <tr>
+            <th>Date/Time</th>
+            <th>DPF</th>
+            <th>Indicator</th>
+            <th>Screened</th>
+            <th>Positive</th>
+            <th>Removed</th>
+            <th>Tricaine</th>
+            <th>Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for s in steps %}
+        <tr>
+            <td>{{ s.screening_datetime }}</td>
+            <td>{{ s.dpf_screened }}</td>
+            <td>{{ s.indicator_screened }}</td>
+            <td>{{ s.count_screened_this_step }}</td>
+            <td>{{ s.number_positive }}</td>
+            <td>
+                {% set removed = (s.number_removed_pigmented or 0) + (s.number_removed_negative or 0) + (s.number_removed_other or 0) %}
+                {{ removed if removed > 0 else "-" }}
+            </td>
+            <td>{{ "Yes" if s.tricaine_used else "No" }}</td>
+            <td>{{ s.notes or "-" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p><em>No screening steps recorded yet.</em></p>
+{% endif %}

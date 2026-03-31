@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Screening — Dish List{% endblock %}
+
+{% block content %}
+<h2>Active Dishes</h2>
+
+{% if dishes %}
+<figure>
+<table role="grid">
+    <thead>
+        <tr>
+            <th>Dish ID</th>
+            <th>Genotype</th>
+            <th>DPF</th>
+            <th>Fish</th>
+            <th>Responsible</th>
+            <th>Steps</th>
+            <th>Status</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in dishes %}
+        <tr>
+            <td>{{ d.dish_id }}</td>
+            <td>{{ d.genotype }}</td>
+            <td>{{ d.dpf if d.dpf is not none else "?" }}</td>
+            <td>{{ d.fish_count }}</td>
+            <td>{{ d.responsible }}</td>
+            <td>{{ d.step_count }}</td>
+            <td>
+                {% if d.finalized %}
+                    <mark>Done</mark>
+                {% elif d.step_count > 0 %}
+                    In progress
+                {% else %}
+                    Not started
+                {% endif %}
+            </td>
+            <td><a href="/screening/{{ d.dish_id }}" role="button" class="outline">Screen</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p>No active dishes found.</p>
+{% endif %}
+{% endblock %}

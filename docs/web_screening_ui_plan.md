@@ -46,45 +46,45 @@ SQLite in WAL mode allows safe concurrent access. Readers never block writers an
 
 ### Server Setup
 
-- [ ] Add `PRAGMA journal_mode = WAL` and `PRAGMA busy_timeout = 3000` to `data_manager.get_connection()`
-- [ ] Initialize `data_manager` in FastAPI lifespan event (currently `api_server.py` uses raw sqlite3 connections; write endpoints need the controller)
-- [ ] Add Jinja2Templates setup to `create_app()` in `api_server.py`
-- [ ] Mount `StaticFiles` at `/static` for HTMX and CSS
-- [ ] Add `--lab-network` flag (or config) to bind `0.0.0.0` instead of `127.0.0.1`
+- [x] Add `PRAGMA journal_mode = WAL` and `PRAGMA busy_timeout = 3000` to `data_manager.get_connection()`
+- [x] Initialize `data_manager` in FastAPI lifespan event (currently `api_server.py` uses raw sqlite3 connections; write endpoints need the controller)
+- [x] Add Jinja2Templates setup to `create_app()` in `api_server.py`
+- [x] Mount `StaticFiles` at `/static` for HTMX and CSS
+- [x] Add `--lab-network` flag (or config) to bind `0.0.0.0` instead of `127.0.0.1`
 
 ### Static Assets
 
-- [ ] Vendor `htmx.min.js` into `src/metazebrobot/static/`
-- [ ] Vendor `pico.min.css` (or similar classless CSS) into `src/metazebrobot/static/`
+- [x] Vendor `htmx.min.js` into `src/metazebrobot/static/`
+- [x] Vendor `pico.min.css` (or similar classless CSS) into `src/metazebrobot/static/`
 
 ### Templates
 
-- [ ] `templates/base.html` — layout with HTMX script, Pico CSS, nav bar
-- [ ] `templates/screening/dish_list.html` — table of active dishes with links to screening form
-- [ ] `templates/screening/screening_form.html` — main page: protocol display, existing steps table, add-step form, finalize section
-- [ ] `templates/screening/_steps_table.html` — HTMX partial: just the steps `<table>` rows (swapped in after adding a step)
-- [ ] `templates/screening/_flash_message.html` — HTMX partial: success/error banner
+- [x] `templates/base.html` — layout with HTMX script, Pico CSS, nav bar
+- [x] `templates/screening/dish_list.html` — table of active dishes with links to screening form
+- [x] `templates/screening/screening_form.html` — main page: protocol display, existing steps table, add-step form, finalize section
+- [x] `templates/screening/_steps_table.html` — HTMX partial: just the steps `<table>` rows (swapped in after adding a step)
+- [x] `templates/screening/_flash_message.html` — HTMX partial: success/error banner
 
 ### API Endpoints
 
-- [ ] `GET /screening/` — dish picker page (active dishes only)
-- [ ] `GET /screening/{dish_id}` — screening form page for a specific dish
-- [ ] `POST /screening/{dish_id}/steps` — submit new screening step (calls `fish_dish_controller.add_screening_step()`, returns HTMX partial)
-- [ ] `POST /screening/{dish_id}/finalize` — submit final positive count (calls `fish_dish_controller.finalize_screening()`)
-- [ ] `GET /screening/{dish_id}/steps-table` — HTMX partial endpoint for refreshing the steps table
+- [x] `GET /screening/` — dish picker page (active dishes only)
+- [x] `GET /screening/{dish_id}` — screening form page for a specific dish
+- [x] `POST /screening/{dish_id}/steps` — submit new screening step (calls `fish_dish_controller.add_screening_step()`, returns HTMX partial)
+- [x] `POST /screening/{dish_id}/finalize` — submit final positive count (calls `fish_dish_controller.finalize_screening()`)
+- [x] `GET /screening/{dish_id}/steps-table` — HTMX partial endpoint for refreshing the steps table
 
 ### Form Features
 
-- [ ] DPF auto-calculated from dish DOF + screening date (server-side on load, client-side on date change with minimal vanilla JS)
-- [ ] Indicator and criteria pre-filled from `screening_protocols.json` based on genotype and DPF
-- [ ] Protocol text display at top of form (mirrors desktop ScreeningDialog)
-- [ ] Reference indicator images displayed alongside protocol
-- [ ] HTMX: submitting a step updates steps table without full page reload
+- [x] DPF auto-calculated from dish DOF + screening date (server-side on load, client-side on date change with minimal vanilla JS)
+- [x] Indicator and criteria pre-filled from `screening_protocols.json` based on genotype and DPF
+- [x] Protocol text display at top of form (mirrors desktop ScreeningDialog)
+- [x] Reference indicator images displayed alongside protocol
+- [x] HTMX: submitting a step updates steps table without full page reload
 
 ### Packaging
 
-- [ ] Add `jinja2` explicitly to `[project.optional-dependencies] api` in `pyproject.toml`
-- [ ] Add `templates/` and `static/` to package data
+- [x] Add `jinja2` explicitly to `[project.optional-dependencies] api` in `pyproject.toml`
+- [x] Add `templates/` and `static/` to package data
 
 ---
 

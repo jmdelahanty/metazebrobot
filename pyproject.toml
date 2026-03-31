@@ -17,6 +17,7 @@ metazebrobot = "metazebrobot.cli:main"
 api = [
   "fastapi>=0.110,<1",
   "uvicorn>=0.23,<1",
+  "jinja2>=3.1,<4",
 ]
 
 [build-system]
@@ -26,7 +27,7 @@ requires = ["hatchling"]
 # Only one instance of this section needed
 [tool.hatch.build]
 packages = ["src/metazebrobot"]
-include = ["src/metazebrobot/config/**"]
+include = ["src/metazebrobot/config/**", "src/metazebrobot/static/**", "src/metazebrobot/templates/**"]
 
 # --- Keep your pixi sections below ---
 [tool.pixi.project]
