@@ -106,12 +106,26 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return app.state.db_path
 
     def _dpf_from_dof(dof_str: str, ref_date: Optional[datetime] = None) -> Optional[int]:
-        """Calculate days-post-fertilisation from DOF string (YYYYMMDD)."""
+        """Calculate days-post-fertilisation from DOF string (YYYYMMDD).
+
+        If ref_date is not provided, defaults to today.
+        """
         try:
             dof = datetime.strptime(dof_str, "%Y%m%d")
             today = ref_date or datetime.now()
             return (today - dof).days
         except (ValueError, TypeError):
+            return None
+
+    def _last_screening_date(dish) -> Optional[datetime]:
+        """Return the datetime of the most recent screening step, or None."""
+        if not dish.screening_results or not dish.screening_results.screenings:
+            return None
+        last = dish.screening_results.screenings[-1]
+        try:
+            date_part = last.screening_datetime.split("T")[0]
+            return datetime.strptime(date_part, "%Y%m%d")
+        except (ValueError, IndexError):
             return None
 
     def _protocol_for_genotype(genotype: str, dpf: Optional[int]):
@@ -216,7 +230,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         all_dishes = fish_dish_ctrl.get_all_dishes(include_inactive=False)
         dishes = []
         for dish_id, dish in sorted(all_dishes.items()):
-            dpf = _dpf_from_dof(dish.dof)
+            ref_date = _last_screening_date(dish)
+            dpf = _dpf_from_dof(dish.dof, ref_date)
             step_count = len(dish.screening_results.screenings) if dish.screening_results else 0
             finalized = dish.screening_results.final_positive_count is not None if dish.screening_results else False
             dishes.append({
@@ -241,7 +256,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if not dish:
             raise HTTPException(status_code=404, detail="Dish not found")
 
-        dpf = _dpf_from_dof(dish.dof)
+        ref_date = _last_screening_date(dish)
+        dpf = _dpf_from_dof(dish.dof, ref_date)
         protocol, current_step = _protocol_for_genotype(dish.genotype, dpf)
 
         steps = dish.screening_results.screenings if dish.screening_results else []
