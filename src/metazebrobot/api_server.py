@@ -259,6 +259,106 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         except sqlite3.Error as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    @app.get("/crosses/{cross_id}")
+    def get_cross_api(
+        cross_id: str,
+        include_dishes: bool = Query(default=False),
+    ) -> Dict[str, Any]:
+        """Fetch crossing info from PyRAT API.
+
+        Returns a response compatible with the palette zebrobot_snapshot contract:
+        cross_id, line_strain, parents, and optionally dishes from the local DB.
+        """
+        import keyring
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        # Get PyRAT credentials
+        base_url = keyring.get_password("pyrat-api", "base_url")
+        client_token = keyring.get_password("pyrat-api", "client_token")
+        user_token = keyring.get_password("pyrat-api", "user_token")
+        if not all([base_url, client_token, user_token]):
+            raise HTTPException(status_code=503, detail="PyRAT API credentials not configured")
+
+        # Fetch crossing from PyRAT (list endpoint with crossing_id filter)
+        if not base_url.endswith("/"):
+            base_url += "/"
+        url = f"{base_url}api/v3/tanks/crossings"
+        try:
+            resp = requests.get(
+                url,
+                auth=(client_token, user_token),
+                headers={"Accept": "application/json"},
+                params={
+                    "crossing_id": cross_id,
+                    "l": 1,
+                    "k": [
+                        "crossing_id", "status", "strain_name", "strain_name_with_id",
+                        "responsible_fullname", "tanks",
+                    ],
+                    "tk": [
+                        "tank_id", "tank_label", "strain_name",
+                        "number_of_male", "number_of_female",
+                        "location_rack_name", "tank_position",
+                    ],
+                },
+                verify=False,
+                timeout=10,
+            )
+        except requests.RequestException as exc:
+            raise HTTPException(status_code=503, detail=f"PyRAT API error: {exc}") from exc
+
+        if resp.status_code != 200:
+            raise HTTPException(status_code=503, detail=f"PyRAT API returned {resp.status_code}")
+
+        results = resp.json()
+        if not results:
+            raise HTTPException(status_code=404, detail="Cross not found in PyRAT")
+
+        data = results[0]
+
+        # Build parents list in the format palette expects
+        parents = []
+        for tank in (data.get("tanks") or {}).get("parents", []) or []:
+            rack = tank.get("location_rack_name", "")
+            pos = tank.get("tank_position", "")
+            tid = tank.get("tank_id", "")
+            identifier = f"{rack}:{pos} ({tid})" if rack and pos else f"#{tid}"
+            n_male = tank.get("number_of_male", 0) or 0
+            n_female = tank.get("number_of_female", 0) or 0
+            if n_male > 0 and n_female == 0:
+                sex = "M"
+            elif n_female > 0 and n_male == 0:
+                sex = "F"
+            else:
+                sex = "unknown"
+            parents.append({"identifier": identifier, "sex": sex})
+
+        result: Dict[str, Any] = {
+            "cross_id": str(data.get("crossing_id", cross_id)),
+            "line_strain": data.get("strain_name") or data.get("strain_name_with_id") or "",
+            "parents": parents,
+        }
+
+        if include_dishes:
+            db_path = _require_db_path()
+            try:
+                with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                    dishes = conn.execute(
+                        """
+                        SELECT dish_id, status, fish_count, dof, date_created
+                        FROM dishes WHERE cross_id = ?
+                        ORDER BY date_created DESC
+                        """,
+                        (cross_id,),
+                    ).fetchall()
+                    result["dishes"] = [_row_to_dict(r) for r in dishes]
+            except sqlite3.Error:
+                result["dishes"] = []
+
+        return result
+
     # ------------------------------------------------------------------
     # Screening web UI
     # ------------------------------------------------------------------
