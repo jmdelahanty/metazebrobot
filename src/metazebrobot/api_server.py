@@ -184,6 +184,36 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_fish_subject_images_fish_id
                 ON fish_subject_images(fish_id)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS experiment_sessions (
+                    session_uuid TEXT PRIMARY KEY,
+                    run_at_utc TEXT,
+                    rig_id TEXT,
+                    arena_id TEXT,
+                    protocol_name TEXT,
+                    h5_path TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS fish_runs (
+                    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fish_id TEXT NOT NULL,
+                    session_uuid TEXT NOT NULL,
+                    dpf_at_run INTEGER,
+                    notes TEXT,
+                    FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE,
+                    FOREIGN KEY (session_uuid) REFERENCES experiment_sessions(session_uuid) ON DELETE CASCADE,
+                    UNIQUE (fish_id, session_uuid)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_fish_runs_fish_id
+                ON fish_runs(fish_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_fish_runs_session_uuid
+                ON fish_runs(session_uuid)
+            """)
             conn.commit()
 
         data_manager.load_all_data()
@@ -1072,6 +1102,82 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "fish_id": fish_id,
             "images": images,
         })
+
+    # ------------------------------------------------------------------
+    # Experiment sessions and fish runs
+    # ------------------------------------------------------------------
+
+    @app.post("/sessions", status_code=201)
+    def create_session(body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Register an experiment session."""
+        _require_db_path()
+        session_uuid = body.get("session_uuid")
+        if not session_uuid:
+            raise HTTPException(status_code=422, detail="session_uuid is required")
+        if data_manager.get_experiment_session(session_uuid) is not None:
+            raise HTTPException(status_code=409, detail="Session already exists")
+        success = data_manager.create_experiment_session(
+            session_uuid=session_uuid,
+            run_at_utc=body.get("run_at_utc"),
+            rig_id=body.get("rig_id"),
+            arena_id=body.get("arena_id"),
+            protocol_name=body.get("protocol_name"),
+            h5_path=body.get("h5_path"),
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to create session")
+        return data_manager.get_experiment_session(session_uuid)
+
+    @app.get("/sessions/{session_uuid}")
+    def get_session(session_uuid: str) -> Dict[str, Any]:
+        """Fetch an experiment session."""
+        _require_db_path()
+        session = data_manager.get_experiment_session(session_uuid)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return session
+
+    @app.post("/sessions/{session_uuid}/fish", status_code=201)
+    def link_fish_to_session(
+        session_uuid: str,
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, str]:
+        """Link a fish to an experiment session (create a fish_run)."""
+        _require_db_path()
+        if data_manager.get_experiment_session(session_uuid) is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        fish_id = body.get("fish_id")
+        if not fish_id:
+            raise HTTPException(status_code=422, detail="fish_id is required")
+        if data_manager.get_fish_subject(fish_id) is None:
+            raise HTTPException(status_code=404, detail="Fish not found")
+        success = data_manager.create_fish_run(
+            fish_id=fish_id,
+            session_uuid=session_uuid,
+            dpf_at_run=body.get("dpf_at_run"),
+            notes=body.get("notes"),
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to link fish to session")
+        return {"status": "ok", "fish_id": fish_id, "session_uuid": session_uuid}
+
+    @app.get("/sessions/{session_uuid}/fish")
+    def list_session_fish(session_uuid: str) -> Dict[str, Any]:
+        """List all fish in a session."""
+        _require_db_path()
+        if data_manager.get_experiment_session(session_uuid) is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        fish = data_manager.get_session_fish(session_uuid)
+        return {"items": fish}
+
+    @app.get("/fish/{fish_id}/sessions")
+    def list_fish_sessions(fish_id: str) -> Dict[str, Any]:
+        """List all experiment sessions for a fish."""
+        _require_db_path()
+        if data_manager.get_fish_subject(fish_id) is None:
+            raise HTTPException(status_code=404, detail="Fish not found")
+        runs = data_manager.get_fish_runs(fish_id)
+        return {"items": runs}
 
     return app
 

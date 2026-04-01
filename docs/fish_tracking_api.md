@@ -335,6 +335,120 @@ query the database directly or use the file paths from the gallery.
 
 ---
 
+### Experiment sessions
+
+#### Register a session
+
+```
+POST /sessions
+Content-Type: application/json
+
+{
+  "session_uuid": "a3f1c9e2-7b4d-4e8a-9c5f-1d2e3f4a5b6c",
+  "run_at_utc": "2026-04-01T14:30:00",
+  "rig_id": "rig-01",
+  "arena_id": "arena-A",
+  "protocol_name": "DefaultScreen",
+  "h5_path": "/data/sessions/a3f1c9e2.h5"
+}
+```
+
+`session_uuid` is required. All other fields are optional.
+
+Returns `201` with the created session object. Returns `409` if a session with
+that UUID already exists.
+
+#### Fetch a session
+
+```
+GET /sessions/{session_uuid}
+```
+
+Response:
+```json
+{
+  "session_uuid": "a3f1c9e2-7b4d-4e8a-9c5f-1d2e3f4a5b6c",
+  "run_at_utc": "2026-04-01T14:30:00",
+  "rig_id": "rig-01",
+  "arena_id": "arena-A",
+  "protocol_name": "DefaultScreen",
+  "h5_path": "/data/sessions/a3f1c9e2.h5"
+}
+```
+
+`404` if not found.
+
+#### Link a fish to a session
+
+```
+POST /sessions/{session_uuid}/fish
+Content-Type: application/json
+
+{
+  "fish_id": "6a1f9b7b-3b2a-4d7a-8a73-0b2d7c9e3d1a",
+  "dpf_at_run": 7,
+  "notes": null
+}
+```
+
+`fish_id` is required. `dpf_at_run` and `notes` are optional. `dpf_at_run` is
+the fish's age in days post-fertilization at the time of the session.
+
+Returns `201` with the created run object. Returns `409` if this fish is already
+linked to this session.
+
+#### List fish in a session
+
+```
+GET /sessions/{session_uuid}/fish
+```
+
+Response:
+```json
+{
+  "items": [
+    {
+      "run_id": 1,
+      "fish_id": "6a1f9b7b-3b2a-4d7a-8a73-0b2d7c9e3d1a",
+      "session_uuid": "a3f1c9e2-7b4d-4e8a-9c5f-1d2e3f4a5b6c",
+      "dpf_at_run": 7,
+      "notes": null,
+      "subject_label": "A1",
+      "genotype": "Tg(elavl3:jRGECO1b)"
+    }
+  ]
+}
+```
+
+Includes `subject_label` and `genotype` from the fish record for convenience.
+
+#### List sessions for a fish
+
+```
+GET /fish/{fish_id}/sessions
+```
+
+Response:
+```json
+{
+  "items": [
+    {
+      "run_id": 1,
+      "session_uuid": "a3f1c9e2-7b4d-4e8a-9c5f-1d2e3f4a5b6c",
+      "dpf_at_run": 7,
+      "notes": null,
+      "run_at_utc": "2026-04-01T14:30:00",
+      "protocol_name": "DefaultScreen",
+      "rig_id": "rig-01"
+    }
+  ]
+}
+```
+
+Includes session details for convenience.
+
+---
+
 ## Acquisition workflow
 
 ### Path A — fish already registered
@@ -360,6 +474,18 @@ Use this for anonymous petri dishes where no fish have been pre-registered.
 
 Both paths produce the same result: the same UUID in both the H5 and the
 registry.
+
+### Post-transfer session registration
+
+After the H5 is transferred, the import pipeline registers the session:
+
+1. `POST /sessions` — register the experiment session (with `session_uuid`,
+   `run_at_utc`, `rig_id`, `protocol_name`, `h5_path`)
+2. `POST /sessions/{session_uuid}/fish` — for each fish in the session, link it
+   with `fish_id` and optional `dpf_at_run`
+
+This creates the `fish_runs` join records that enable "show me all sessions for
+this fish" queries.
 
 ---
 

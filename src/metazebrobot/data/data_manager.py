@@ -332,6 +332,38 @@ class DataManager:
                     ON fish_subject_images(fish_id)
                 """)
 
+                # Experiment sessions and fish runs
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS experiment_sessions (
+                        session_uuid TEXT PRIMARY KEY,
+                        run_at_utc TEXT,
+                        rig_id TEXT,
+                        arena_id TEXT,
+                        protocol_name TEXT,
+                        h5_path TEXT
+                    )
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS fish_runs (
+                        run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        fish_id TEXT NOT NULL,
+                        session_uuid TEXT NOT NULL,
+                        dpf_at_run INTEGER,
+                        notes TEXT,
+                        FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE,
+                        FOREIGN KEY (session_uuid) REFERENCES experiment_sessions(session_uuid) ON DELETE CASCADE,
+                        UNIQUE (fish_id, session_uuid)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_fish_runs_fish_id
+                    ON fish_runs(fish_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_fish_runs_session_uuid
+                    ON fish_runs(session_uuid)
+                """)
+
                 conn.commit()
                 logger.debug("Schema updates applied successfully")
 
@@ -1559,6 +1591,132 @@ class DataManager:
                 return [{k: row[k] for k in row.keys()} for row in rows]
         except Exception as e:
             logger.error(f"Error querying fish images: {e}")
+            return []
+
+    # --- Experiment Sessions and Fish Runs ---
+
+    def create_experiment_session(
+        self,
+        session_uuid: str,
+        run_at_utc: Optional[str] = None,
+        rig_id: Optional[str] = None,
+        arena_id: Optional[str] = None,
+        protocol_name: Optional[str] = None,
+        h5_path: Optional[str] = None,
+    ) -> bool:
+        """Register an experiment session."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO experiment_sessions
+                        (session_uuid, run_at_utc, rig_id, arena_id, protocol_name, h5_path)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (session_uuid, run_at_utc, rig_id, arena_id, protocol_name, h5_path),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error creating experiment session: {e}")
+            return False
+
+    def get_experiment_session(self, session_uuid: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single experiment session."""
+        if not self.is_initialized:
+            return None
+        try:
+            with self.get_connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT session_uuid, run_at_utc, rig_id, arena_id,
+                           protocol_name, h5_path
+                    FROM experiment_sessions
+                    WHERE session_uuid = ?
+                    """,
+                    (session_uuid,),
+                ).fetchone()
+                if row is None:
+                    return None
+                return {k: row[k] for k in row.keys()}
+        except Exception as e:
+            logger.error(f"Error fetching experiment session: {e}")
+            return None
+
+    def create_fish_run(
+        self,
+        fish_id: str,
+        session_uuid: str,
+        dpf_at_run: Optional[int] = None,
+        notes: Optional[str] = None,
+    ) -> bool:
+        """Link a fish to an experiment session."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO fish_runs (fish_id, session_uuid, dpf_at_run, notes)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (fish_id, session_uuid, dpf_at_run, notes),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error creating fish run: {e}")
+            return False
+
+    def get_fish_runs(self, fish_id: str) -> List[Dict[str, Any]]:
+        """List all experiment sessions a fish participated in."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT fr.run_id, fr.fish_id, fr.session_uuid,
+                           fr.dpf_at_run, fr.notes,
+                           es.run_at_utc, es.rig_id, es.arena_id,
+                           es.protocol_name, es.h5_path
+                    FROM fish_runs fr
+                    JOIN experiment_sessions es ON es.session_uuid = fr.session_uuid
+                    WHERE fr.fish_id = ?
+                    ORDER BY es.run_at_utc
+                    """,
+                    (fish_id,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying fish runs: {e}")
+            return []
+
+    def get_session_fish(self, session_uuid: str) -> List[Dict[str, Any]]:
+        """List all fish in a given experiment session."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT fr.run_id, fr.fish_id, fr.dpf_at_run, fr.notes,
+                           f.dish_id, f.subject_label, f.sex, f.genotype,
+                           f.species, f.current_unit_id
+                    FROM fish_runs fr
+                    JOIN fish_subjects f ON f.fish_id = fr.fish_id
+                    WHERE fr.session_uuid = ?
+                    ORDER BY f.subject_label
+                    """,
+                    (session_uuid,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying session fish: {e}")
             return []
 
     # --- Material Management (using database backend) ---

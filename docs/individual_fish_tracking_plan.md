@@ -2,7 +2,7 @@
 
 Track individual fish from registration through experiments. A UUID assigned in MetaZebrobot flows through the pipeline: MetaZebrobot → Citrus (acquisition) → Palette (ingestion) → Crimson (analysis).
 
-**Implementation status:** Phases 1, 2, 2b, and 3 are complete — fish subject CRUD, web UI, housing unit management, and reference images are implemented with API endpoints and data manager methods. Phase 4 (experiment session tracking) is planned but not yet implemented.
+**Implementation status:** All phases (1, 2, 2b, 3, 4) are complete — fish subject CRUD, web UI, housing unit management, reference images, and experiment session tracking are implemented with API endpoints and data manager methods.
 
 ## Key Constraints
 
@@ -376,7 +376,7 @@ The existing dish-level `quality_checks` table stays as-is for dishes that don't
 
 ### Schema
 
-- [ ] Add `experiment_sessions` table to `data_manager.py` `initialize()`:
+- [x] Add `experiment_sessions` table to `data_manager.py` `initialize()`:
   ```sql
   CREATE TABLE IF NOT EXISTS experiment_sessions (
       session_uuid TEXT PRIMARY KEY,
@@ -387,12 +387,13 @@ The existing dish-level `quality_checks` table stays as-is for dishes that don't
       h5_path TEXT
   );
   ```
-- [ ] Add `fish_runs` table:
+- [x] Add `fish_runs` table:
   ```sql
   CREATE TABLE IF NOT EXISTS fish_runs (
       run_id INTEGER PRIMARY KEY AUTOINCREMENT,
       fish_id TEXT NOT NULL,
       session_uuid TEXT NOT NULL,
+      dpf_at_run INTEGER,
       notes TEXT,
       FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE,
       FOREIGN KEY (session_uuid) REFERENCES experiment_sessions(session_uuid) ON DELETE CASCADE,
@@ -401,24 +402,24 @@ The existing dish-level `quality_checks` table stays as-is for dishes that don't
   CREATE INDEX IF NOT EXISTS idx_fish_runs_fish_id ON fish_runs(fish_id);
   CREATE INDEX IF NOT EXISTS idx_fish_runs_session_uuid ON fish_runs(session_uuid);
   ```
-- [ ] Consider adding `dpf_at_run INTEGER` column to `fish_runs` (see `docs/experimental_data_schema.md`)
-- [ ] Consider adding `session_assets` table for per-session file paths
+- [x] Added `dpf_at_run INTEGER` column to `fish_runs` (see `docs/experimental_data_schema.md`)
+- [ ] Consider adding `session_assets` table for per-session file paths (deferred — not yet needed)
 
 ### Data Manager Methods
 
-- [ ] `create_experiment_session(session_uuid, run_at_utc, rig_id, arena_id, protocol_name, h5_path)` — insert session
-- [ ] `get_experiment_session(session_uuid)` — fetch single session
-- [ ] `create_fish_run(fish_id, session_uuid, notes=None)` — link fish to session
-- [ ] `get_fish_runs(fish_id)` — list all sessions a fish participated in
-- [ ] `get_session_fish(session_uuid)` — list all fish in a session
+- [x] `create_experiment_session(session_uuid, run_at_utc, rig_id, arena_id, protocol_name, h5_path)` — insert session
+- [x] `get_experiment_session(session_uuid)` — fetch single session
+- [x] `create_fish_run(fish_id, session_uuid, dpf_at_run=None, notes=None)` — link fish to session
+- [x] `get_fish_runs(fish_id)` — list all sessions a fish participated in
+- [x] `get_session_fish(session_uuid)` — list all fish in a session
 
 ### API Endpoints
 
-- [ ] `POST /sessions` — register an experiment session
-- [ ] `GET /sessions/{session_uuid}` — fetch session details
-- [ ] `POST /sessions/{session_uuid}/fish` — link a fish to a session (accepts `fish_id`)
-- [ ] `GET /sessions/{session_uuid}/fish` — list fish in a session
-- [ ] `GET /fish/{fish_id}/sessions` — list sessions for a fish
+- [x] `POST /sessions` — register an experiment session (409 if already exists)
+- [x] `GET /sessions/{session_uuid}` — fetch session details
+- [x] `POST /sessions/{session_uuid}/fish` — link a fish to a session (accepts `fish_id`, optional `dpf_at_run`, `notes`)
+- [x] `GET /sessions/{session_uuid}/fish` — list fish in a session
+- [x] `GET /fish/{fish_id}/sessions` — list sessions for a fish
 
 ### Downstream Integration
 
