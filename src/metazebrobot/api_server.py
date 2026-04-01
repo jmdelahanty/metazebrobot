@@ -214,6 +214,21 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_fish_runs_session_uuid
                 ON fish_runs(session_uuid)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dish_images (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dish_id TEXT NOT NULL,
+                    image_filename TEXT NOT NULL,
+                    image_type TEXT DEFAULT 'reference',
+                    caption TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_images_dish_id
+                ON dish_images(dish_id)
+            """)
             conn.commit()
 
         data_manager.load_all_data()
@@ -230,6 +245,12 @@ async def lifespan(app: FastAPI):
         fish_images_dir.mkdir(parents=True, exist_ok=True)
         app.state.fish_images_dir = fish_images_dir
         logger.info(f"Fish images directory: {fish_images_dir}")
+
+        # Ensure dish images directory exists
+        dish_images_dir = db_path.parent / "dish_images"
+        dish_images_dir.mkdir(parents=True, exist_ok=True)
+        app.state.dish_images_dir = dish_images_dir
+        logger.info(f"Dish images directory: {dish_images_dir}")
     yield
 
 
@@ -265,6 +286,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "/fish-images",
             StaticFiles(directory=str(_fish_images_dir)),
             name="fish_images",
+        )
+        # Serve uploaded dish reference images
+        _dish_images_dir = app.state.db_path.parent / "dish_images"
+        _dish_images_dir.mkdir(parents=True, exist_ok=True)
+        app.mount(
+            "/dish-images",
+            StaticFiles(directory=str(_dish_images_dir)),
+            name="dish_images",
         )
 
     # Controller instance for write endpoints
@@ -809,11 +838,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     # ------------------------------------------------------------------
 
     def _dish_context_for_fish_page(dish_id: str):
-        """Fetch dish genotype + species for pre-filling the registration form."""
+        """Fetch dish genotype, species, and cross_id for fish pages."""
         db_path = _require_db_path()
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             row = conn.execute(
-                "SELECT dish_id, genotype, species FROM dishes WHERE dish_id = ?",
+                "SELECT dish_id, genotype, species, cross_id FROM dishes WHERE dish_id = ?",
                 (dish_id,),
             ).fetchone()
             if not row:
@@ -828,6 +857,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return templates.TemplateResponse("fish/fish_list.html", {
             "request": request,
             "dish_id": dish_id,
+            "cross_id": dish.get("cross_id"),
             "genotype": dish.get("genotype"),
             "species": dish.get("species") or "Danio rerio",
             "fish": fish,
@@ -899,6 +929,63 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "fish": fish,
             "flash_message": f"Registered {created} fish.",
             "flash_level": "success",
+        })
+
+    # ------------------------------------------------------------------
+    # Fish index and cross-level views
+    # ------------------------------------------------------------------
+
+    @app.get("/fish/", response_class=HTMLResponse)
+    def fish_index_page(request: Request):
+        """Top-level fish index — lists crosses that have registered fish."""
+        _require_db_path()
+        crosses = data_manager.get_crosses_with_fish_counts()
+        return templates.TemplateResponse("fish/fish_index.html", {
+            "request": request,
+            "crosses": crosses,
+        })
+
+    @app.get("/crosses/{cross_id}/fish")
+    def list_fish_for_cross(cross_id: str) -> Dict[str, Any]:
+        """List all fish subjects across every dish belonging to a cross."""
+        _require_db_path()
+        subjects = data_manager.get_fish_subjects_for_cross(cross_id)
+        return {"items": subjects}
+
+    @app.get("/crosses/{cross_id}/fish/", response_class=HTMLResponse)
+    def fish_cross_page(request: Request, cross_id: str):
+        """Web page showing all fish for a cross, grouped by dish."""
+        _require_db_path()
+        dish_meta = data_manager.get_dishes_for_cross(cross_id)
+        subjects = data_manager.get_fish_subjects_for_cross(cross_id)
+
+        # Build dish info lookup and group fish by dish
+        dish_info: Dict[str, Dict[str, Any]] = {}
+        for d in dish_meta:
+            dish_info[d["dish_id"]] = d
+
+        fish_by_dish: Dict[str, List[Dict[str, Any]]] = {}
+        for fish in subjects:
+            fish_by_dish.setdefault(fish["dish_id"], []).append(fish)
+
+        # Separate primary dishes (no parent) from derived dishes
+        primary_dishes = [d for d in dish_meta if not d.get("parent_dish_id")]
+        derived_dishes = [d for d in dish_meta if d.get("parent_dish_id")]
+
+        # Map parent_dish_id → list of child dishes
+        children_of: Dict[str, List[Dict[str, Any]]] = {}
+        for d in derived_dishes:
+            children_of.setdefault(d["parent_dish_id"], []).append(d)
+
+        return templates.TemplateResponse("fish/fish_cross.html", {
+            "request": request,
+            "cross_id": cross_id,
+            "primary_dishes": primary_dishes,
+            "children_of": children_of,
+            "fish_by_dish": fish_by_dish,
+            "dish_info": dish_info,
+            "total_fish": len(subjects),
+            "total_dishes": len(dish_meta),
         })
 
     # ------------------------------------------------------------------
@@ -1104,6 +1191,75 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         })
 
     # ------------------------------------------------------------------
+    # Dish-level reference images
+    # ------------------------------------------------------------------
+
+    @app.post("/dishes/{dish_id}/images", response_class=HTMLResponse)
+    async def upload_dish_image(
+        request: Request,
+        dish_id: str,
+        file: UploadFile = ...,
+        caption: Optional[str] = Form(default=None),
+    ):
+        """Upload a reference image for a dish (for bulk populations without individual fish)."""
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            row = conn.execute(
+                "SELECT dish_id FROM dishes WHERE dish_id = ?", (dish_id,)
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Dish not found")
+
+        allowed = {"image/jpeg", "image/png"}
+        if file.content_type not in allowed:
+            return templates.TemplateResponse("screening/_flash_message.html", {
+                "request": request,
+                "message": f"Invalid file type: {file.content_type}. Only JPEG and PNG are accepted.",
+                "level": "error",
+            })
+
+        dish_images_dir: Path = app.state.dish_images_dir
+        dish_dir = dish_images_dir / dish_id
+        dish_dir.mkdir(parents=True, exist_ok=True)
+
+        ext = "jpg" if file.content_type == "image/jpeg" else "png"
+        existing = list(dish_dir.glob("*"))
+        seq = len(existing) + 1
+        filename = f"{seq:03d}.{ext}"
+
+        dest = dish_dir / filename
+        contents = await file.read()
+        dest.write_bytes(contents)
+
+        data_manager.save_dish_image(
+            dish_id=dish_id,
+            image_filename=filename,
+            image_type="reference",
+            caption=caption,
+        )
+
+        images = data_manager.get_dish_images(dish_id)
+        return templates.TemplateResponse("fish/_dish_image_gallery.html", {
+            "request": request,
+            "dish_id": dish_id,
+            "images": images,
+        })
+
+    @app.get("/dishes/{dish_id}/images", response_class=HTMLResponse)
+    def dish_image_gallery(
+        request: Request,
+        dish_id: str,
+    ):
+        """HTMX partial — reference image gallery for a dish."""
+        _require_db_path()
+        images = data_manager.get_dish_images(dish_id)
+        return templates.TemplateResponse("fish/_dish_image_gallery.html", {
+            "request": request,
+            "dish_id": dish_id,
+            "images": images,
+        })
+
+    # ------------------------------------------------------------------
     # Experiment sessions and fish runs
     # ------------------------------------------------------------------
 
@@ -1189,7 +1345,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run MetaZebrobot API server.")
     parser.add_argument("--db-path", help="Path to zebrobot.db")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=8002)
     parser.add_argument("--busy-timeout-ms", type=int, default=DEFAULT_BUSY_TIMEOUT_MS)
     parser.add_argument(
         "--lab-network",

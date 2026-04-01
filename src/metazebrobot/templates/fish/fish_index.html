@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Fish Index{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Individual Fish Tracking</h2>
+    <p>Crosses with registered fish subjects</p>
+</hgroup>
+
+{% if crosses %}
+<table role="grid">
+    <thead>
+        <tr>
+            <th>Cross</th>
+            <th>Genotype</th>
+            <th>Dishes</th>
+            <th>Fish</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for c in crosses %}
+        <tr>
+            <td><a href="/crosses/{{ c.cross_id }}/fish/">{{ c.cross_id }}</a></td>
+            <td>{{ c.genotype or "—" }}</td>
+            <td>{{ c.dish_count }}</td>
+            <td>{{ c.fish_count }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No fish have been registered yet. Register fish from a <a href="/screening/">dish's fish page</a>.</p>
+{% endif %}
+
+<p><a href="/screening/">&larr; Dish list</a></p>
+{% endblock %}

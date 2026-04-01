@@ -8,8 +8,10 @@ from PySide6.QtWidgets import (
     QPushButton, QDateEdit, QTableWidget, QTableWidgetItem, QMessageBox,
     QHeaderView, QScrollArea, QDialog
 )
-from PySide6.QtCore import Qt, QDate, Signal, Slot
+from PySide6.QtCore import Qt, QDate, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices
 
+from ..utils.config import config
 from ..controllers.fish_dish_controller import fish_dish_controller
 from ..controllers.pyrat_tanks_controller import pyrat_tanks_controller
 from ..models.fish_dish import FishDish
@@ -242,6 +244,10 @@ class FishDishTab(QWidget):
         self.terminate_dish_button.setEnabled(False)
         self.terminate_dish_button.clicked.connect(self.show_termination_dialog_for_selected)
         filter_layout.addWidget(self.terminate_dish_button)
+        self.fish_browser_button = QPushButton("Fish")
+        self.fish_browser_button.setEnabled(False)
+        self.fish_browser_button.clicked.connect(self.open_fish_in_browser)
+        filter_layout.addWidget(self.fish_browser_button)
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
@@ -339,8 +345,9 @@ class FishDishTab(QWidget):
         num_selected = len(selected_rows)
         has_selection = num_selected > 0
 
-        # Screening only works for single selection
+        # Screening / Fish only work for single selection
         self.manage_screening_button.setEnabled(num_selected == 1)
+        self.fish_browser_button.setEnabled(num_selected == 1)
         self.terminate_dish_button.setEnabled(has_selection)
 
         # Update button text to reflect selection count
@@ -348,6 +355,16 @@ class FishDishTab(QWidget):
             self.terminate_dish_button.setText(f"Terminate {num_selected} Dishes")
         else:
             self.terminate_dish_button.setText("Terminate Dish")
+
+    def open_fish_in_browser(self):
+        """Open the fish management web page for the selected dish."""
+        selected = self.dishes_table.selectionModel().selectedRows()
+        if not selected:
+            return
+        dish_id = self.dishes_table.item(selected[0].row(), 0).text()
+        port = config.get("api_port", 8002)
+        url = QUrl(f"http://localhost:{port}/dishes/{dish_id}/fish/")
+        QDesktopServices.openUrl(url)
 
     def handle_header_click(self, column):
         """Handle clicks on the table header for sorting."""

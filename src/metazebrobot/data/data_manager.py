@@ -364,6 +364,23 @@ class DataManager:
                     ON fish_runs(session_uuid)
                 """)
 
+                # Dish-level reference images (for bulk populations without individual fish)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS dish_images (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        dish_id TEXT NOT NULL,
+                        image_filename TEXT NOT NULL,
+                        image_type TEXT DEFAULT 'reference',
+                        caption TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_images_dish_id
+                    ON dish_images(dish_id)
+                """)
+
                 conn.commit()
                 logger.debug("Schema updates applied successfully")
 
@@ -1195,6 +1212,78 @@ class DataManager:
             logger.error(f"Error querying fish subjects: {e}")
             return []
 
+    def get_crosses_with_fish_counts(self) -> List[Dict[str, Any]]:
+        """List all crosses that have at least one registered fish, with counts."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT d.cross_id,
+                           COUNT(DISTINCT d.dish_id) AS dish_count,
+                           COUNT(f.fish_id) AS fish_count,
+                           d.genotype
+                    FROM dishes d
+                    JOIN fish_subjects f ON f.dish_id = d.dish_id
+                    WHERE d.cross_id IS NOT NULL
+                    GROUP BY d.cross_id
+                    ORDER BY d.cross_id DESC
+                    """,
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying crosses with fish counts: {e}")
+            return []
+
+    def get_dishes_for_cross(self, cross_id: str) -> List[Dict[str, Any]]:
+        """List dishes for a cross with fish counts and parent/child metadata."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT d.dish_id, d.cross_id, d.genotype, d.status,
+                           d.parent_dish_id, d.dish_population_type,
+                           COUNT(f.fish_id) AS fish_count
+                    FROM dishes d
+                    LEFT JOIN fish_subjects f ON f.dish_id = d.dish_id
+                    WHERE d.cross_id = ?
+                    GROUP BY d.dish_id
+                    ORDER BY d.parent_dish_id NULLS FIRST, d.dish_id
+                    """,
+                    (cross_id,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying dishes for cross: {e}")
+            return []
+
+    def get_fish_subjects_for_cross(self, cross_id: str) -> List[Dict[str, Any]]:
+        """List all fish subjects across every dish belonging to a cross."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT f.fish_id, f.dish_id, f.subject_label, f.sex,
+                           f.genotype, f.species, f.created_at, f.notes,
+                           f.current_unit_id, d.cross_id,
+                           d.parent_dish_id, d.dish_population_type
+                    FROM fish_subjects f
+                    JOIN dishes d ON d.dish_id = f.dish_id
+                    WHERE d.cross_id = ?
+                    ORDER BY d.parent_dish_id NULLS FIRST, f.dish_id, f.created_at
+                    """,
+                    (cross_id,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying fish subjects for cross: {e}")
+            return []
+
     def get_fish_subject(self, fish_id: str) -> Optional[Dict[str, Any]]:
         """Fetch a single fish subject by UUID."""
         if not self.is_initialized:
@@ -1591,6 +1680,55 @@ class DataManager:
                 return [{k: row[k] for k in row.keys()} for row in rows]
         except Exception as e:
             logger.error(f"Error querying fish images: {e}")
+            return []
+
+    # --- Dish-Level Images ---
+
+    def save_dish_image(
+        self,
+        dish_id: str,
+        image_filename: str,
+        image_type: str = "reference",
+        caption: Optional[str] = None,
+    ) -> bool:
+        """Insert a row into dish_images linking an image file to a dish."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO dish_images
+                        (dish_id, image_filename, image_type, caption)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (dish_id, image_filename, image_type, caption),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error saving dish image record: {e}")
+            return False
+
+    def get_dish_images(self, dish_id: str) -> List[Dict[str, Any]]:
+        """Query reference images for a dish."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT id, dish_id, image_filename, image_type, caption, created_at
+                    FROM dish_images
+                    WHERE dish_id = ?
+                    ORDER BY created_at
+                    """,
+                    (dish_id,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying dish images: {e}")
             return []
 
     # --- Experiment Sessions and Fish Runs ---

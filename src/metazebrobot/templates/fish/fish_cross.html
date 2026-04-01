@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Fish — Cross {{ cross_id }}{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Fish — Cross {{ cross_id }}</h2>
+    <p>{{ total_fish }} fish across {{ total_dishes }} dish{{ "es" if total_dishes != 1 }}</p>
+</hgroup>
+
+{# Macro: render a fish table for a single dish #}
+{% macro dish_fish_table(dish, fish_list, indent=false) %}
+<div{% if indent %} style="margin-left: 1.5rem; border-left: 3px solid var(--pico-muted-border-color); padding-left: 1rem;"{% endif %}>
+    <details{% if fish_list %} open{% endif %}>
+        <summary>
+            <strong>{{ dish.dish_id }}</strong>
+            {% if dish.dish_population_type and dish.dish_population_type != "primary" %}
+                <small>({{ dish.dish_population_type | replace("_", " ") }})</small>
+            {% endif %}
+            &mdash; {{ (fish_list | length) if fish_list else 0 }} fish
+            {% if dish.status == "inactive" %}<small>[inactive]</small>{% endif %}
+        </summary>
+        {% if fish_list %}
+        <table role="grid" class="screening-steps-table">
+            <thead>
+                <tr>
+                    <th>Label</th>
+                    <th>Fish ID</th>
+                    <th>Sex</th>
+                    <th>Genotype</th>
+                    <th>Unit</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for f in fish_list %}
+                <tr>
+                    <td>{{ f.subject_label or "—" }}</td>
+                    <td><a href="/fish/{{ f.fish_id }}">{{ f.fish_id[:8] }}</a></td>
+                    <td>{{ f.sex or "—" }}</td>
+                    <td>{{ f.genotype or "—" }}</td>
+                    <td>{{ f.current_unit_id or "—" }}</td>
+                    <td>{{ f.created_at }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p><small>No fish registered on this dish.</small></p>
+        {% endif %}
+        <p><a href="/dishes/{{ dish.dish_id }}/fish/">Manage fish for {{ dish.dish_id }} &rarr;</a></p>
+    </details>
+</div>
+{% endmacro %}
+
+{% if primary_dishes or children_of %}
+    {% for dish in primary_dishes %}
+        {# Render the primary dish #}
+        {{ dish_fish_table(dish, fish_by_dish.get(dish.dish_id, [])) }}
+
+        {# Render any derived (child) dishes indented beneath their parent #}
+        {% if dish.dish_id in children_of %}
+            {% for child in children_of[dish.dish_id] %}
+                {{ dish_fish_table(child, fish_by_dish.get(child.dish_id, []), indent=true) }}
+            {% endfor %}
+        {% endif %}
+    {% endfor %}
+
+    {# Orphan derived dishes whose parent isn't in this cross (shouldn't happen, but be safe) #}
+    {% for parent_id, children in children_of.items() %}
+        {% if parent_id not in dish_info %}
+            {% for child in children %}
+                {{ dish_fish_table(child, fish_by_dish.get(child.dish_id, []), indent=true) }}
+            {% endfor %}
+        {% endif %}
+    {% endfor %}
+{% else %}
+<p>No dishes found for this cross.</p>
+{% endif %}
+
+<p><a href="/fish/">&larr; Fish index</a> | <a href="/screening/">&larr; Dish list</a></p>
+{% endblock %}

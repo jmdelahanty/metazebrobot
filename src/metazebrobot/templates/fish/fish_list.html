@@ -7,6 +7,17 @@
     <p>{{ genotype or "Unknown genotype" }} &mdash; {{ fish | length }} registered</p>
 </hgroup>
 
+{# Dish-level reference images — always available #}
+<h3>Dish Reference Images</h3>
+<p><small>Photos of this dish's population (e.g. what positive/negative fish look like).</small></p>
+<div
+    hx-get="/dishes/{{ dish_id }}/images"
+    hx-trigger="revealed"
+    hx-swap="innerHTML"
+>
+    Loading images...
+</div>
+
 {# Registered fish #}
 <h3>Registered Fish</h3>
 <div id="fish-table">
@@ -58,7 +69,7 @@
 
 {# Reference images per fish #}
 {% if fish %}
-<h3>Reference Images</h3>
+<h3>Per-Fish Images</h3>
 {% for f in fish %}
 <details{% if loop.last %} open{% endif %}>
     <summary>{{ f.subject_label or f.fish_id[:8] }}</summary>
@@ -95,5 +106,5 @@
     </form>
 </details>
 
-<p><a href="/screening/{{ dish_id }}">&larr; Back to screening</a> | <a href="/screening/">&larr; Dish list</a></p>
+<p><a href="/screening/{{ dish_id }}">&larr; Back to screening</a> | <a href="/screening/">&larr; Dish list</a>{% if cross_id %} | <a href="/crosses/{{ cross_id }}/fish/">All fish for cross {{ cross_id }}</a>{% endif %}</p>
 {% endblock %}
