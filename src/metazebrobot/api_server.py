@@ -90,6 +90,100 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_screening_images_dish_datetime
                 ON screening_step_images(dish_id, screening_datetime)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS fish_subjects (
+                    fish_id TEXT PRIMARY KEY,
+                    dish_id TEXT NOT NULL,
+                    subject_label TEXT,
+                    sex TEXT,
+                    genotype TEXT,
+                    species TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    notes TEXT,
+                    FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_fish_subjects_dish_id
+                ON fish_subjects(dish_id)
+            """)
+            # Add current_unit_id to fish_subjects if not present
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(fish_subjects)").fetchall()]
+            if 'current_unit_id' not in cols:
+                conn.execute(
+                    "ALTER TABLE fish_subjects ADD COLUMN current_unit_id TEXT REFERENCES housing_units(unit_id)"
+                )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS housing_units (
+                    unit_id TEXT PRIMARY KEY,
+                    dish_id TEXT NOT NULL,
+                    position_label TEXT,
+                    unit_kind TEXT NOT NULL DEFAULT 'open',
+                    capacity INTEGER DEFAULT 1,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    notes TEXT,
+                    FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_housing_units_dish_id
+                ON housing_units(dish_id)
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS housing_unit_checks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    unit_id TEXT NOT NULL,
+                    check_time TEXT NOT NULL,
+                    fed BOOLEAN,
+                    feed_type TEXT,
+                    water_changed BOOLEAN,
+                    vol_water_changed INTEGER,
+                    num_dead INTEGER DEFAULT 0,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (unit_id) REFERENCES housing_units(unit_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_housing_unit_checks_unit_id
+                ON housing_unit_checks(unit_id)
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS housing_unit_occupancy (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fish_id TEXT NOT NULL,
+                    unit_id TEXT NOT NULL,
+                    moved_in_at TEXT NOT NULL,
+                    moved_out_at TEXT,
+                    reason TEXT,
+                    FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE,
+                    FOREIGN KEY (unit_id) REFERENCES housing_units(unit_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_housing_occupancy_fish_id
+                ON housing_unit_occupancy(fish_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_housing_occupancy_unit_id
+                ON housing_unit_occupancy(unit_id)
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS fish_subject_images (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fish_id TEXT NOT NULL,
+                    image_filename TEXT NOT NULL,
+                    image_type TEXT DEFAULT 'reference',
+                    caption TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_fish_subject_images_fish_id
+                ON fish_subject_images(fish_id)
+            """)
             conn.commit()
 
         data_manager.load_all_data()
@@ -100,6 +194,12 @@ async def lifespan(app: FastAPI):
         images_dir.mkdir(parents=True, exist_ok=True)
         app.state.screening_images_dir = images_dir
         logger.info(f"Screening images directory: {images_dir}")
+
+        # Ensure fish images directory exists
+        fish_images_dir = db_path.parent / "fish_images"
+        fish_images_dir.mkdir(parents=True, exist_ok=True)
+        app.state.fish_images_dir = fish_images_dir
+        logger.info(f"Fish images directory: {fish_images_dir}")
     yield
 
 
@@ -127,6 +227,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "/screening-images",
             StaticFiles(directory=str(_screening_images_dir)),
             name="screening_images",
+        )
+        # Serve uploaded fish reference images
+        _fish_images_dir = app.state.db_path.parent / "fish_images"
+        _fish_images_dir.mkdir(parents=True, exist_ok=True)
+        app.mount(
+            "/fish-images",
+            StaticFiles(directory=str(_fish_images_dir)),
+            name="fish_images",
         )
 
     # Controller instance for write endpoints
@@ -583,6 +691,385 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "request": request,
             "dish_id": dish_id,
             "screening_datetime": screening_datetime,
+            "images": images,
+        })
+
+    # ------------------------------------------------------------------
+    # Fish subject tracking
+    # ------------------------------------------------------------------
+
+    @app.get("/dishes/{dish_id}/fish")
+    def list_fish_for_dish(dish_id: str) -> Dict[str, Any]:
+        """List all fish subjects registered to a dish."""
+        _require_db_path()
+        subjects = data_manager.get_fish_subjects(dish_id)
+        return {"items": subjects}
+
+    @app.post("/dishes/{dish_id}/fish", status_code=201)
+    def create_fish_for_dish(
+        dish_id: str,
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, Any]:
+        """Register a new fish subject on a dish. Returns the created fish."""
+        db_path = _require_db_path()
+        # Verify dish exists
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            row = conn.execute(
+                "SELECT dish_id FROM dishes WHERE dish_id = ?", (dish_id,)
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Dish not found")
+
+        fish_id = data_manager.create_fish_subject(
+            dish_id=dish_id,
+            fish_id=body.get("fish_id"),
+            subject_label=body.get("subject_label"),
+            sex=body.get("sex"),
+            genotype=body.get("genotype"),
+            species=body.get("species"),
+            notes=body.get("notes"),
+        )
+        if fish_id is None:
+            raise HTTPException(status_code=500, detail="Failed to create fish subject")
+        fish = data_manager.get_fish_subject(fish_id)
+        return fish
+
+    @app.get("/fish/{fish_id}")
+    def get_fish(fish_id: str) -> Dict[str, Any]:
+        """Fetch a single fish subject by UUID."""
+        _require_db_path()
+        fish = data_manager.get_fish_subject(fish_id)
+        if fish is None:
+            raise HTTPException(status_code=404, detail="Fish not found")
+        return fish
+
+    @app.patch("/fish/{fish_id}")
+    def update_fish(fish_id: str, body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Update mutable fields on a fish subject."""
+        _require_db_path()
+        existing = data_manager.get_fish_subject(fish_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Fish not found")
+        if not data_manager.update_fish_subject(fish_id, **body):
+            raise HTTPException(status_code=500, detail="Failed to update fish subject")
+        return data_manager.get_fish_subject(fish_id)
+
+    @app.delete("/fish/{fish_id}", status_code=204)
+    def delete_fish(request: Request, fish_id: str):
+        """Delete a fish subject. Returns HTMX partial when called from the browser."""
+        _require_db_path()
+        existing = data_manager.get_fish_subject(fish_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Fish not found")
+        dish_id = existing["dish_id"]
+        if not data_manager.delete_fish_subject(fish_id):
+            raise HTTPException(status_code=500, detail="Failed to delete fish subject")
+        # If called via HTMX, return updated fish table partial
+        if request.headers.get("HX-Request"):
+            fish = data_manager.get_fish_subjects(dish_id)
+            return templates.TemplateResponse("fish/_fish_table.html", {
+                "request": request,
+                "fish": fish,
+                "flash_message": "Fish removed.",
+                "flash_level": "success",
+            })
+
+    # ------------------------------------------------------------------
+    # Fish tracking web UI
+    # ------------------------------------------------------------------
+
+    def _dish_context_for_fish_page(dish_id: str):
+        """Fetch dish genotype + species for pre-filling the registration form."""
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            row = conn.execute(
+                "SELECT dish_id, genotype, species FROM dishes WHERE dish_id = ?",
+                (dish_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Dish not found")
+            return _row_to_dict(row)
+
+    @app.get("/dishes/{dish_id}/fish/", response_class=HTMLResponse)
+    def fish_list_page(request: Request, dish_id: str):
+        """Fish management page for a dish."""
+        dish = _dish_context_for_fish_page(dish_id)
+        fish = data_manager.get_fish_subjects(dish_id)
+        return templates.TemplateResponse("fish/fish_list.html", {
+            "request": request,
+            "dish_id": dish_id,
+            "genotype": dish.get("genotype"),
+            "species": dish.get("species") or "Danio rerio",
+            "fish": fish,
+        })
+
+    @app.post("/dishes/{dish_id}/fish/register", response_class=HTMLResponse)
+    def register_fish_htmx(
+        request: Request,
+        dish_id: str,
+        subject_label: Optional[str] = Form(default=None),
+        sex: Optional[str] = Form(default=None),
+        genotype: Optional[str] = Form(default=None),
+        species: Optional[str] = Form(default=None),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Register a single fish via the web form, return HTMX partial."""
+        _dish_context_for_fish_page(dish_id)  # validates dish exists
+        fish_id = data_manager.create_fish_subject(
+            dish_id=dish_id,
+            subject_label=subject_label or None,
+            sex=sex or None,
+            genotype=genotype or None,
+            species=species or None,
+            notes=notes or None,
+        )
+        if fish_id is None:
+            return templates.TemplateResponse("screening/_flash_message.html", {
+                "request": request,
+                "message": "Failed to register fish.",
+                "level": "error",
+            })
+        fish = data_manager.get_fish_subjects(dish_id)
+        return templates.TemplateResponse("fish/_fish_table.html", {
+            "request": request,
+            "fish": fish,
+            "flash_message": f"Registered fish {subject_label or fish_id[:8]}.",
+            "flash_level": "success",
+        })
+
+    @app.post("/dishes/{dish_id}/fish/batch", response_class=HTMLResponse)
+    def register_fish_batch_htmx(
+        request: Request,
+        dish_id: str,
+        count: int = Form(...),
+        label_prefix: Optional[str] = Form(default=None),
+    ):
+        """Batch-register multiple fish, return HTMX partial."""
+        dish = _dish_context_for_fish_page(dish_id)  # validates dish exists
+        if count < 1 or count > 96:
+            return templates.TemplateResponse("screening/_flash_message.html", {
+                "request": request,
+                "message": "Count must be between 1 and 96.",
+                "level": "error",
+            })
+        created = 0
+        for i in range(1, count + 1):
+            label = f"{label_prefix}-{i}" if label_prefix else None
+            fish_id = data_manager.create_fish_subject(
+                dish_id=dish_id,
+                subject_label=label,
+                genotype=dish.get("genotype"),
+                species=dish.get("species") or "Danio rerio",
+            )
+            if fish_id is not None:
+                created += 1
+        fish = data_manager.get_fish_subjects(dish_id)
+        return templates.TemplateResponse("fish/_fish_table.html", {
+            "request": request,
+            "fish": fish,
+            "flash_message": f"Registered {created} fish.",
+            "flash_level": "success",
+        })
+
+    # ------------------------------------------------------------------
+    # Housing units
+    # ------------------------------------------------------------------
+
+    @app.get("/dishes/{dish_id}/units")
+    def list_housing_units(dish_id: str) -> Dict[str, Any]:
+        """List housing units for a dish with occupancy counts."""
+        _require_db_path()
+        units = data_manager.get_housing_units(dish_id)
+        return {"items": units}
+
+    @app.post("/dishes/{dish_id}/units", status_code=201)
+    def create_housing_units(
+        dish_id: str,
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, Any]:
+        """Create housing unit(s) for a dish.
+
+        Body accepts:
+        - unit_kind: "open", "well", "lane", "chamber" (default "open")
+        - count: number of units to create (default 1)
+        - label_format: "numeric" or "well_plate" (default "numeric")
+        - position_label: for single-unit creation (ignored if count > 1)
+        - capacity: per-unit capacity (default 1)
+        - notes: optional
+        """
+        db_path = _require_db_path()
+        # Verify dish exists
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            row = conn.execute(
+                "SELECT dish_id FROM dishes WHERE dish_id = ?", (dish_id,)
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Dish not found")
+
+        unit_kind = body.get("unit_kind", "open")
+        count = body.get("count", 1)
+
+        if count > 1:
+            label_format = body.get("label_format", "numeric")
+            created_ids = data_manager.create_housing_units_for_dish(
+                dish_id=dish_id,
+                unit_kind=unit_kind,
+                count=count,
+                label_format=label_format,
+            )
+            if not created_ids:
+                raise HTTPException(status_code=500, detail="Failed to create housing units")
+            return {"created": created_ids}
+        else:
+            unit_id = data_manager.create_housing_unit(
+                dish_id=dish_id,
+                unit_kind=unit_kind,
+                position_label=body.get("position_label"),
+                capacity=body.get("capacity", 1),
+                notes=body.get("notes"),
+            )
+            if unit_id is None:
+                raise HTTPException(status_code=500, detail="Failed to create housing unit")
+            return data_manager.get_housing_unit(unit_id)
+
+    @app.get("/units/{unit_id}")
+    def get_unit(unit_id: str) -> Dict[str, Any]:
+        """Fetch a housing unit with its current fish list."""
+        _require_db_path()
+        unit = data_manager.get_housing_unit(unit_id)
+        if unit is None:
+            raise HTTPException(status_code=404, detail="Housing unit not found")
+        return unit
+
+    @app.post("/units/{unit_id}/checks", status_code=201)
+    def log_unit_check(
+        unit_id: str,
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, str]:
+        """Log a maintenance check for a housing unit position."""
+        _require_db_path()
+        if data_manager.get_housing_unit(unit_id) is None:
+            raise HTTPException(status_code=404, detail="Housing unit not found")
+        check_time = body.get("check_time")
+        if not check_time:
+            raise HTTPException(status_code=422, detail="check_time is required")
+        success = data_manager.log_housing_unit_check(
+            unit_id=unit_id,
+            check_time=check_time,
+            fed=body.get("fed"),
+            feed_type=body.get("feed_type"),
+            water_changed=body.get("water_changed"),
+            vol_water_changed=body.get("vol_water_changed"),
+            num_dead=body.get("num_dead", 0),
+            notes=body.get("notes"),
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to log check")
+        return {"status": "ok"}
+
+    @app.get("/units/{unit_id}/checks")
+    def get_unit_checks(unit_id: str) -> Dict[str, Any]:
+        """Maintenance history for a housing unit position."""
+        _require_db_path()
+        checks = data_manager.get_housing_unit_checks(unit_id)
+        return {"items": checks}
+
+    @app.post("/fish/{fish_id}/assign", status_code=200)
+    def assign_or_move_fish(
+        fish_id: str,
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, Any]:
+        """Assign a fish to a housing unit, or move it if already assigned."""
+        _require_db_path()
+        fish = data_manager.get_fish_subject(fish_id)
+        if fish is None:
+            raise HTTPException(status_code=404, detail="Fish not found")
+        new_unit_id = body.get("unit_id")
+        if not new_unit_id:
+            raise HTTPException(status_code=422, detail="unit_id is required")
+        if data_manager.get_housing_unit(new_unit_id) is None:
+            raise HTTPException(status_code=404, detail="Housing unit not found")
+        reason = body.get("reason", "transfer")
+        if fish.get("current_unit_id"):
+            success = data_manager.move_fish(fish_id, new_unit_id, reason)
+        else:
+            success = data_manager.assign_fish_to_unit(fish_id, new_unit_id, reason)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to assign fish")
+        return data_manager.get_fish_subject(fish_id)
+
+    @app.get("/fish/{fish_id}/history")
+    def get_fish_history(fish_id: str) -> Dict[str, Any]:
+        """Occupancy history for a fish — where it has lived."""
+        _require_db_path()
+        if data_manager.get_fish_subject(fish_id) is None:
+            raise HTTPException(status_code=404, detail="Fish not found")
+        history = data_manager.get_fish_occupancy_history(fish_id)
+        return {"items": history}
+
+    # ------------------------------------------------------------------
+    # Fish reference images
+    # ------------------------------------------------------------------
+
+    @app.post("/fish/{fish_id}/images", response_class=HTMLResponse)
+    async def upload_fish_image(
+        request: Request,
+        fish_id: str,
+        file: UploadFile = ...,
+        caption: Optional[str] = Form(default=None),
+    ):
+        """Upload a reference image for a fish."""
+        _require_db_path()
+        fish = data_manager.get_fish_subject(fish_id)
+        if fish is None:
+            raise HTTPException(status_code=404, detail="Fish not found")
+
+        allowed = {"image/jpeg", "image/png"}
+        if file.content_type not in allowed:
+            return templates.TemplateResponse("screening/_flash_message.html", {
+                "request": request,
+                "message": f"Invalid file type: {file.content_type}. Only JPEG and PNG are accepted.",
+                "level": "error",
+            })
+
+        fish_images_dir: Path = app.state.fish_images_dir
+        fish_dir = fish_images_dir / fish_id
+        fish_dir.mkdir(parents=True, exist_ok=True)
+
+        ext = "jpg" if file.content_type == "image/jpeg" else "png"
+        existing = list(fish_dir.glob("*"))
+        seq = len(existing) + 1
+        filename = f"{seq:03d}.{ext}"
+
+        dest = fish_dir / filename
+        contents = await file.read()
+        dest.write_bytes(contents)
+
+        data_manager.save_fish_image(
+            fish_id=fish_id,
+            image_filename=filename,
+            image_type="reference",
+            caption=caption,
+        )
+
+        images = data_manager.get_fish_images(fish_id)
+        return templates.TemplateResponse("fish/_image_gallery.html", {
+            "request": request,
+            "fish_id": fish_id,
+            "images": images,
+        })
+
+    @app.get("/fish/{fish_id}/images", response_class=HTMLResponse)
+    def fish_image_gallery(
+        request: Request,
+        fish_id: str,
+    ):
+        """HTMX partial — image gallery for a fish."""
+        _require_db_path()
+        images = data_manager.get_fish_images(fish_id)
+        return templates.TemplateResponse("fish/_image_gallery.html", {
+            "request": request,
+            "fish_id": fish_id,
             "images": images,
         })
 

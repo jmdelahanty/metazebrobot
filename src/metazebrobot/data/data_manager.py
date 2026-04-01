@@ -8,6 +8,7 @@ using SQLite with JSON columns for flexible NoSQL-style storage.
 import logging
 import sqlite3
 import json
+import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union, Tuple
 from contextlib import contextmanager
@@ -223,6 +224,112 @@ class DataManager:
                 cursor.execute("""
                     CREATE INDEX IF NOT EXISTS idx_screening_images_dish_datetime
                     ON screening_step_images(dish_id, screening_datetime)
+                """)
+
+                # Individual fish tracking
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS fish_subjects (
+                        fish_id TEXT PRIMARY KEY,
+                        dish_id TEXT NOT NULL,
+                        subject_label TEXT,
+                        sex TEXT,
+                        genotype TEXT,
+                        species TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        notes TEXT,
+                        FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_fish_subjects_dish_id
+                    ON fish_subjects(dish_id)
+                """)
+
+                # Add current_unit_id to fish_subjects if not present
+                cursor.execute("PRAGMA table_info(fish_subjects)")
+                fish_cols = {row[1] for row in cursor.fetchall()}
+                if 'current_unit_id' not in fish_cols:
+                    cursor.execute(
+                        "ALTER TABLE fish_subjects ADD COLUMN current_unit_id TEXT REFERENCES housing_units(unit_id)"
+                    )
+
+                # Housing units — physical positions within a dish
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS housing_units (
+                        unit_id TEXT PRIMARY KEY,
+                        dish_id TEXT NOT NULL,
+                        position_label TEXT,
+                        unit_kind TEXT NOT NULL DEFAULT 'open',
+                        capacity INTEGER DEFAULT 1,
+                        status TEXT NOT NULL DEFAULT 'active',
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        notes TEXT,
+                        FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_housing_units_dish_id
+                    ON housing_units(dish_id)
+                """)
+
+                # Per-position maintenance checks
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS housing_unit_checks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        unit_id TEXT NOT NULL,
+                        check_time TEXT NOT NULL,
+                        fed BOOLEAN,
+                        feed_type TEXT,
+                        water_changed BOOLEAN,
+                        vol_water_changed INTEGER,
+                        num_dead INTEGER DEFAULT 0,
+                        notes TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (unit_id) REFERENCES housing_units(unit_id)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_housing_unit_checks_unit_id
+                    ON housing_unit_checks(unit_id)
+                """)
+
+                # Fish occupancy history
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS housing_unit_occupancy (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        fish_id TEXT NOT NULL,
+                        unit_id TEXT NOT NULL,
+                        moved_in_at TEXT NOT NULL,
+                        moved_out_at TEXT,
+                        reason TEXT,
+                        FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE,
+                        FOREIGN KEY (unit_id) REFERENCES housing_units(unit_id)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_housing_occupancy_fish_id
+                    ON housing_unit_occupancy(fish_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_housing_occupancy_unit_id
+                    ON housing_unit_occupancy(unit_id)
+                """)
+
+                # Per-fish reference images
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS fish_subject_images (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        fish_id TEXT NOT NULL,
+                        image_filename TEXT NOT NULL,
+                        image_type TEXT DEFAULT 'reference',
+                        caption TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_fish_subject_images_fish_id
+                    ON fish_subject_images(fish_id)
                 """)
 
                 conn.commit()
@@ -994,6 +1101,464 @@ class DataManager:
                 return [{k: row[k] for k in row.keys()} for row in rows]
         except Exception as e:
             logger.error(f"Error querying screening images: {e}")
+            return []
+
+    # --- Fish Subject Tracking ---
+
+    def create_fish_subject(
+        self,
+        dish_id: str,
+        fish_id: Optional[str] = None,
+        subject_label: Optional[str] = None,
+        sex: Optional[str] = None,
+        genotype: Optional[str] = None,
+        species: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Optional[str]:
+        """Create a new fish subject.
+
+        If fish_id is provided (e.g. minted by Citrus at acquisition time),
+        it is used as-is.  Otherwise a new UUID v4 is generated server-side.
+
+        Returns the fish_id on success, None on failure.
+        """
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return None
+        fish_id = fish_id or str(uuid.uuid4())
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO fish_subjects
+                        (fish_id, dish_id, subject_label, sex, genotype, species, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (fish_id, dish_id, subject_label, sex, genotype, species, notes),
+                )
+                conn.commit()
+                return fish_id
+        except Exception as e:
+            logger.error(f"Error creating fish subject: {e}")
+            return None
+
+    def get_fish_subjects(self, dish_id: str) -> List[Dict[str, Any]]:
+        """List all fish subjects for a dish, ordered by created_at."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT fish_id, dish_id, subject_label, sex, genotype,
+                           species, created_at, notes, current_unit_id
+                    FROM fish_subjects
+                    WHERE dish_id = ?
+                    ORDER BY created_at
+                    """,
+                    (dish_id,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying fish subjects: {e}")
+            return []
+
+    def get_fish_subject(self, fish_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single fish subject by UUID."""
+        if not self.is_initialized:
+            return None
+        try:
+            with self.get_connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT fish_id, dish_id, subject_label, sex, genotype,
+                           species, created_at, notes, current_unit_id
+                    FROM fish_subjects
+                    WHERE fish_id = ?
+                    """,
+                    (fish_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                return {k: row[k] for k in row.keys()}
+        except Exception as e:
+            logger.error(f"Error fetching fish subject: {e}")
+            return None
+
+    def update_fish_subject(self, fish_id: str, **kwargs) -> bool:
+        """Update mutable fields on a fish subject.
+
+        Accepted keyword arguments: subject_label, sex, genotype, species, notes.
+        """
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        allowed = {"subject_label", "sex", "genotype", "species", "notes"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return True  # nothing to do
+        set_clause = ", ".join(f"{col} = ?" for col in updates)
+        values = list(updates.values()) + [fish_id]
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute(
+                    f"UPDATE fish_subjects SET {set_clause} WHERE fish_id = ?",
+                    values,
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating fish subject: {e}")
+            return False
+
+    def delete_fish_subject(self, fish_id: str) -> bool:
+        """Delete a fish subject by UUID."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM fish_subjects WHERE fish_id = ?",
+                    (fish_id,),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting fish subject: {e}")
+            return False
+
+    # --- Housing Unit Management ---
+
+    def create_housing_unit(
+        self,
+        dish_id: str,
+        unit_kind: str = "open",
+        position_label: Optional[str] = None,
+        capacity: Optional[int] = 1,
+        notes: Optional[str] = None,
+    ) -> Optional[str]:
+        """Create a single housing unit. Returns the generated unit_id."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return None
+        unit_id = f"{dish_id}:{position_label}" if position_label else f"{dish_id}:open"
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO housing_units
+                        (unit_id, dish_id, position_label, unit_kind, capacity, notes)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (unit_id, dish_id, position_label, unit_kind, capacity, notes),
+                )
+                conn.commit()
+                return unit_id
+        except Exception as e:
+            logger.error(f"Error creating housing unit: {e}")
+            return None
+
+    def create_housing_units_for_dish(
+        self,
+        dish_id: str,
+        unit_kind: str,
+        count: int,
+        label_format: Optional[str] = None,
+    ) -> List[str]:
+        """Batch-create housing units for a dish.
+
+        label_format controls position labels:
+        - None or "numeric": "1", "2", ..., "N"
+        - "well_plate": "A1", "A2", ..., row-major for standard plates
+
+        Returns list of created unit_ids.
+        """
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return []
+
+        labels = []
+        if label_format == "well_plate":
+            rows = "ABCDEFGH"
+            cols_per_row = max(1, (count + 7) // 8) if count > 8 else count
+            for r in rows:
+                for c in range(1, cols_per_row + 1):
+                    labels.append(f"{r}{c}")
+                    if len(labels) == count:
+                        break
+                if len(labels) == count:
+                    break
+        else:
+            labels = [str(i) for i in range(1, count + 1)]
+
+        created = []
+        try:
+            with self.get_connection() as conn:
+                for label in labels:
+                    unit_id = f"{dish_id}:{label}"
+                    conn.execute(
+                        """
+                        INSERT INTO housing_units
+                            (unit_id, dish_id, position_label, unit_kind, capacity)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (unit_id, dish_id, label, unit_kind, 1),
+                    )
+                    created.append(unit_id)
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error batch-creating housing units: {e}")
+        return created
+
+    def get_housing_units(self, dish_id: str) -> List[Dict[str, Any]]:
+        """List housing units for a dish with current occupancy counts."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT h.unit_id, h.dish_id, h.position_label, h.unit_kind,
+                           h.capacity, h.status, h.created_at, h.notes,
+                           COUNT(f.fish_id) AS occupant_count
+                    FROM housing_units h
+                    LEFT JOIN fish_subjects f ON f.current_unit_id = h.unit_id
+                    WHERE h.dish_id = ?
+                    GROUP BY h.unit_id
+                    ORDER BY h.position_label
+                    """,
+                    (dish_id,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying housing units: {e}")
+            return []
+
+    def get_housing_unit(self, unit_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single housing unit with its current fish."""
+        if not self.is_initialized:
+            return None
+        try:
+            with self.get_connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT unit_id, dish_id, position_label, unit_kind,
+                           capacity, status, created_at, notes
+                    FROM housing_units WHERE unit_id = ?
+                    """,
+                    (unit_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                unit = {k: row[k] for k in row.keys()}
+                fish_rows = conn.execute(
+                    """
+                    SELECT fish_id, dish_id, subject_label, sex, genotype,
+                           species, created_at, notes
+                    FROM fish_subjects WHERE current_unit_id = ?
+                    ORDER BY created_at
+                    """,
+                    (unit_id,),
+                ).fetchall()
+                unit["fish"] = [{k: r[k] for k in r.keys()} for r in fish_rows]
+                return unit
+        except Exception as e:
+            logger.error(f"Error fetching housing unit: {e}")
+            return None
+
+    def assign_fish_to_unit(
+        self, fish_id: str, unit_id: str, reason: str = "initial",
+    ) -> bool:
+        """Assign a fish to a housing unit. Updates current_unit_id and creates occupancy record."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    "UPDATE fish_subjects SET current_unit_id = ? WHERE fish_id = ?",
+                    (unit_id, fish_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO housing_unit_occupancy
+                        (fish_id, unit_id, moved_in_at, reason)
+                    VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+                    """,
+                    (fish_id, unit_id, reason),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error assigning fish to unit: {e}")
+            return False
+
+    def move_fish(
+        self, fish_id: str, new_unit_id: str, reason: str = "transfer",
+    ) -> bool:
+        """Move a fish from its current unit to a new one.
+
+        Closes the old occupancy record and opens a new one.
+        """
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        try:
+            with self.get_connection() as conn:
+                # Close current occupancy
+                conn.execute(
+                    """
+                    UPDATE housing_unit_occupancy
+                    SET moved_out_at = CURRENT_TIMESTAMP
+                    WHERE fish_id = ? AND moved_out_at IS NULL
+                    """,
+                    (fish_id,),
+                )
+                # Update current unit
+                conn.execute(
+                    "UPDATE fish_subjects SET current_unit_id = ? WHERE fish_id = ?",
+                    (new_unit_id, fish_id),
+                )
+                # Open new occupancy
+                conn.execute(
+                    """
+                    INSERT INTO housing_unit_occupancy
+                        (fish_id, unit_id, moved_in_at, reason)
+                    VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+                    """,
+                    (fish_id, new_unit_id, reason),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error moving fish: {e}")
+            return False
+
+    def log_housing_unit_check(
+        self,
+        unit_id: str,
+        check_time: str,
+        fed: Optional[bool] = None,
+        feed_type: Optional[str] = None,
+        water_changed: Optional[bool] = None,
+        vol_water_changed: Optional[int] = None,
+        num_dead: int = 0,
+        notes: Optional[str] = None,
+    ) -> bool:
+        """Log a maintenance check for a housing unit position."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO housing_unit_checks
+                        (unit_id, check_time, fed, feed_type, water_changed,
+                         vol_water_changed, num_dead, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (unit_id, check_time, fed, feed_type, water_changed,
+                     vol_water_changed, num_dead, notes),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error logging housing unit check: {e}")
+            return False
+
+    def get_housing_unit_checks(self, unit_id: str) -> List[Dict[str, Any]]:
+        """Maintenance history for a housing unit position."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT id, unit_id, check_time, fed, feed_type, water_changed,
+                           vol_water_changed, num_dead, notes, created_at
+                    FROM housing_unit_checks
+                    WHERE unit_id = ?
+                    ORDER BY check_time DESC
+                    """,
+                    (unit_id,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying housing unit checks: {e}")
+            return []
+
+    def get_fish_occupancy_history(self, fish_id: str) -> List[Dict[str, Any]]:
+        """Where has this fish lived — full occupancy history with unit details."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT o.id, o.fish_id, o.unit_id, o.moved_in_at,
+                           o.moved_out_at, o.reason,
+                           h.dish_id, h.position_label, h.unit_kind
+                    FROM housing_unit_occupancy o
+                    JOIN housing_units h ON h.unit_id = o.unit_id
+                    WHERE o.fish_id = ?
+                    ORDER BY o.moved_in_at
+                    """,
+                    (fish_id,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying fish occupancy history: {e}")
+            return []
+
+    # --- Fish Subject Images ---
+
+    def save_fish_image(
+        self,
+        fish_id: str,
+        image_filename: str,
+        image_type: str = "reference",
+        caption: Optional[str] = None,
+    ) -> bool:
+        """Insert a row into fish_subject_images linking an image file to a fish."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO fish_subject_images
+                        (fish_id, image_filename, image_type, caption)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (fish_id, image_filename, image_type, caption),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error saving fish image record: {e}")
+            return False
+
+    def get_fish_images(self, fish_id: str) -> List[Dict[str, Any]]:
+        """Query images for a fish."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT id, fish_id, image_filename, image_type, caption, created_at
+                    FROM fish_subject_images
+                    WHERE fish_id = ?
+                    ORDER BY created_at
+                    """,
+                    (fish_id,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying fish images: {e}")
             return []
 
     # --- Material Management (using database backend) ---

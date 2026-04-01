@@ -37,7 +37,10 @@
                     Not started
                 {% endif %}
             </td>
-            <td><a href="/screening/{{ d.dish_id }}" role="button" class="outline">Screen</a></td>
+            <td>
+                <a href="/screening/{{ d.dish_id }}" role="button" class="outline">Screen</a>
+                <a href="/dishes/{{ d.dish_id }}/fish/" role="button" class="outline secondary" style="margin-left:0.25rem">Fish</a>
+            </td>
         </tr>
         {% endfor %}
     </tbody>

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Fish — {{ dish_id }}{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Fish — {{ dish_id }}</h2>
+    <p>{{ genotype or "Unknown genotype" }} &mdash; {{ fish | length }} registered</p>
+</hgroup>
+
+{# Registered fish #}
+<h3>Registered Fish</h3>
+<div id="fish-table">
+    {% include "fish/_fish_table.html" %}
+</div>
+
+{# Registration form #}
+<details open>
+    <summary><strong>Register New Fish</strong></summary>
+    <form
+        hx-post="/dishes/{{ dish_id }}/fish/register"
+        hx-target="#fish-table"
+        hx-swap="innerHTML"
+    >
+        <div class="grid">
+            <label>
+                Label <small>(well position, name, etc.)</small>
+                <input type="text" name="subject_label" placeholder="e.g. A1, fish-01">
+            </label>
+            <label>
+                Sex
+                <select name="sex">
+                    <option value="">Unknown</option>
+                    <option value="M">Male</option>
+                    <option value="F">Female</option>
+                </select>
+            </label>
+        </div>
+
+        <div class="grid">
+            <label>
+                Genotype
+                <input type="text" name="genotype" value="{{ genotype or '' }}">
+            </label>
+            <label>
+                Species
+                <input type="text" name="species" value="{{ species or 'Danio rerio' }}">
+            </label>
+        </div>
+
+        <label>
+            Notes
+            <textarea name="notes" rows="2"></textarea>
+        </label>
+
+        <button type="submit">Register Fish</button>
+    </form>
+</details>
+
+{# Reference images per fish #}
+{% if fish %}
+<h3>Reference Images</h3>
+{% for f in fish %}
+<details{% if loop.last %} open{% endif %}>
+    <summary>{{ f.subject_label or f.fish_id[:8] }}</summary>
+    <div
+        hx-get="/fish/{{ f.fish_id }}/images"
+        hx-trigger="revealed"
+        hx-swap="innerHTML"
+    >
+        Loading images...
+    </div>
+</details>
+{% endfor %}
+{% endif %}
+
+{# Batch registration #}
+<details>
+    <summary><strong>Batch Register</strong></summary>
+    <form
+        hx-post="/dishes/{{ dish_id }}/fish/batch"
+        hx-target="#fish-table"
+        hx-swap="innerHTML"
+    >
+        <div class="grid">
+            <label>
+                Number of fish
+                <input type="number" name="count" min="1" max="96" value="1" required>
+            </label>
+            <label>
+                Label prefix <small>(optional — produces prefix-1, prefix-2, ...)</small>
+                <input type="text" name="label_prefix" placeholder="e.g. well, fish">
+            </label>
+        </div>
+        <button type="submit" class="secondary">Register Batch</button>
+    </form>
+</details>
+
+<p><a href="/screening/{{ dish_id }}">&larr; Back to screening</a> | <a href="/screening/">&larr; Dish list</a></p>
+{% endblock %}

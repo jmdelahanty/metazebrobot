@@ -1,0 +1,49 @@
+{% if flash_message is defined and flash_message %}
+<div class="flash flash-{{ flash_level }}" role="alert">
+    {{ flash_message }}
+</div>
+{% endif %}
+
+{% if fish %}
+<figure>
+<table role="grid">
+    <thead>
+        <tr>
+            <th>Label</th>
+            <th>Fish ID</th>
+            <th>Sex</th>
+            <th>Genotype</th>
+            <th>Species</th>
+            <th>Created</th>
+            <th>Notes</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for f in fish %}
+        <tr>
+            <td>{{ f.subject_label or "-" }}</td>
+            <td><code>{{ f.fish_id[:8] }}&hellip;</code></td>
+            <td>{{ f.sex or "-" }}</td>
+            <td>{{ f.genotype or "-" }}</td>
+            <td>{{ f.species or "-" }}</td>
+            <td>{{ f.created_at }}</td>
+            <td>{{ f.notes or "-" }}</td>
+            <td>
+                <button class="outline secondary"
+                        hx-delete="/fish/{{ f.fish_id }}"
+                        hx-target="#fish-table"
+                        hx-swap="innerHTML"
+                        hx-confirm="Remove fish {{ f.subject_label or f.fish_id[:8] }}?"
+                        style="padding:0.25rem 0.5rem; font-size:0.8rem">
+                    Remove
+                </button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p><em>No fish registered for this dish yet.</em></p>
+{% endif %}
