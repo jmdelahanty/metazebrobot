@@ -36,6 +36,27 @@
 </details>
 {% endif %}
 
+{# Atlas reference images from mapzebrain #}
+{% if atlas_lines %}
+<details class="protocol-box">
+    <summary><strong>Atlas Reference</strong> <small>(mapzebrain, 6 dpf larval brain)</small></summary>
+    <div class="indicator-images">
+        {% for line in atlas_lines %}
+        <figure class="indicator-thumb">
+            <img src="{{ line.url }}" alt="{{ line.display_name }}" loading="lazy">
+            <figcaption>{{ line.display_name }}</figcaption>
+        </figure>
+        {% endfor %}
+    </div>
+    <small><a href="https://mapzebrain.org" target="_blank" rel="noopener">Browse full atlas on mapzebrain.org</a></small>
+</details>
+{% elif not atlas_catalog_available %}
+<details class="protocol-box">
+    <summary><strong>Atlas Reference</strong> <small>(unavailable)</small></summary>
+    <p><em>Could not load the mapzebrain atlas catalog. Check your internet connection and restart the server to try again.</em></p>
+</details>
+{% endif %}
+
 {# Existing steps #}
 <h3>Screening Steps</h3>
 <div id="steps-table">

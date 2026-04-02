@@ -174,13 +174,13 @@ class Walkthrough:
             (
                 dish_id,
                 json.dumps({"dish_id": dish_id, "fish_count": 20}),
-                "Tg(test:walkthrough)",
+                "Tg(gfap:TRPV1-T2A-GFP);Tg(elavl3:jRGECO1b)",
                 "Danio rerio",
                 self.cross_id,
                 "active",
                 "primary",
                 "20260401",  # date_created
-                "20260301",  # dof
+                "20260327",  # dof (April 1 screening = DPF 5)
                 "walkthrough",  # responsible
                 20,  # fish_count
                 "petri_dish",  # container_type
@@ -208,15 +208,14 @@ class Walkthrough:
             data={
                 "screening_datetime": "20260401T10:00:00",
                 "dpf_screened": 5,
-                "indicators_screened": "GFP",
-                "pigment_screened": True,
-                "criteria": "fluorescence",
+                "indicators_screened": "gfap:TRPV1-T2A-GFP",
+                "pigment_screened": False,
+                "criteria": "Check pan-glial expression",
                 "count_screened_this_step": 20,
                 "number_kept": 12,
-                "number_removed_pigmented": 3,
-                "number_removed_negative": 5,
+                "number_removed_negative": 8,
                 "tricaine_used": True,
-                "notes": "E2E walkthrough test screening",
+                "notes": "E2E walkthrough: DPF 5 gfap screen per protocol",
             },
         )
 
@@ -310,7 +309,7 @@ class Walkthrough:
                 json_body={
                     "subject_label": f"wt-{i:02d}",
                     "sex": "unknown",
-                    "genotype": "Tg(test:walkthrough)",
+                    "genotype": "Tg(gfap:TRPV1-T2A-GFP);Tg(elavl3:jRGECO1b)",
                     "species": "Danio rerio",
                     "notes": f"E2E walkthrough fish #{i}",
                 },
@@ -373,7 +372,7 @@ class Walkthrough:
             self.base,
             json_body={
                 "subject_label": "unplaced-05",
-                "genotype": "Tg(test:walkthrough)",
+                "genotype": "Tg(gfap:TRPV1-T2A-GFP);Tg(elavl3:jRGECO1b)",
                 "notes": "E2E walkthrough: unassigned fish for plate map demo",
             },
             expect=201,

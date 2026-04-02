@@ -6,6 +6,7 @@ using SQLite with JSON columns for flexible NoSQL-style storage.
 """
 
 import logging
+import re
 import sqlite3
 import json
 import uuid
@@ -1102,6 +1103,157 @@ class DataManager:
             return image_map
         logger.warning("Indicator images data not in expected format. Returning empty dict.")
         return {}
+
+    # --- mapzebrain Atlas Integration ---
+
+    _MAPZEBRAIN_CATALOG_URL = (
+        "https://api.mapzebrain.org/media/downloads/Lines/markers_catalog.json"
+    )
+    _MAPZEBRAIN_IMAGE_BASE = (
+        "https://api.mapzebrain.org/media/Lines"
+    )
+    _mapzebrain_catalog: Optional[List[Dict[str, Any]]] = None
+
+    def fetch_mapzebrain_catalog(self) -> List[Dict[str, Any]]:
+        """Fetch and cache the mapzebrain markers catalog.
+
+        Downloads from the mapzebrain API on first call, caches to disk
+        at ``config/mapzebrain_catalog.json``.  Returns an empty list on
+        network failure — the external dependency must never block screening.
+        """
+        if self._mapzebrain_catalog is not None:
+            return self._mapzebrain_catalog
+
+        cache_path = self.config_dir / "mapzebrain_catalog.json" if self.config_dir else None
+
+        # Try disk cache first
+        if cache_path and cache_path.exists():
+            try:
+                data = json.loads(cache_path.read_text())
+                if isinstance(data, list):
+                    DataManager._mapzebrain_catalog = data
+                    logger.info(f"Loaded mapzebrain catalog from cache ({len(data)} markers)")
+                    return data
+            except Exception as e:
+                logger.warning(f"Failed to read mapzebrain cache: {e}")
+
+        # Fetch from API
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                self._MAPZEBRAIN_CATALOG_URL,
+                headers={"User-Agent": "MetaZebrobot/0.1"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            if isinstance(data, list):
+                DataManager._mapzebrain_catalog = data
+                logger.info(f"Fetched mapzebrain catalog ({len(data)} markers)")
+                # Cache to disk
+                if cache_path:
+                    try:
+                        cache_path.write_text(json.dumps(data))
+                    except Exception as e:
+                        logger.warning(f"Failed to write mapzebrain cache: {e}")
+                return data
+        except Exception as e:
+            logger.warning(f"Failed to fetch mapzebrain catalog: {e}")
+
+        DataManager._mapzebrain_catalog = []
+        return []
+
+    def lookup_mapzebrain_lines(self, genotype: str) -> List[Dict[str, str]]:
+        """Find mapzebrain atlas entries matching a genotype string.
+
+        Parses ``"Tg(promoter:reporter);Tg(promoter:reporter)"`` to extract
+        promoter and reporter names, then searches the cached catalog.
+
+        Returns a list of dicts with ``name``, ``folder``, and ``url`` keys
+        for each matched atlas line.
+        """
+        catalog = self.fetch_mapzebrain_catalog()
+        if not catalog:
+            return []
+
+        # Parse genotype into search terms
+        search_terms = self._parse_genotype_terms(genotype)
+        if not search_terms:
+            return []
+
+        # Build folder lookup from catalog
+        results = []
+        seen_folders = set()
+        for term_promoter, term_reporter in search_terms:
+            best = self._find_best_catalog_match(catalog, term_promoter, term_reporter)
+            if best and best["folder"] not in seen_folders:
+                seen_folders.add(best["folder"])
+                results.append(best)
+
+        return results
+
+    @staticmethod
+    def _parse_genotype_terms(genotype: str) -> List[tuple]:
+        """Extract (promoter, reporter) pairs from a genotype string."""
+        terms = []
+        # Match Tg(...) blocks
+        tg_blocks = re.findall(r'Tg\(([^)]+)\)', genotype)
+        for block in tg_blocks:
+            parts = block.split(":", 1)
+            promoter = parts[0].strip().lower()
+            reporter = parts[1].strip().lower() if len(parts) > 1 else ""
+            if promoter:
+                terms.append((promoter, reporter))
+        return terms
+
+    def _find_best_catalog_match(
+        self,
+        catalog: List[Dict[str, Any]],
+        promoter: str,
+        reporter: str,
+    ) -> Optional[Dict[str, str]]:
+        """Find the best catalog entry for a promoter+reporter pair."""
+        candidates = []
+        for entry in catalog:
+            synonyms = (entry.get("synonyms") or "").lower()
+            name = (entry.get("name") or "").lower()
+            search_text = f"{name} {synonyms}"
+
+            if promoter not in search_text:
+                continue
+
+            # Extract folder from stack URL
+            stack_url = entry.get("stack", "")
+            if "/Lines/" not in stack_url:
+                continue
+            folder = stack_url.split("/Lines/")[1].split("/")[0]
+
+            # Score: prefer entries whose folder also contains the reporter
+            score = 0
+            if reporter:
+                # Check if reporter terms appear in folder or synonyms
+                reporter_parts = re.split(r'[-_]', reporter)
+                for part in reporter_parts:
+                    if len(part) >= 3 and part in folder.lower():
+                        score += 2
+                    elif len(part) >= 3 and part in search_text:
+                        score += 1
+
+            candidates.append({
+                "name": entry.get("name", ""),
+                "display_name": f"{promoter}:{folder}",
+                "folder": folder,
+                "url": f"{self._MAPZEBRAIN_IMAGE_BASE}/{folder}/average_data/orthogonal_views/dorsal/180.jpg",
+                "_score": score,
+            })
+
+        if not candidates:
+            return None
+
+        # Return highest-scoring match
+        candidates.sort(key=lambda c: c["_score"], reverse=True)
+        best = candidates[0]
+        del best["_score"]
+        return best
 
     # --- Screening Step Images ---
 

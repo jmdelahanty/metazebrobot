@@ -257,6 +257,9 @@ async def lifespan(app: FastAPI):
         dish_images_dir.mkdir(parents=True, exist_ok=True)
         app.state.dish_images_dir = dish_images_dir
         logger.info(f"Dish images directory: {dish_images_dir}")
+
+        # Pre-fetch mapzebrain atlas catalog (non-blocking — logs warning on failure)
+        data_manager.fetch_mapzebrain_catalog()
     yield
 
 
@@ -588,6 +591,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             if imgs:
                 step_images[s.screening_datetime] = imgs
 
+        # mapzebrain atlas expression pattern images
+        atlas_catalog_available = bool(data_manager.fetch_mapzebrain_catalog())
+        atlas_lines = data_manager.lookup_mapzebrain_lines(dish.genotype)
+
         return templates.TemplateResponse(request, "screening/screening_form.html", {
             "dish": dish,
             "dpf": dpf,
@@ -598,6 +605,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "final_count": final_count,
             "indicator_images": indicator_images,
             "step_images": step_images,
+            "atlas_lines": atlas_lines,
+            "atlas_catalog_available": atlas_catalog_available,
         })
 
     @app.get("/screening/{dish_id}/steps-table", response_class=HTMLResponse)

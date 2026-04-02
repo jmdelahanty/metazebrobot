@@ -185,3 +185,27 @@ class TestDishImageData:
         assert images[1]["caption"] == "second"
 
 
+class TestMapzebrainParsing:
+    """Genotype parsing for mapzebrain atlas lookup."""
+
+    def test_parse_single_transgene(self):
+        terms = data_manager._parse_genotype_terms("Tg(elavl3:GCaMP6s)")
+        assert terms == [("elavl3", "gcamp6s")]
+
+    def test_parse_double_transgene(self):
+        terms = data_manager._parse_genotype_terms(
+            "Tg(gfap:TRPV1-T2A-GFP);Tg(elavl3:jRGECO1b)"
+        )
+        assert len(terms) == 2
+        assert terms[0] == ("gfap", "trpv1-t2a-gfp")
+        assert terms[1] == ("elavl3", "jrgeco1b")
+
+    def test_parse_no_tg(self):
+        terms = data_manager._parse_genotype_terms("wild-type AB")
+        assert terms == []
+
+    def test_parse_promoter_only(self):
+        terms = data_manager._parse_genotype_terms("Tg(elavl3)")
+        assert terms == [("elavl3", "")]
+
+
