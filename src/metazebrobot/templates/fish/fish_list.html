@@ -18,6 +18,15 @@
     Loading images...
 </div>
 
+{# Housing map (well plate grid or occupant list) #}
+<h3>Housing Map</h3>
+<div id="plate-map"
+     hx-get="/dishes/{{ dish_id }}/plate-map"
+     hx-trigger="revealed"
+     hx-swap="innerHTML">
+    Loading...
+</div>
+
 {# Registered fish #}
 <h3>Registered Fish</h3>
 <div id="fish-table">

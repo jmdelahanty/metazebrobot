@@ -2,7 +2,7 @@
 
 Track individual fish from registration through experiments. A UUID assigned in MetaZebrobot flows through the pipeline: MetaZebrobot → Citrus (acquisition) → Palette (ingestion) → Crimson (analysis).
 
-**Implementation status:** All phases (1, 2, 2b, 3, 4) are complete — fish subject CRUD, web UI, housing unit management, reference images, and experiment session tracking are implemented with API endpoints and data manager methods.
+**Implementation status:** Phases 1–3 are complete — fish subject CRUD, web UI, housing unit management, and reference images are implemented. Phase 4 (experiment session tracking) was implemented then removed — session/run data belongs in Palette.
 
 ## Key Constraints
 
@@ -11,7 +11,7 @@ Track individual fish from registration through experiments. A UUID assigned in 
 - `fish_id` is UUID v4 (`8-4-4-4-12` hex) per downstream contracts (`~/gitrepos/palette/docs/zebrobot_snapshot.md`)
 - UUIDs can be minted by MetaZebrobot (web UI, batch registration) or by Citrus at acquisition time and back-registered later
 - Downstream systems consume `fish_id` via H5 `/subject_metadata` block
-- One fish can have **multiple recordings** — the `fish_runs` join table links N sessions to 1 fish
+- One fish can have **multiple recordings** — session tracking lives in Palette
 
 ## Data Storage Strategy: Snapshot + Registry
 
@@ -59,25 +59,27 @@ Registry-only (not snapshotted):
 
 ### Target query
 
-The registry enables the target query:
+The combined MetaZebrobot + Palette registries enable the target query:
 
 > "Show me all individual fish that had protocol X performed, with their housing history, screening results, and cross lineage."
 
+Session data (`experiment_sessions`, `fish_runs`) lives in Palette. Fish
+identity, housing, and screening data lives in MetaZebrobot. The `fish_id`
+UUID is the join key between the two systems.
+
+MetaZebrobot query (housing + screening for a fish):
+
 ```sql
-SELECT
-    f.fish_id, f.genotype, f.sex,
-    s.protocol_name, s.run_at_utc, fr.dpf_at_run,
-    d.cross_id, d.dof,
-    h.position_label, h.unit_kind,
-    ho.moved_in_at, ho.moved_out_at, ho.reason
+SELECT f.fish_id, f.genotype, f.sex,
+       d.cross_id, d.dof,
+       h.position_label, h.unit_kind,
+       ho.moved_in_at, ho.moved_out_at, ho.reason
 FROM fish_subjects f
-JOIN fish_runs fr ON fr.fish_id = f.fish_id
-JOIN experiment_sessions s ON s.session_uuid = fr.session_uuid
 JOIN dishes d ON d.dish_id = f.dish_id
 LEFT JOIN housing_unit_occupancy ho ON ho.fish_id = f.fish_id
 LEFT JOIN housing_units h ON h.unit_id = ho.unit_id
-WHERE s.protocol_name = 'DefaultScreen'
-ORDER BY f.fish_id, ho.moved_in_at;
+WHERE f.fish_id = ?
+ORDER BY ho.moved_in_at;
 ```
 
 Screening results join through the dish:
@@ -99,8 +101,7 @@ The `fish_id` UUID is minted once — either in MetaZebrobot (web UI, batch regi
 | Resource | Location |
 |----------|----------|
 | `fish_subjects` table definition | `docs/schema.sql:124-134` |
-| `experiment_sessions` + `fish_runs` tables | `docs/schema.sql:135-154` |
-| Proposed `session_assets` table + `dpf_at_run` | `docs/experimental_data_schema.md` |
+| Session/run tracking (moved to Palette) | `docs/identity_and_provenance_contract.md` |
 | Acquisition registry + import receipts | `docs/zebrobot_snapshot.md:187-347` |
 | Snapshot contract with `fish_id` in `subject_metadata` | `~/gitrepos/palette/docs/zebrobot_snapshot.md:61-78` |
 | Data manager (needs CRUD methods) | `src/metazebrobot/data/data_manager.py` |
@@ -137,7 +138,7 @@ The `fish_id` UUID is minted once — either in MetaZebrobot (web UI, batch regi
 - [x] `get_fish_subjects(dish_id)` — list all fish for a dish, ordered by `created_at`
 - [x] `get_fish_subject(fish_id)` — fetch single fish by UUID
 - [x] `update_fish_subject(fish_id, **kwargs)` — update mutable fields (`subject_label`, `sex`, `genotype`, `species`, `notes`)
-- [x] `delete_fish_subject(fish_id)` — remove fish (cascade handled by FK on `fish_runs`)
+- [x] `delete_fish_subject(fish_id)` — remove fish (cascade handled by FK on `housing_unit_occupancy`, `fish_subject_images`)
 
 ### API Endpoints
 
@@ -372,54 +373,13 @@ The existing dish-level `quality_checks` table stays as-is for dishes that don't
 
 ---
 
-## Phase 4: Experiment Session Tracking
+## Phase 4: Experiment Session Tracking — REMOVED
 
-### Schema
-
-- [x] Add `experiment_sessions` table to `data_manager.py` `initialize()`:
-  ```sql
-  CREATE TABLE IF NOT EXISTS experiment_sessions (
-      session_uuid TEXT PRIMARY KEY,
-      run_at_utc TEXT,
-      rig_id TEXT,
-      arena_id TEXT,
-      protocol_name TEXT,
-      h5_path TEXT
-  );
-  ```
-- [x] Add `fish_runs` table:
-  ```sql
-  CREATE TABLE IF NOT EXISTS fish_runs (
-      run_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      fish_id TEXT NOT NULL,
-      session_uuid TEXT NOT NULL,
-      dpf_at_run INTEGER,
-      notes TEXT,
-      FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE,
-      FOREIGN KEY (session_uuid) REFERENCES experiment_sessions(session_uuid) ON DELETE CASCADE,
-      UNIQUE (fish_id, session_uuid)
-  );
-  CREATE INDEX IF NOT EXISTS idx_fish_runs_fish_id ON fish_runs(fish_id);
-  CREATE INDEX IF NOT EXISTS idx_fish_runs_session_uuid ON fish_runs(session_uuid);
-  ```
-- [x] Added `dpf_at_run INTEGER` column to `fish_runs` (see `docs/experimental_data_schema.md`)
-- [ ] Consider adding `session_assets` table for per-session file paths (deferred — not yet needed)
-
-### Data Manager Methods
-
-- [x] `create_experiment_session(session_uuid, run_at_utc, rig_id, arena_id, protocol_name, h5_path)` — insert session
-- [x] `get_experiment_session(session_uuid)` — fetch single session
-- [x] `create_fish_run(fish_id, session_uuid, dpf_at_run=None, notes=None)` — link fish to session
-- [x] `get_fish_runs(fish_id)` — list all sessions a fish participated in
-- [x] `get_session_fish(session_uuid)` — list all fish in a session
-
-### API Endpoints
-
-- [x] `POST /sessions` — register an experiment session (409 if already exists)
-- [x] `GET /sessions/{session_uuid}` — fetch session details
-- [x] `POST /sessions/{session_uuid}/fish` — link a fish to a session (accepts `fish_id`, optional `dpf_at_run`, `notes`)
-- [x] `GET /sessions/{session_uuid}/fish` — list fish in a session
-- [x] `GET /fish/{fish_id}/sessions` — list sessions for a fish
+> **Status:** Phase 4 was implemented and then removed. Session and experiment
+> tracking belongs in **Palette**, which owns the behavioral pipeline.
+> MetaZebrobot provides fish identity, housing, and screening data; Palette
+> stores sessions, runs, and file assets. See
+> `docs/identity_and_provenance_contract.md` for the cross-repo data flow.
 
 ### Downstream Integration
 
@@ -441,35 +401,6 @@ Two registration paths depending on whether the fish already exists in the regis
 
 Both paths converge: the same UUID ends up in both the H5 and the registry.
 
-**API response shapes (for Citrus integration):**
-
-`GET /dishes/{dish_id}/fish` → `{"items": [<fish>, ...]}`
-
-`GET /fish/{fish_id}` → single fish object:
-```json
-{
-  "fish_id": "6a1f9b7b-3b2a-4d7a-8a73-0b2d7c9e3d1a",
-  "dish_id": "17257_1",
-  "subject_label": "A1",
-  "sex": "unknown",
-  "genotype": "Tg(elavl3:jRGECO1b)",
-  "species": "Danio rerio",
-  "created_at": "2026-03-31T14:22:01",
-  "notes": null,
-  "current_unit_id": "17257_1_WP1:A1"
-}
-```
-
-`POST /dishes/{dish_id}/fish` — body accepts optional `fish_id` (for Citrus-minted UUIDs), `subject_label`, `sex`, `genotype`, `species`, `notes`. Returns `201` with the created fish object.
-
-`GET /dishes/{dish_id}/units` → `{"items": [<unit>, ...]}` where each unit includes `occupant_count`.
-
-`GET /units/{unit_id}` → unit object with nested `fish` array of current occupants.
-
-`POST /fish/{fish_id}/assign` — body: `{"unit_id": "...", "reason": "initial"}`. Assigns or moves fish.
-
-`GET /fish/{fish_id}/history` → `{"items": [<occupancy_record>, ...]}` with `moved_in_at`, `moved_out_at`, `reason`, plus unit details.
-
 **H5 snapshot (both paths):**
 
 Citrus snapshots into H5 `/subject_metadata`:
@@ -483,41 +414,28 @@ Citrus snapshots into H5 `/subject_metadata`:
 
 Citrus snapshots richer dish/cross metadata into H5 `/zebrobot_snapshot` (existing contract).
 
-**Multiple recordings per fish:**
-
-The same fish can appear in multiple recordings. Each recording creates a separate `fish_runs` row linking the `fish_id` to a different `experiment_sessions` entry. Example: fish in a petri dish runs protocol A, then later runs protocol B — two sessions, two `fish_runs` rows, one `fish_id`.
-
-```
-fish_subjects      1 ──< N >──  fish_runs  ──< N >── 1  experiment_sessions
-(one fish)                      (one per recording)      (one session)
-```
-
 #### Palette (ingestion time)
 
 - [ ] Palette reads `/subject_metadata.fish_id` during ingestion and stores it in its own registry
+- [ ] Palette stores experiment sessions and fish runs (the session/run tables live in Palette, not MetaZebrobot)
 - [ ] Palette maps `fish_id` → `subject_id` per the metadata cleanup recommendation (see `~/gitrepos/palette/docs/metadata_cleanup_recommendation.md`)
 - [ ] Palette preserves the full `/subject_metadata` and `/zebrobot_snapshot` blocks in its analysis metadata
-
-#### MetaZebrobot (import pipeline, post-transfer)
-
-- [ ] `POST /sessions` registers the experiment session after H5 files are transferred
-- [ ] `POST /sessions/{session_uuid}/fish` links fish to the session (creates `fish_runs` row)
 - [ ] Import receipts (see `docs/zebrobot_snapshot.md:243-347`) confirm successful import back to acquisition machine
 
 #### What lives where
 
-| Fact | H5 (snapshot) | MetaZebrobot (registry) | Notes |
-|------|:---:|:---:|-------|
-| `fish_id` UUID | yes | yes | The join key between both |
-| Genotype, species, sex at recording | yes | yes | H5 is point-in-time; registry may be corrected later |
-| DPF at run | yes | yes (`fish_runs.dpf_at_run`) | Computed once, stored in both |
-| Source dish + cross | yes | yes (via `dishes.parent_dish_id` chain) | H5 has compact summary; registry has full lineage |
-| Housing unit at recording time | yes | yes (via `housing_unit_occupancy`) | H5 snapshots current; registry has full history |
-| Full housing history | no | yes | Accumulates over fish lifetime |
-| All experiment sessions | no | yes | Grows with each session |
-| Screening results | no | yes | May be amended; join through dish |
-| Maintenance / quality checks | no | yes | Per-housing-unit, not per-recording |
-| Zebrobot snapshot (dish + cross detail) | yes | implicit (it's the source) | Rich provenance payload in H5 |
+| Fact | H5 (snapshot) | MetaZebrobot | Palette | Notes |
+|------|:---:|:---:|:---:|-------|
+| `fish_id` UUID | yes | yes | yes | The join key across all three |
+| Genotype, species, sex at recording | yes | yes | cached | H5 is point-in-time; MetaZebrobot may be corrected later |
+| DPF at run | yes | no | yes | Computed once, stored in H5 + Palette |
+| Source dish + cross | yes | yes | cached | H5 has compact summary; MetaZebrobot has full lineage |
+| Housing unit at recording time | yes | yes | no | H5 snapshots current; MetaZebrobot has full history |
+| Full housing history | no | yes | no | Accumulates over fish lifetime |
+| Experiment sessions + runs | no | no | yes | Palette owns the behavioral pipeline |
+| Screening results | no | yes | cached | May be amended; join through dish |
+| Maintenance / quality checks | no | yes | no | Per-housing-unit, not per-recording |
+| Zebrobot snapshot (dish + cross detail) | yes | implicit | cached | Rich provenance payload in H5 |
 
 ---
 
@@ -534,6 +452,6 @@ src/metazebrobot/templates/
 ## Files to Modify
 
 ```
-src/metazebrobot/data/data_manager.py  -- fish_subjects table, housing_units tables, CRUD methods, image methods, session/run methods
-src/metazebrobot/api_server.py         -- fish endpoints, housing unit endpoints, session endpoints, static mount for fish images
+src/metazebrobot/data/data_manager.py  -- fish_subjects table, housing_units tables, CRUD methods, image methods
+src/metazebrobot/api_server.py         -- fish endpoints, housing unit endpoints, static mount for fish images
 ```

@@ -160,7 +160,7 @@ position) for bench use — the UUID is the real identity.
 
 ### Near-term
 
-- [ ] Add automated tests for `POST /screening/{dish_id}/split`
+- [x] Add automated tests for `POST /screening/{dish_id}/split`
 - [ ] Coordinate with Citrus on identity assignment API calls
 - [ ] Define H5 snapshot schema_version=2 format (per-fish metadata)
 

@@ -356,10 +356,39 @@ class Walkthrough:
 
         pause(f"{self.base}/dishes/{dish_id}/fish/", self.interactive)
 
-    # ── Phase 7: Cross-level view ────────────────────────────────
+    # ── Phase 7: Plate map visualization ─────────────────────────
 
-    def phase_7_cross_level_view(self) -> None:
-        banner("Phase 7: Cross-Level View")
+    def phase_7_plate_map(self, dish_id: str, fish_ids: List[str]) -> None:
+        banner("Phase 7: Plate Map Visualization")
+
+        info("The fish list page now shows a visual housing map.")
+        info("Occupied wells are green, empty wells are gray.")
+        info("Check the plate map, then we'll add an unassigned fish.")
+        pause(f"{self.base}/dishes/{dish_id}/plate-map", self.interactive)
+
+        step("Registering one more fish WITHOUT assigning to a well...")
+        resp = api(
+            "POST",
+            f"/dishes/{dish_id}/fish",
+            self.base,
+            json_body={
+                "subject_label": "unplaced-05",
+                "genotype": "Tg(test:walkthrough)",
+                "notes": "E2E walkthrough: unassigned fish for plate map demo",
+            },
+            expect=201,
+        )
+        fid = resp["fish_id"]
+        self.fish_ids.append(fid)
+        info(f"  → {fid[:8]}… label=unplaced-05 (no well assignment)")
+        info("This fish should appear in the 'Unassigned fish' section below the grid.")
+
+        pause(f"{self.base}/dishes/{dish_id}/fish/", self.interactive)
+
+    # ── Phase 8: Cross-level view ────────────────────────────────
+
+    def phase_8_cross_level_view(self) -> None:
+        banner("Phase 8: Cross-Level View")
 
         info("Check the fish index, then drill into the cross to see the full hierarchy.")
         pause(f"{self.base}/fish/", self.interactive)
@@ -501,8 +530,11 @@ def main() -> None:
         # Phase 6: Housing units
         wt.phase_6_housing_units(pos_dish, fish_ids)
 
-        # Phase 7: Cross-level view
-        wt.phase_7_cross_level_view()
+        # Phase 7: Plate map visualization
+        wt.phase_7_plate_map(pos_dish, fish_ids)
+
+        # Phase 8: Cross-level view
+        wt.phase_8_cross_level_view()
 
         # Done!
         banner("Walkthrough Complete!")

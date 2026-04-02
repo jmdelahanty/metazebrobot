@@ -27,8 +27,8 @@ End-to-end pieces:
    - Prune aggressively; registry is not the source of truth
 
 4) **Database (individual tracking)**
-   - `fish_subjects`, `experiment_sessions`, `fish_runs`
-   - One fish per session (no role column)
+   - `fish_subjects`, `housing_units`, `housing_unit_occupancy`, `housing_unit_checks`
+   - Session/experiment tracking lives in Palette (see `docs/identity_and_provenance_contract.md`)
 
 ## API access
 

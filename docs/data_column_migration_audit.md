@@ -52,7 +52,7 @@ This means the JSON blob is only consulted for fields that have no column yet.
 | `termination_reason` | `termination_reason` | TEXT |
 | `enclosure.temperature` | `enclosure_temperature` | REAL |
 | `enclosure.room` | `room` | TEXT |
-| `enclosure.in_beaker` | `enclosure_in_beaker` | BOOLEAN |
+| `enclosure.container_type` | `container_type` | TEXT |
 | `enclosure.vol_water_total` | `enclosure_vol_water_total` | INTEGER |
 | `enclosure.light_cycle.light_duration` | `enclosure_light_duration` | TEXT |
 | `enclosure.light_cycle.dawn_dusk` | `enclosure_dawn_dusk` | TEXT |

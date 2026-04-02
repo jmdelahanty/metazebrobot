@@ -2,13 +2,14 @@
 
 ## Near-term
 
-- [ ] Add automated tests for `POST /screening/{dish_id}/split` endpoint
+- [x] Add automated tests for `POST /screening/{dish_id}/split` endpoint
   - Successful split with custom container type
   - Split on nonexistent dish (404)
   - Zero fish count (validation error)
   - Split inherits parent properties correctly
+  - Suffix increments for repeated splits
 
-- [ ] Commit current work — screening model redesign, derived dish splitting,
+- [x] Commit current work — screening model redesign, derived dish splitting,
   container_type migration, session/fish_runs removal, identity contract docs
 
 - [ ] Review screening protocol suggestions in web form — the protocol-aware

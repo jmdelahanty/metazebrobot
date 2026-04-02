@@ -1,0 +1,100 @@
+{# Housing map partial — loaded via HTMX on the fish list page. #}
+{# Renders a visual well plate grid for well plates, or a simple #}
+{# occupant list for open containers (petri dish, beaker, tank). #}
+
+{% if units %}
+{% set first_kind = units[0].unit_kind %}
+
+{% if first_kind == "well" %}
+{# ── Well plate grid ── #}
+{# Derive grid dimensions from position labels (e.g. A1..D6 → 4 rows, 6 cols) #}
+{% set ns = namespace(max_col=0, row_letters=[]) %}
+{% for u in units %}
+    {% set letter = u.position_label[0] %}
+    {% set col = u.position_label[1:] | int %}
+    {% if letter not in ns.row_letters %}
+        {% set ns.row_letters = ns.row_letters + [letter] %}
+    {% endif %}
+    {% if col > ns.max_col %}
+        {% set ns.max_col = col %}
+    {% endif %}
+{% endfor %}
+
+{# Build a lookup: position_label → unit #}
+{% set well_lookup = {} %}
+{% for u in units %}
+    {% set _ = well_lookup.update({u.position_label: u}) %}
+{% endfor %}
+
+<div class="plate-map">
+<div class="plate-grid" style="grid-template-columns: 2rem repeat({{ ns.max_col }}, 1fr);">
+    {# Column headers: blank corner + 1..N #}
+    <div></div>
+    {% for c in range(1, ns.max_col + 1) %}
+    <div class="plate-col-header">{{ c }}</div>
+    {% endfor %}
+
+    {# Rows #}
+    {% for row_letter in ns.row_letters %}
+    <div class="plate-row-label">{{ row_letter }}</div>
+        {% for c in range(1, ns.max_col + 1) %}
+            {% set label = row_letter ~ c %}
+            {% set unit = well_lookup.get(label) %}
+            {% if unit %}
+                {% if unit.fish %}
+                <div class="plate-well plate-well--occupied">
+                    <div class="plate-well__label">{{ label }}</div>
+                    {% for f in unit.fish %}
+                    <div class="plate-well__fish">{{ f.subject_label or f.fish_id[:8] }}</div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="plate-well plate-well--empty">
+                    <div class="plate-well__label">{{ label }}</div>
+                </div>
+                {% endif %}
+            {% else %}
+            <div class="plate-well plate-well--empty">
+                <div class="plate-well__label">{{ label }}</div>
+            </div>
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+</div>
+</div>
+
+{% else %}
+{# ── Open container (petri dish, beaker, tank) ── #}
+{% set all_fish = [] %}
+{% for u in units %}
+    {% for f in u.fish %}
+        {% set _ = all_fish.append(f) %}
+    {% endfor %}
+{% endfor %}
+{% if all_fish %}
+<p>{{ all_fish | length }} fish in this container:</p>
+<ul>
+    {% for f in all_fish %}
+    <li>{{ f.subject_label or f.fish_id[:8] }} <code>{{ f.fish_id[:8] }}&hellip;</code></li>
+    {% endfor %}
+</ul>
+{% else %}
+<p><em>No fish assigned to housing units yet.</em></p>
+{% endif %}
+{% endif %}
+
+{% else %}
+<p><em>No housing units created for this dish.</em></p>
+{% endif %}
+
+{# ── Unassigned fish ── #}
+{% if unassigned_fish %}
+<div class="unassigned-list">
+    <strong>Unassigned fish</strong> ({{ unassigned_fish | length }}):
+    <ul>
+        {% for f in unassigned_fish %}
+        <li>{{ f.subject_label or f.fish_id[:8] }} <code>{{ f.fish_id[:8] }}&hellip;</code></li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}

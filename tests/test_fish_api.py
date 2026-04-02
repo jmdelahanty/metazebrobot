@@ -303,6 +303,155 @@ class TestHousingUnitChecks:
 
 
 # -------------------------------------------------------------------
+# Dish splitting (derived dishes)
+# -------------------------------------------------------------------
+
+
+class TestDishSplit:
+    """POST /screening/{dish_id}/split — create derived dishes."""
+
+    def test_split_success(self, client, seed_full_dish):
+        resp = client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 10, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        # Derived dish should exist
+        new_id = f"{seed_full_dish}_pos1"
+        resp2 = client.get(f"/dishes/{new_id}")
+        assert resp2.status_code == 200
+        body = resp2.json()
+        assert body["parent_dish_id"] == seed_full_dish
+        assert body["dish_population_type"] == "positive_screened"
+        assert body["fish_count"] == 10
+
+    def test_split_custom_container_type(self, client, seed_full_dish):
+        resp = client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={
+                "fish_count": 5,
+                "population_type": "negative_screened",
+                "container_type": "beaker",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        new_id = f"{seed_full_dish}_neg1"
+        resp2 = client.get(f"/dishes/{new_id}")
+        assert resp2.status_code == 200
+        body = resp2.json()
+        assert body["container_type"] == "beaker"
+
+    def test_split_nonexistent_dish(self, client):
+        resp = client.post(
+            "/screening/NO_SUCH_DISH/split",
+            data={"fish_count": 5},
+        )
+        # Returns an HTML error (not a redirect)
+        assert resp.status_code == 200
+        assert "not found" in resp.text.lower()
+
+    def test_split_zero_fish_count(self, client, seed_full_dish):
+        resp = client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 0},
+        )
+        assert resp.status_code == 200
+        assert "greater than zero" in resp.text.lower()
+
+    def test_split_inherits_parent_properties(self, client, seed_full_dish):
+        """Derived dish inherits genotype, species, and enclosure from parent."""
+        parent = client.get(f"/dishes/{seed_full_dish}").json()
+        client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 3, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        new_id = f"{seed_full_dish}_pos1"
+        child = client.get(f"/dishes/{new_id}").json()
+        assert child["genotype"] == parent["genotype"]
+        assert child["species"] == parent["species"]
+
+    def test_split_increments_suffix(self, client, seed_full_dish):
+        """Second split of the same type gets _pos2."""
+        client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 5, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 3, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        assert client.get(f"/dishes/{seed_full_dish}_pos1").status_code == 200
+        assert client.get(f"/dishes/{seed_full_dish}_pos2").status_code == 200
+
+
+# -------------------------------------------------------------------
+# Plate map visualization
+# -------------------------------------------------------------------
+
+
+class TestPlateMap:
+    """GET /dishes/{dish_id}/plate-map — housing visualization."""
+
+    def test_plate_map_no_units(self, client, seed_dish):
+        resp = client.get(f"/dishes/{seed_dish}/plate-map")
+        assert resp.status_code == 200
+        assert "No housing units" in resp.text
+
+    def test_plate_map_well_plate(self, client, seed_dish):
+        # Create a 6-well plate
+        client.post(
+            f"/dishes/{seed_dish}/units",
+            json={"unit_kind": "well", "count": 6, "label_format": "well_plate"},
+        )
+        resp = client.get(f"/dishes/{seed_dish}/plate-map")
+        assert resp.status_code == 200
+        assert "plate-grid" in resp.text
+        assert "A1" in resp.text
+
+    def test_plate_map_shows_occupant(self, client, seed_dish):
+        # Create units + fish + assign
+        client.post(
+            f"/dishes/{seed_dish}/units",
+            json={"unit_kind": "well", "count": 6, "label_format": "well_plate"},
+        )
+        fish_id = client.post(
+            f"/dishes/{seed_dish}/fish",
+            json={"subject_label": "wt-01"},
+        ).json()["fish_id"]
+        unit_id = f"{seed_dish}:A1"
+        client.post(f"/fish/{fish_id}/assign", json={"unit_id": unit_id})
+
+        resp = client.get(f"/dishes/{seed_dish}/plate-map")
+        assert resp.status_code == 200
+        assert "plate-well--occupied" in resp.text
+        assert "wt-01" in resp.text
+
+    def test_plate_map_shows_unassigned(self, client, seed_dish):
+        # Register fish but don't assign to any unit
+        client.post(f"/dishes/{seed_dish}/fish", json={"subject_label": "loose-fish"})
+        resp = client.get(f"/dishes/{seed_dish}/plate-map")
+        assert resp.status_code == 200
+        assert "loose-fish" in resp.text
+        assert "Unassigned" in resp.text
+
+    def test_plate_map_open_container(self, client, seed_dish):
+        # Create a single open unit (petri dish style)
+        client.post(
+            f"/dishes/{seed_dish}/units",
+            json={"unit_kind": "open", "position_label": "main"},
+        )
+        resp = client.get(f"/dishes/{seed_dish}/plate-map")
+        assert resp.status_code == 200
+        # Should NOT render a plate grid
+        assert "plate-grid" not in resp.text
+
+
+# -------------------------------------------------------------------
 # Cross-level fish views
 # -------------------------------------------------------------------
 

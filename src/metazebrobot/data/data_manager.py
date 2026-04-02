@@ -1506,6 +1506,49 @@ class DataManager:
             logger.error(f"Error fetching housing unit: {e}")
             return None
 
+    def get_housing_units_with_fish(self, dish_id: str) -> List[Dict[str, Any]]:
+        """Fetch all housing units for a dish with their occupants in a single query.
+
+        Returns a list of unit dicts, each with a nested ``fish`` list containing
+        ``fish_id`` and ``subject_label`` for every current occupant.
+        """
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT h.unit_id, h.position_label, h.unit_kind, h.status,
+                           f.fish_id, f.subject_label
+                    FROM housing_units h
+                    LEFT JOIN fish_subjects f ON f.current_unit_id = h.unit_id
+                    WHERE h.dish_id = ?
+                    ORDER BY h.position_label, f.created_at
+                    """,
+                    (dish_id,),
+                ).fetchall()
+                # Group rows by unit_id
+                units: Dict[str, Dict[str, Any]] = {}
+                for row in rows:
+                    uid = row["unit_id"]
+                    if uid not in units:
+                        units[uid] = {
+                            "unit_id": uid,
+                            "position_label": row["position_label"],
+                            "unit_kind": row["unit_kind"],
+                            "status": row["status"],
+                            "fish": [],
+                        }
+                    if row["fish_id"] is not None:
+                        units[uid]["fish"].append({
+                            "fish_id": row["fish_id"],
+                            "subject_label": row["subject_label"],
+                        })
+                return list(units.values())
+        except Exception as e:
+            logger.error(f"Error querying housing units with fish: {e}")
+            return []
+
     def assign_fish_to_unit(
         self, fish_id: str, unit_id: str, reason: str = "initial",
     ) -> bool:

@@ -556,8 +556,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "step_count": step_count,
                 "finalized": finalized,
             })
-        return templates.TemplateResponse("screening/dish_list.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "screening/dish_list.html", {
             "dishes": dishes,
         })
 
@@ -589,8 +588,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             if imgs:
                 step_images[s.screening_datetime] = imgs
 
-        return templates.TemplateResponse("screening/screening_form.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "screening/screening_form.html", {
             "dish": dish,
             "dpf": dpf,
             "protocol": protocol,
@@ -609,8 +607,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if not dish:
             raise HTTPException(status_code=404, detail="Dish not found")
         steps = dish.screening_results.screenings if dish.screening_results else []
-        return templates.TemplateResponse("screening/_steps_table.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "screening/_steps_table.html", {
             "steps": steps,
             "dish_id": dish_id,
         })
@@ -655,8 +652,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         success, message, _ = fish_dish_ctrl.add_screening_step(dish_id, step_data)
 
         if not success:
-            return templates.TemplateResponse("screening/_flash_message.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
                 "message": message,
                 "level": "error",
             })
@@ -664,8 +660,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         # Return updated steps table + success flash
         dish = fish_dish_ctrl.get_dish(dish_id)
         steps = dish.screening_results.screenings if dish and dish.screening_results else []
-        return templates.TemplateResponse("screening/_steps_table.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "screening/_steps_table.html", {
             "steps": steps,
             "dish_id": dish_id,
             "flash_message": message,
@@ -685,8 +680,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         )
 
         if not success:
-            return templates.TemplateResponse("screening/_flash_message.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
                 "message": message,
                 "level": "error",
             })
@@ -716,8 +710,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         )
 
         if not success:
-            return templates.TemplateResponse("screening/_flash_message.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
                 "message": message,
                 "level": "error",
             })
@@ -744,8 +737,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         # Validate file type
         allowed = {"image/jpeg", "image/png"}
         if file.content_type not in allowed:
-            return templates.TemplateResponse("screening/_flash_message.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
                 "message": f"Invalid file type: {file.content_type}. Only JPEG and PNG are accepted.",
                 "level": "error",
             })
@@ -776,8 +768,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         # Return updated gallery
         images = data_manager.get_screening_images(dish_id, screening_datetime)
-        return templates.TemplateResponse("screening/_image_gallery.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "screening/_image_gallery.html", {
             "dish_id": dish_id,
             "screening_datetime": screening_datetime,
             "images": images,
@@ -791,8 +782,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     ):
         """HTMX partial — image gallery for a screening step."""
         images = data_manager.get_screening_images(dish_id, screening_datetime)
-        return templates.TemplateResponse("screening/_image_gallery.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "screening/_image_gallery.html", {
             "dish_id": dish_id,
             "screening_datetime": screening_datetime,
             "images": images,
@@ -871,8 +861,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         # If called via HTMX, return updated fish table partial
         if request.headers.get("HX-Request"):
             fish = data_manager.get_fish_subjects(dish_id)
-            return templates.TemplateResponse("fish/_fish_table.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "fish/_fish_table.html", {
                 "fish": fish,
                 "flash_message": "Fish removed.",
                 "flash_level": "success",
@@ -899,13 +888,27 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """Fish management page for a dish."""
         dish = _dish_context_for_fish_page(dish_id)
         fish = data_manager.get_fish_subjects(dish_id)
-        return templates.TemplateResponse("fish/fish_list.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "fish/fish_list.html", {
             "dish_id": dish_id,
             "cross_id": dish.get("cross_id"),
             "genotype": dish.get("genotype"),
             "species": dish.get("species") or "Danio rerio",
             "fish": fish,
+        })
+
+    @app.get("/dishes/{dish_id}/plate-map", response_class=HTMLResponse)
+    def plate_map(request: Request, dish_id: str):
+        """HTMX partial: visual housing map for a dish."""
+        _require_db_path()
+        units = data_manager.get_housing_units_with_fish(dish_id)
+        unassigned = [
+            f for f in data_manager.get_fish_subjects(dish_id)
+            if f.get("current_unit_id") is None
+        ]
+        return templates.TemplateResponse(request, "fish/_plate_map.html", {
+            "dish_id": dish_id,
+            "units": units,
+            "unassigned_fish": unassigned,
         })
 
     @app.post("/dishes/{dish_id}/fish/register", response_class=HTMLResponse)
@@ -929,14 +932,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             notes=notes or None,
         )
         if fish_id is None:
-            return templates.TemplateResponse("screening/_flash_message.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
                 "message": "Failed to register fish.",
                 "level": "error",
             })
         fish = data_manager.get_fish_subjects(dish_id)
-        return templates.TemplateResponse("fish/_fish_table.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "fish/_fish_table.html", {
             "fish": fish,
             "flash_message": f"Registered fish {subject_label or fish_id[:8]}.",
             "flash_level": "success",
@@ -952,8 +953,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """Batch-register multiple fish, return HTMX partial."""
         dish = _dish_context_for_fish_page(dish_id)  # validates dish exists
         if count < 1 or count > 96:
-            return templates.TemplateResponse("screening/_flash_message.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
                 "message": "Count must be between 1 and 96.",
                 "level": "error",
             })
@@ -969,8 +969,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             if fish_id is not None:
                 created += 1
         fish = data_manager.get_fish_subjects(dish_id)
-        return templates.TemplateResponse("fish/_fish_table.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "fish/_fish_table.html", {
             "fish": fish,
             "flash_message": f"Registered {created} fish.",
             "flash_level": "success",
@@ -985,8 +984,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """Top-level fish index — lists crosses that have registered fish."""
         _require_db_path()
         crosses = data_manager.get_crosses_with_fish_counts()
-        return templates.TemplateResponse("fish/fish_index.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "fish/fish_index.html", {
             "crosses": crosses,
         })
 
@@ -1022,8 +1020,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         for d in derived_dishes:
             children_of.setdefault(d["parent_dish_id"], []).append(d)
 
-        return templates.TemplateResponse("fish/fish_cross.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "fish/fish_cross.html", {
             "cross_id": cross_id,
             "primary_dishes": primary_dishes,
             "children_of": children_of,
@@ -1188,8 +1185,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         allowed = {"image/jpeg", "image/png"}
         if file.content_type not in allowed:
-            return templates.TemplateResponse("screening/_flash_message.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
                 "message": f"Invalid file type: {file.content_type}. Only JPEG and PNG are accepted.",
                 "level": "error",
             })
@@ -1215,8 +1211,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         )
 
         images = data_manager.get_fish_images(fish_id)
-        return templates.TemplateResponse("fish/_image_gallery.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "fish/_image_gallery.html", {
             "fish_id": fish_id,
             "images": images,
         })
@@ -1229,8 +1224,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """HTMX partial — image gallery for a fish."""
         _require_db_path()
         images = data_manager.get_fish_images(fish_id)
-        return templates.TemplateResponse("fish/_image_gallery.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "fish/_image_gallery.html", {
             "fish_id": fish_id,
             "images": images,
         })
@@ -1257,8 +1251,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         allowed = {"image/jpeg", "image/png"}
         if file.content_type not in allowed:
-            return templates.TemplateResponse("screening/_flash_message.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
                 "message": f"Invalid file type: {file.content_type}. Only JPEG and PNG are accepted.",
                 "level": "error",
             })
@@ -1284,8 +1277,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         )
 
         images = data_manager.get_dish_images(dish_id)
-        return templates.TemplateResponse("fish/_dish_image_gallery.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "fish/_dish_image_gallery.html", {
             "dish_id": dish_id,
             "images": images,
         })
@@ -1298,8 +1290,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """HTMX partial — reference image gallery for a dish."""
         _require_db_path()
         images = data_manager.get_dish_images(dish_id)
-        return templates.TemplateResponse("fish/_dish_image_gallery.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "fish/_dish_image_gallery.html", {
             "dish_id": dish_id,
             "images": images,
         })

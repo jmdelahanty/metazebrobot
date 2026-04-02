@@ -38,7 +38,12 @@ A guided, interactive script (`scripts/walkthrough.py`) that exercises the full 
 - [ ] Assign each fish to a well (POST /fish/{fish_id}/assign)
 - [ ] **Pause** — check `/dishes/{dish_id}/fish/` to see unit assignments
 
-### Phase 7: Cross-level view
+### Phase 7: Plate map visualization
+- [ ] **Pause** — check `/dishes/{dish_id}/plate-map` to see the well plate grid (4 occupied wells, green)
+- [ ] Register one more fish WITHOUT assigning to a well
+- [ ] **Pause** — check `/dishes/{dish_id}/fish/` to see the plate map with the "Unassigned fish" section
+
+### Phase 8: Cross-level view
 - [ ] **Pause** — check `/fish/` index, then drill into the cross to see the full hierarchy
 
 ### Cleanup

@@ -27,16 +27,55 @@ def tmp_db_path(tmp_path_factory) -> Path:
             dish_id TEXT PRIMARY KEY,
             data TEXT,
             genotype TEXT,
-            species TEXT,
+            species TEXT DEFAULT 'Danio rerio',
+            sex TEXT DEFAULT 'unknown',
             date_created TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             status TEXT DEFAULT 'active',
             cross_id TEXT,
             dof TEXT,
+            fish_count INTEGER,
             responsible TEXT,
             parent_dish_id TEXT,
             dish_population_type TEXT DEFAULT 'primary',
-            container_type TEXT DEFAULT 'petri_dish'
+            container_type TEXT DEFAULT 'petri_dish',
+            notes TEXT,
+            room TEXT,
+            enclosure_temperature REAL,
+            enclosure_vol_water_total INTEGER,
+            enclosure_light_duration TEXT,
+            enclosure_dawn_dusk TEXT,
+            breeding_parents TEXT,
+            screening_final_positive_count INTEGER,
+            screening_date_finalized TEXT,
+            termination_date TEXT,
+            termination_reason TEXT
         )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS screening_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dish_id TEXT NOT NULL,
+            screening_datetime TEXT NOT NULL,
+            dpf_screened INTEGER,
+            indicators_screened TEXT,
+            pigment_screened BOOLEAN DEFAULT FALSE,
+            criteria TEXT,
+            count_screened_this_step INTEGER,
+            number_kept INTEGER,
+            number_removed_pigmented INTEGER,
+            number_removed_negative INTEGER,
+            number_removed_other INTEGER,
+            tricaine_used BOOLEAN DEFAULT FALSE,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (dish_id) REFERENCES dishes(dish_id),
+            UNIQUE(dish_id, screening_datetime)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_screening_steps_dish_id
+        ON screening_steps(dish_id)
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS quality_checks (
@@ -91,6 +130,28 @@ def seed_dish(client) -> str:
     conn.commit()
     conn.close()
     return dish_id
+
+
+@pytest.fixture()
+def seed_full_dish(client) -> str:
+    """Insert a dish with all fields required by the FishDish model.
+
+    Unlike seed_dish (minimal row), this goes through save_fish_dish so the
+    controller can load it back as a valid FishDish for operations like split.
+    """
+    import uuid as _uuid
+    from metazebrobot.models.fish_dish import FishDish
+    dish = FishDish.create_new(
+        cross_id=f"CROSS_{_uuid.uuid4().hex[:6]}",
+        dish_number=1,
+        genotype="Tg(elavl3:GCaMP6s)",
+        responsible="test-user",
+        fish_count=50,
+        dof="20260401",
+        container_type="petri_dish",
+    )
+    data_manager.save_fish_dish(dish.model_dump(mode="json", exclude_none=True))
+    return dish.dish_id
 
 
 @pytest.fixture()

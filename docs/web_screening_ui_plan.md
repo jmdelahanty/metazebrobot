@@ -143,9 +143,9 @@ SQLite in WAL mode allows safe concurrent access. Readers never block writers an
 
 ### Derived Dish Creation
 
-- [ ] `POST /screening/{dish_id}/derive` — create derived dish from last screening step (calls `fish_dish_controller.create_derived_dish()`)
-- [ ] `templates/screening/_derive_prompt.html` — confirmation form shown after step if negatives > 0
-- [ ] HTMX: derive prompt appears inline after step submission
+- [x] `POST /screening/{dish_id}/split` — create derived dish with explicit fish count, container type, and population type (calls `fish_dish_controller.create_derived_dish()`)
+- [x] "Create Derived Dish" form embedded in `_steps_table.html` partial (shown via `<details>` when steps exist)
+- [x] Automated tests: success, custom container type, nonexistent dish, zero fish, inheritance, suffix incrementing
 
 ### Mobile / Microscope UX
 
@@ -176,7 +176,6 @@ src/metazebrobot/templates/
     _steps_table.html
     _flash_message.html
     _image_gallery.html      (Phase 2)
-    _derive_prompt.html      (Phase 3)
 ```
 
 ## Files to Modify
