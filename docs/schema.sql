@@ -137,3 +137,15 @@ CREATE TABLE fish_subjects (
   FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
 );
 CREATE INDEX idx_fish_subjects_dish_id ON fish_subjects(dish_id);
+CREATE TABLE dish_transgenes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dish_id TEXT NOT NULL,
+    construct TEXT NOT NULL,
+    promoter TEXT NOT NULL,
+    reporter TEXT,
+    fluorophore TEXT,
+    FOREIGN KEY (dish_id) REFERENCES dishes(dish_id),
+    UNIQUE(dish_id, construct)
+);
+CREATE INDEX idx_dish_transgenes_dish_id ON dish_transgenes(dish_id);
+CREATE INDEX idx_dish_transgenes_promoter ON dish_transgenes(promoter);

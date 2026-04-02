@@ -630,6 +630,9 @@ class DataManager:
             # Update screening steps (within same transaction)
             self._save_screening_steps(cursor, dish_id, dish_data.get('screening_results'))
 
+            # Update normalized transgenes (within same transaction)
+            self._save_dish_transgenes(cursor, dish_id, dish_data.get('genotype', ''))
+
             # Commit transaction - all or nothing
             conn.commit()
 
@@ -717,6 +720,67 @@ class DataManager:
             screening_results.get('date_finalized'),
             dish_id
         ))
+
+    def _save_dish_transgenes(self, cursor, dish_id: str, genotype: str):
+        """Parse genotype and save normalized transgene rows."""
+        cursor.execute("DELETE FROM dish_transgenes WHERE dish_id = ?", (dish_id,))
+        transgenes = self.parse_genotype(genotype)
+        for tg in transgenes:
+            cursor.execute("""
+                INSERT OR IGNORE INTO dish_transgenes
+                (dish_id, construct, promoter, reporter, fluorophore)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                dish_id,
+                tg["construct"],
+                tg["promoter"],
+                tg["reporter"],
+                tg["fluorophore"],
+            ))
+
+    def backfill_dish_transgenes(self):
+        """One-time backfill: parse genotypes for all existing dishes."""
+        if not self.is_initialized:
+            return
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Skip if already populated
+                count = cursor.execute("SELECT COUNT(*) FROM dish_transgenes").fetchone()[0]
+                if count > 0:
+                    return
+                rows = cursor.execute("SELECT dish_id, genotype FROM dishes WHERE genotype IS NOT NULL").fetchall()
+                filled = 0
+                for row in rows:
+                    tgs = self.parse_genotype(row["genotype"])
+                    for tg in tgs:
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO dish_transgenes
+                            (dish_id, construct, promoter, reporter, fluorophore)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (row["dish_id"], tg["construct"], tg["promoter"], tg["reporter"], tg["fluorophore"]))
+                    if tgs:
+                        filled += 1
+                conn.commit()
+                if filled:
+                    logger.info(f"Backfilled dish_transgenes for {filled} dishes")
+        except Exception as e:
+            logger.warning(f"dish_transgenes backfill failed (table may not exist yet): {e}")
+
+    def get_dish_transgenes(self, dish_id: str) -> List[Dict[str, Any]]:
+        """Get parsed transgenes for a dish."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT construct, promoter, reporter, fluorophore FROM dish_transgenes WHERE dish_id = ?",
+                    (dish_id,),
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying dish transgenes: {e}")
+            return []
 
     def get_screening_steps(self, dish_id: str) -> List[Dict[str, Any]]:
         """Get all screening steps for a dish from the normalized table."""
@@ -1162,25 +1226,35 @@ class DataManager:
         DataManager._mapzebrain_catalog = []
         return []
 
-    def lookup_mapzebrain_lines(self, genotype: str) -> List[Dict[str, str]]:
-        """Find mapzebrain atlas entries matching a genotype string.
+    def lookup_mapzebrain_lines(
+        self,
+        genotype: Optional[str] = None,
+        dish_id: Optional[str] = None,
+    ) -> List[Dict[str, str]]:
+        """Find mapzebrain atlas entries matching a genotype.
 
-        Parses ``"Tg(promoter:reporter);Tg(promoter:reporter)"`` to extract
-        promoter and reporter names, then searches the cached catalog.
+        Can use either a raw genotype string (parsed on the fly) or a
+        ``dish_id`` (reads pre-parsed transgenes from ``dish_transgenes``).
+        If both are provided, ``dish_id`` takes precedence.
 
-        Returns a list of dicts with ``name``, ``folder``, and ``url`` keys
-        for each matched atlas line.
+        Returns a list of dicts with ``name``, ``folder``, and ``url`` keys.
         """
         catalog = self.fetch_mapzebrain_catalog()
         if not catalog:
             return []
 
-        # Parse genotype into search terms
-        search_terms = self._parse_genotype_terms(genotype)
+        # Get search terms from transgenes table or by parsing
+        if dish_id:
+            tgs = self.get_dish_transgenes(dish_id)
+            search_terms = [(t["promoter"], t["reporter"] or "") for t in tgs]
+        elif genotype:
+            search_terms = self._parse_genotype_terms(genotype)
+        else:
+            return []
+
         if not search_terms:
             return []
 
-        # Build folder lookup from catalog
         results = []
         seen_folders = set()
         for term_promoter, term_reporter in search_terms:
@@ -1191,19 +1265,84 @@ class DataManager:
 
         return results
 
+    # Known fluorophore patterns (lowercase) → canonical name
+    _FLUOROPHORE_PATTERNS = [
+        ("gcamp", "gcamp"),
+        ("jrgeco", "jrgeco"),
+        ("rgeco", "rgeco"),
+        ("campari", "campari"),
+        ("mcherry", "mcherry"),
+        ("dsred", "dsred"),
+        ("tagrfp", "rfp"),
+        ("h2brfp", "rfp"),
+        ("rfp", "rfp"),
+        ("cerulean", "cerulean"),
+        ("cer", "cerulean"),
+        ("egfp", "gfp"),
+        ("gfp", "gfp"),
+        ("yfp", "yfp"),
+        ("cfp", "cfp"),
+        ("bfp", "bfp"),
+        ("tdtomato", "tdtomato"),
+    ]
+
+    @staticmethod
+    def _extract_fluorophore(reporter: str) -> Optional[str]:
+        """Extract the canonical fluorophore name from a reporter string.
+
+        Best-effort: checks the reporter (lowercase) against known fluorophore
+        patterns.  Returns None for unrecognized reporters.
+        """
+        if not reporter:
+            return None
+        reporter_lower = reporter.lower()
+        for pattern, canonical in DataManager._FLUOROPHORE_PATTERNS:
+            if pattern in reporter_lower:
+                return canonical
+        return None
+
+    @staticmethod
+    def parse_genotype(genotype: str) -> List[Dict[str, Optional[str]]]:
+        """Parse a genotype string into structured transgene dicts.
+
+        Extracts ``Tg(promoter:reporter)`` blocks and returns a list of::
+
+            {"construct": "Tg(elavl3:jRGECO1b)",
+             "promoter": "elavl3",
+             "reporter": "jrgeco1b",
+             "fluorophore": "jrgeco"}
+
+        Non-Tg genotypes (e.g. ``"wt"``) return an empty list.
+        Parsing is best-effort and never raises.
+        """
+        results = []
+        tg_blocks = re.findall(r'(Tg\(([^)]+)\))', genotype)
+        for full_match, inner in tg_blocks:
+            parts = inner.split(":", 1)
+            promoter = parts[0].strip().lower()
+            reporter_raw = parts[1].strip() if len(parts) > 1 else ""
+            reporter = reporter_raw.lower() if reporter_raw else None
+            if not promoter:
+                continue
+            fluorophore = DataManager._extract_fluorophore(reporter or "")
+            results.append({
+                "construct": full_match,
+                "promoter": promoter,
+                "reporter": reporter,
+                "fluorophore": fluorophore,
+            })
+        return results
+
     @staticmethod
     def _parse_genotype_terms(genotype: str) -> List[tuple]:
-        """Extract (promoter, reporter) pairs from a genotype string."""
-        terms = []
-        # Match Tg(...) blocks
-        tg_blocks = re.findall(r'Tg\(([^)]+)\)', genotype)
-        for block in tg_blocks:
-            parts = block.split(":", 1)
-            promoter = parts[0].strip().lower()
-            reporter = parts[1].strip().lower() if len(parts) > 1 else ""
-            if promoter:
-                terms.append((promoter, reporter))
-        return terms
+        """Extract (promoter, reporter) pairs from a genotype string.
+
+        Legacy wrapper around :meth:`parse_genotype` for mapzebrain lookup.
+        """
+        return [
+            (t["promoter"], t["reporter"] or "")
+            for t in DataManager.parse_genotype(genotype)
+        ]
 
     def _find_best_catalog_match(
         self,

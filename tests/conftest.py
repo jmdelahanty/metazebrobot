@@ -78,6 +78,26 @@ def tmp_db_path(tmp_path_factory) -> Path:
         ON screening_steps(dish_id)
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS dish_transgenes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dish_id TEXT NOT NULL,
+            construct TEXT NOT NULL,
+            promoter TEXT NOT NULL,
+            reporter TEXT,
+            fluorophore TEXT,
+            FOREIGN KEY (dish_id) REFERENCES dishes(dish_id),
+            UNIQUE(dish_id, construct)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_dish_transgenes_dish_id
+        ON dish_transgenes(dish_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_dish_transgenes_promoter
+        ON dish_transgenes(promoter)
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS quality_checks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             dish_id TEXT NOT NULL,

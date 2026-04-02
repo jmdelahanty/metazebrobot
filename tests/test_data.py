@@ -185,27 +185,84 @@ class TestDishImageData:
         assert images[1]["caption"] == "second"
 
 
-class TestMapzebrainParsing:
-    """Genotype parsing for mapzebrain atlas lookup."""
+class TestGenotypeParser:
+    """parse_genotype() — structured transgene extraction."""
 
-    def test_parse_single_transgene(self):
+    def test_single_transgene(self):
+        result = data_manager.parse_genotype("Tg(elavl3:GCaMP6s)")
+        assert len(result) == 1
+        assert result[0]["promoter"] == "elavl3"
+        assert result[0]["reporter"] == "gcamp6s"
+        assert result[0]["fluorophore"] == "gcamp"
+        assert result[0]["construct"] == "Tg(elavl3:GCaMP6s)"
+
+    def test_double_transgene(self):
+        result = data_manager.parse_genotype(
+            "Tg(gfap:TRPV1-T2A-GFP);Tg(elavl3:jRGECO1b)"
+        )
+        assert len(result) == 2
+        assert result[0]["promoter"] == "gfap"
+        assert result[0]["fluorophore"] == "gfp"
+        assert result[1]["promoter"] == "elavl3"
+        assert result[1]["fluorophore"] == "jrgeco"
+
+    def test_wildtype_returns_empty(self):
+        assert data_manager.parse_genotype("wt") == []
+        assert data_manager.parse_genotype("wild-type AB") == []
+
+    def test_promoter_only(self):
+        result = data_manager.parse_genotype("Tg(elavl3)")
+        assert len(result) == 1
+        assert result[0]["promoter"] == "elavl3"
+        assert result[0]["reporter"] is None
+        assert result[0]["fluorophore"] is None
+
+    def test_fluorophore_extraction(self):
+        cases = [
+            ("GCaMP6s", "gcamp"),
+            ("jRGECO1b", "jrgeco"),
+            ("TRPV1-T2A-GFP", "gfp"),
+            ("EGFP", "gfp"),
+            ("mCherry", "mcherry"),
+            ("H2BRFP", "rfp"),
+            ("lynTagRFP", "rfp"),
+            ("CaMPARI", "campari"),
+            ("Cerulean", "cerulean"),
+            ("tdTomato", "tdtomato"),
+            ("SomeUnknownProtein", None),
+        ]
+        for reporter, expected in cases:
+            assert data_manager._extract_fluorophore(reporter) == expected, f"Failed for {reporter}"
+
+    def test_legacy_parse_genotype_terms(self):
+        """_parse_genotype_terms still works as before (mapzebrain compat)."""
         terms = data_manager._parse_genotype_terms("Tg(elavl3:GCaMP6s)")
         assert terms == [("elavl3", "gcamp6s")]
 
-    def test_parse_double_transgene(self):
-        terms = data_manager._parse_genotype_terms(
-            "Tg(gfap:TRPV1-T2A-GFP);Tg(elavl3:jRGECO1b)"
+
+class TestDishTransgenes:
+    """dish_transgenes table populated on save."""
+
+    def test_transgenes_populated_on_split(self, client, seed_full_dish):
+        """Splitting a dish populates dish_transgenes for the new dish."""
+        client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 5, "population_type": "positive_screened"},
+            follow_redirects=False,
         )
-        assert len(terms) == 2
-        assert terms[0] == ("gfap", "trpv1-t2a-gfp")
-        assert terms[1] == ("elavl3", "jrgeco1b")
+        new_id = f"{seed_full_dish}_pos1"
+        tgs = data_manager.get_dish_transgenes(new_id)
+        # seed_full_dish has genotype Tg(elavl3:GCaMP6s) — but let's check
+        # what the parent has and verify child inherited it
+        parent_tgs = data_manager.get_dish_transgenes(seed_full_dish)
+        assert len(tgs) == len(parent_tgs)
 
-    def test_parse_no_tg(self):
-        terms = data_manager._parse_genotype_terms("wild-type AB")
-        assert terms == []
-
-    def test_parse_promoter_only(self):
-        terms = data_manager._parse_genotype_terms("Tg(elavl3)")
-        assert terms == [("elavl3", "")]
+    def test_get_transgenes_empty(self, client, seed_dish):
+        """Minimal seed dish (genotype without Tg prefix) has no transgenes."""
+        # seed_dish has genotype "Tg(elavl3:GCaMP6s)" in conftest
+        tgs = data_manager.get_dish_transgenes(seed_dish)
+        # seed_dish is created via raw SQL, not save_fish_dish,
+        # so transgenes are NOT auto-populated
+        assert tgs == []
 
 

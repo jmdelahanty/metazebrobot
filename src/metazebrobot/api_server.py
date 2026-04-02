@@ -220,6 +220,27 @@ async def lifespan(app: FastAPI):
                             SET number_kept = number_positive
                             WHERE number_kept IS NULL AND number_positive IS NOT NULL
                         """)
+            # Normalized transgenes table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dish_transgenes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dish_id TEXT NOT NULL,
+                    construct TEXT NOT NULL,
+                    promoter TEXT NOT NULL,
+                    reporter TEXT,
+                    fluorophore TEXT,
+                    FOREIGN KEY (dish_id) REFERENCES dishes(dish_id),
+                    UNIQUE(dish_id, construct)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_transgenes_dish_id
+                ON dish_transgenes(dish_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_transgenes_promoter
+                ON dish_transgenes(promoter)
+            """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS dish_images (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,6 +260,9 @@ async def lifespan(app: FastAPI):
 
         data_manager.load_all_data()
         logger.info(f"data_manager initialised with {db_path}")
+
+        # Backfill dish_transgenes for existing dishes (one-time migration)
+        data_manager.backfill_dish_transgenes()
 
         # Ensure screening images directory exists
         images_dir = db_path.parent / "screening_images"
@@ -344,11 +368,40 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             return None
 
     def _protocol_for_genotype(genotype: str, dpf: Optional[int]):
-        """Return the matching protocol step (if any) for a genotype + DPF."""
+        """Return the matching protocol step (if any) for a genotype + DPF.
+
+        Tries exact string match first, then falls back to matching by the
+        set of promoters parsed from the genotype.  This makes protocol
+        lookup resilient to whitespace, capitalisation, and ordering
+        differences in genotype strings.
+        """
         protocols = data_manager.get_screening_protocols()
-        proto = protocols.get(genotype) or protocols.get("_default")
+
+        # 1. Exact match (fast path, backward compatible)
+        proto = protocols.get(genotype)
+
+        # 2. Fuzzy match: compare promoter sets
+        if not proto:
+            dish_promoters = {
+                t["promoter"] for t in data_manager.parse_genotype(genotype)
+            }
+            if dish_promoters:
+                for proto_genotype, proto_data in protocols.items():
+                    if proto_genotype == "_default":
+                        continue
+                    proto_promoters = {
+                        t["promoter"] for t in data_manager.parse_genotype(proto_genotype)
+                    }
+                    if proto_promoters == dish_promoters:
+                        proto = proto_data
+                        break
+
+        # 3. Fall back to default
+        if not proto:
+            proto = protocols.get("_default")
         if not proto:
             return None, None
+
         for step in proto.get("steps", []):
             lo, hi = step.get("dpf_range", [0, 999])
             if dpf is not None and lo <= dpf <= hi:
@@ -375,6 +428,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     def list_dishes_api(
         status: Optional[str] = Query(default=None),
         cross_id: Optional[str] = Query(default=None),
+        promoter: Optional[str] = Query(default=None),
         limit: int = Query(default=200, ge=1, le=1000),
         offset: int = Query(default=0, ge=0),
     ) -> Dict[str, Any]:
@@ -392,6 +446,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if cross_id:
             query += " AND cross_id = ?"
             params.append(cross_id)
+        if promoter:
+            query += " AND dish_id IN (SELECT dish_id FROM dish_transgenes WHERE promoter = ?)"
+            params.append(promoter.lower())
         query += " ORDER BY date_created DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         try:
@@ -593,7 +650,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         # mapzebrain atlas expression pattern images
         atlas_catalog_available = bool(data_manager.fetch_mapzebrain_catalog())
-        atlas_lines = data_manager.lookup_mapzebrain_lines(dish.genotype)
+        atlas_lines = data_manager.lookup_mapzebrain_lines(
+            dish_id=dish_id, genotype=dish.genotype
+        )
 
         return templates.TemplateResponse(request, "screening/screening_form.html", {
             "dish": dish,
