@@ -108,10 +108,14 @@ class DataManager:
                         dish_id TEXT NOT NULL,
                         screening_datetime TEXT NOT NULL,
                         dpf_screened INTEGER,
-                        indicator_screened TEXT,
+                        indicators_screened TEXT,
+                        pigment_screened BOOLEAN DEFAULT FALSE,
                         criteria TEXT,
                         count_screened_this_step INTEGER,
-                        number_positive INTEGER,
+                        number_kept INTEGER,
+                        number_removed_pigmented INTEGER,
+                        number_removed_negative INTEGER,
+                        number_removed_other INTEGER,
                         tricaine_used BOOLEAN DEFAULT FALSE,
                         notes TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -124,7 +128,7 @@ class DataManager:
                     ON screening_steps(dish_id)
                 """)
 
-                # Add removal tracking columns to screening_steps table (if not exist)
+                # Migrate screening_steps columns for new screening model
                 cursor.execute("PRAGMA table_info(screening_steps)")
                 screening_cols = {row[1] for row in cursor.fetchall()}
                 if 'number_removed_pigmented' not in screening_cols:
@@ -133,6 +137,31 @@ class DataManager:
                     cursor.execute("ALTER TABLE screening_steps ADD COLUMN number_removed_negative INTEGER")
                 if 'number_removed_other' not in screening_cols:
                     cursor.execute("ALTER TABLE screening_steps ADD COLUMN number_removed_other INTEGER")
+                # New columns: indicators_screened (JSON list), pigment_screened, number_kept
+                if 'indicators_screened' not in screening_cols:
+                    cursor.execute("ALTER TABLE screening_steps ADD COLUMN indicators_screened TEXT")
+                    # Migrate old indicator_screened → indicators_screened JSON array
+                    if 'indicator_screened' in screening_cols:
+                        cursor.execute("""
+                            UPDATE screening_steps
+                            SET indicators_screened = CASE
+                                WHEN indicator_screened IS NOT NULL AND indicator_screened != ''
+                                THEN '["' || indicator_screened || '"]'
+                                ELSE '[]'
+                            END
+                            WHERE indicators_screened IS NULL
+                        """)
+                if 'pigment_screened' not in screening_cols:
+                    cursor.execute("ALTER TABLE screening_steps ADD COLUMN pigment_screened BOOLEAN DEFAULT FALSE")
+                if 'number_kept' not in screening_cols:
+                    cursor.execute("ALTER TABLE screening_steps ADD COLUMN number_kept INTEGER")
+                    # Migrate: number_kept = number_positive where it existed
+                    if 'number_positive' in screening_cols:
+                        cursor.execute("""
+                            UPDATE screening_steps
+                            SET number_kept = number_positive
+                            WHERE number_kept IS NULL AND number_positive IS NOT NULL
+                        """)
 
                 # Add screening result columns to dishes table (if not exist)
                 # SQLite doesn't have ADD COLUMN IF NOT EXISTS, so we check first
@@ -185,6 +214,17 @@ class DataManager:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN enclosure_temperature REAL")
                 if 'enclosure_in_beaker' not in existing_columns:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN enclosure_in_beaker BOOLEAN")
+                # Migrate enclosure_in_beaker → container_type
+                if 'container_type' not in existing_columns:
+                    cursor.execute("ALTER TABLE dishes ADD COLUMN container_type TEXT")
+                    # Backfill: in_beaker=True → "beaker", else → "petri_dish"
+                    cursor.execute("""
+                        UPDATE dishes SET container_type = CASE
+                            WHEN enclosure_in_beaker = 1 THEN 'beaker'
+                            ELSE 'petri_dish'
+                        END
+                        WHERE container_type IS NULL
+                    """)
                 if 'enclosure_vol_water_total' not in existing_columns:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN enclosure_vol_water_total INTEGER")
                 if 'enclosure_light_duration' not in existing_columns:
@@ -330,38 +370,6 @@ class DataManager:
                 cursor.execute("""
                     CREATE INDEX IF NOT EXISTS idx_fish_subject_images_fish_id
                     ON fish_subject_images(fish_id)
-                """)
-
-                # Experiment sessions and fish runs
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS experiment_sessions (
-                        session_uuid TEXT PRIMARY KEY,
-                        run_at_utc TEXT,
-                        rig_id TEXT,
-                        arena_id TEXT,
-                        protocol_name TEXT,
-                        h5_path TEXT
-                    )
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS fish_runs (
-                        run_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        fish_id TEXT NOT NULL,
-                        session_uuid TEXT NOT NULL,
-                        dpf_at_run INTEGER,
-                        notes TEXT,
-                        FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE,
-                        FOREIGN KEY (session_uuid) REFERENCES experiment_sessions(session_uuid) ON DELETE CASCADE,
-                        UNIQUE (fish_id, session_uuid)
-                    )
-                """)
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_fish_runs_fish_id
-                    ON fish_runs(fish_id)
-                """)
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_fish_runs_session_uuid
-                    ON fish_runs(session_uuid)
                 """)
 
                 # Dish-level reference images (for bulk populations without individual fish)
@@ -585,7 +593,7 @@ class DataManager:
             INSERT OR REPLACE INTO dishes
             (dish_id, cross_id, date_created, dof, genotype, responsible,
              status, fish_count, species, sex, parent_dish_id, dish_population_type,
-             notes, room, enclosure_temperature, enclosure_in_beaker,
+             notes, room, enclosure_temperature, container_type,
              enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
              breeding_parents, termination_date, termination_reason, data, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -605,7 +613,7 @@ class DataManager:
                 dish_data.get('notes'),
                 enclosure.get('room') if enclosure else None,
                 enclosure.get('temperature') if enclosure else None,
-                enclosure.get('in_beaker') if enclosure else None,
+                enclosure.get('container_type', 'petri_dish') if enclosure else 'petri_dish',
                 enclosure.get('vol_water_total') if enclosure else None,
                 light_cycle.get('light_duration') if light_cycle else None,
                 light_cycle.get('dawn_dusk') if light_cycle else None,
@@ -671,21 +679,25 @@ class DataManager:
         # Insert screening steps
         screenings = screening_results.get('screenings', [])
         for step in screenings:
+            # Serialize indicators_screened list to JSON
+            indicators = step.get('indicators_screened', [])
+            indicators_json = json.dumps(indicators) if isinstance(indicators, list) else indicators
             cursor.execute("""
             INSERT INTO screening_steps
-            (dish_id, screening_datetime, dpf_screened, indicator_screened,
-             criteria, count_screened_this_step, number_positive,
+            (dish_id, screening_datetime, dpf_screened, indicators_screened,
+             pigment_screened, criteria, count_screened_this_step, number_kept,
              number_removed_pigmented, number_removed_negative, number_removed_other,
              tricaine_used, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 dish_id,
                 step.get('screening_datetime'),
                 step.get('dpf_screened'),
-                step.get('indicator_screened'),
+                indicators_json,
+                step.get('pigment_screened', False),
                 step.get('criteria'),
                 step.get('count_screened_this_step'),
-                step.get('number_positive'),
+                step.get('number_kept'),
                 step.get('number_removed_pigmented'),
                 step.get('number_removed_negative'),
                 step.get('number_removed_other'),
@@ -714,8 +726,8 @@ class DataManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT screening_datetime, dpf_screened, indicator_screened,
-                           criteria, count_screened_this_step, number_positive,
+                    SELECT screening_datetime, dpf_screened, indicators_screened,
+                           pigment_screened, criteria, count_screened_this_step, number_kept,
                            number_removed_pigmented, number_removed_negative, number_removed_other,
                            tricaine_used, notes
                     FROM screening_steps
@@ -725,13 +737,19 @@ class DataManager:
 
                 steps = []
                 for row in cursor.fetchall():
+                    indicators_raw = row['indicators_screened']
+                    try:
+                        indicators = json.loads(indicators_raw) if indicators_raw else []
+                    except (json.JSONDecodeError, TypeError):
+                        indicators = [indicators_raw] if indicators_raw else []
                     steps.append({
                         'screening_datetime': row['screening_datetime'],
                         'dpf_screened': row['dpf_screened'],
-                        'indicator_screened': row['indicator_screened'],
+                        'indicators_screened': indicators,
+                        'pigment_screened': bool(row['pigment_screened']),
                         'criteria': row['criteria'],
                         'count_screened_this_step': row['count_screened_this_step'],
-                        'number_positive': row['number_positive'],
+                        'number_kept': row['number_kept'],
                         'number_removed_pigmented': row['number_removed_pigmented'],
                         'number_removed_negative': row['number_removed_negative'],
                         'number_removed_other': row['number_removed_other'],
@@ -844,7 +862,7 @@ class DataManager:
                 cursor.execute("""
                     SELECT dish_id, cross_id, date_created, dof, genotype, responsible,
                            status, fish_count, species, sex, parent_dish_id, dish_population_type,
-                           notes, room, enclosure_temperature, enclosure_in_beaker,
+                           notes, room, enclosure_temperature, container_type,
                            enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
                            breeding_parents, screening_final_positive_count, screening_date_finalized,
                            termination_date, termination_reason, data
@@ -876,7 +894,7 @@ class DataManager:
                     # Reconstruct enclosure structure from flattened columns
                     dish_data['enclosure'] = {
                         'temperature': row['enclosure_temperature'],
-                        'in_beaker': bool(row['enclosure_in_beaker']) if row['enclosure_in_beaker'] is not None else None,
+                        'container_type': row['container_type'] or 'petri_dish',
                         'vol_water_total': row['enclosure_vol_water_total'],
                         'room': row['room'],
                         'light_cycle': {
@@ -1014,7 +1032,7 @@ class DataManager:
                 cursor.execute("""
                     SELECT dish_id, cross_id, date_created, dof, genotype, responsible,
                            status, fish_count, species, sex, parent_dish_id, dish_population_type,
-                           notes, room, enclosure_temperature, enclosure_in_beaker,
+                           notes, room, enclosure_temperature, container_type,
                            enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
                            breeding_parents, screening_final_positive_count, screening_date_finalized,
                            termination_date, termination_reason
@@ -1044,7 +1062,7 @@ class DataManager:
                         'termination_reason': row['termination_reason'],
                         'enclosure': {
                             'temperature': row['enclosure_temperature'],
-                            'in_beaker': bool(row['enclosure_in_beaker']) if row['enclosure_in_beaker'] is not None else None,
+                            'container_type': row['container_type'] or 'petri_dish',
                             'vol_water_total': row['enclosure_vol_water_total'],
                             'room': row['room'],
                             'light_cycle': {
@@ -1731,132 +1749,6 @@ class DataManager:
             logger.error(f"Error querying dish images: {e}")
             return []
 
-    # --- Experiment Sessions and Fish Runs ---
-
-    def create_experiment_session(
-        self,
-        session_uuid: str,
-        run_at_utc: Optional[str] = None,
-        rig_id: Optional[str] = None,
-        arena_id: Optional[str] = None,
-        protocol_name: Optional[str] = None,
-        h5_path: Optional[str] = None,
-    ) -> bool:
-        """Register an experiment session."""
-        if not self.is_initialized:
-            logger.error("DataManager not initialized.")
-            return False
-        try:
-            with self.get_connection() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO experiment_sessions
-                        (session_uuid, run_at_utc, rig_id, arena_id, protocol_name, h5_path)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (session_uuid, run_at_utc, rig_id, arena_id, protocol_name, h5_path),
-                )
-                conn.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Error creating experiment session: {e}")
-            return False
-
-    def get_experiment_session(self, session_uuid: str) -> Optional[Dict[str, Any]]:
-        """Fetch a single experiment session."""
-        if not self.is_initialized:
-            return None
-        try:
-            with self.get_connection() as conn:
-                row = conn.execute(
-                    """
-                    SELECT session_uuid, run_at_utc, rig_id, arena_id,
-                           protocol_name, h5_path
-                    FROM experiment_sessions
-                    WHERE session_uuid = ?
-                    """,
-                    (session_uuid,),
-                ).fetchone()
-                if row is None:
-                    return None
-                return {k: row[k] for k in row.keys()}
-        except Exception as e:
-            logger.error(f"Error fetching experiment session: {e}")
-            return None
-
-    def create_fish_run(
-        self,
-        fish_id: str,
-        session_uuid: str,
-        dpf_at_run: Optional[int] = None,
-        notes: Optional[str] = None,
-    ) -> bool:
-        """Link a fish to an experiment session."""
-        if not self.is_initialized:
-            logger.error("DataManager not initialized.")
-            return False
-        try:
-            with self.get_connection() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO fish_runs (fish_id, session_uuid, dpf_at_run, notes)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (fish_id, session_uuid, dpf_at_run, notes),
-                )
-                conn.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Error creating fish run: {e}")
-            return False
-
-    def get_fish_runs(self, fish_id: str) -> List[Dict[str, Any]]:
-        """List all experiment sessions a fish participated in."""
-        if not self.is_initialized:
-            return []
-        try:
-            with self.get_connection() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT fr.run_id, fr.fish_id, fr.session_uuid,
-                           fr.dpf_at_run, fr.notes,
-                           es.run_at_utc, es.rig_id, es.arena_id,
-                           es.protocol_name, es.h5_path
-                    FROM fish_runs fr
-                    JOIN experiment_sessions es ON es.session_uuid = fr.session_uuid
-                    WHERE fr.fish_id = ?
-                    ORDER BY es.run_at_utc
-                    """,
-                    (fish_id,),
-                ).fetchall()
-                return [{k: row[k] for k in row.keys()} for row in rows]
-        except Exception as e:
-            logger.error(f"Error querying fish runs: {e}")
-            return []
-
-    def get_session_fish(self, session_uuid: str) -> List[Dict[str, Any]]:
-        """List all fish in a given experiment session."""
-        if not self.is_initialized:
-            return []
-        try:
-            with self.get_connection() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT fr.run_id, fr.fish_id, fr.dpf_at_run, fr.notes,
-                           f.dish_id, f.subject_label, f.sex, f.genotype,
-                           f.species, f.current_unit_id
-                    FROM fish_runs fr
-                    JOIN fish_subjects f ON f.fish_id = fr.fish_id
-                    WHERE fr.session_uuid = ?
-                    ORDER BY f.subject_label
-                    """,
-                    (session_uuid,),
-                ).fetchall()
-                return [{k: row[k] for k in row.keys()} for row in rows]
-        except Exception as e:
-            logger.error(f"Error querying session fish: {e}")
-            return []
-
     # --- Material Management (using database backend) ---
 
     def add_agarose_solution(self, solution_id: str, solution_data: Dict[str, Any]) -> bool:
@@ -2018,20 +1910,32 @@ class DataManager:
                                 # Migrate screening steps
                                 screenings = screening_results.get('screenings', [])
                                 for step in screenings:
+                                    # Handle legacy indicator_screened → indicators_screened
+                                    indicators = step.get('indicators_screened', [])
+                                    if not indicators and step.get('indicator_screened'):
+                                        indicators = [step['indicator_screened']]
+                                    indicators_json = json.dumps(indicators)
+                                    # Handle legacy number_positive → number_kept
+                                    number_kept = step.get('number_kept', step.get('number_positive'))
                                     cursor.execute("""
                                         INSERT OR IGNORE INTO screening_steps
-                                        (dish_id, screening_datetime, dpf_screened, indicator_screened,
-                                         criteria, count_screened_this_step, number_positive,
+                                        (dish_id, screening_datetime, dpf_screened, indicators_screened,
+                                         pigment_screened, criteria, count_screened_this_step, number_kept,
+                                         number_removed_pigmented, number_removed_negative, number_removed_other,
                                          tricaine_used, notes)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                     """, (
                                         dish_id,
                                         step.get('screening_datetime'),
                                         step.get('dpf_screened'),
-                                        step.get('indicator_screened'),
+                                        indicators_json,
+                                        step.get('pigment_screened', False),
                                         step.get('criteria'),
                                         step.get('count_screened_this_step'),
-                                        step.get('number_positive'),
+                                        number_kept,
+                                        step.get('number_removed_pigmented'),
+                                        step.get('number_removed_negative'),
+                                        step.get('number_removed_other'),
                                         step.get('tricaine_used', False),
                                         step.get('notes')
                                     ))
@@ -2110,7 +2014,7 @@ class DataManager:
                                 notes = COALESCE(notes, ?),
                                 room = COALESCE(room, ?),
                                 enclosure_temperature = COALESCE(enclosure_temperature, ?),
-                                enclosure_in_beaker = COALESCE(enclosure_in_beaker, ?),
+                                container_type = COALESCE(container_type, ?),
                                 enclosure_vol_water_total = COALESCE(enclosure_vol_water_total, ?),
                                 enclosure_light_duration = COALESCE(enclosure_light_duration, ?),
                                 enclosure_dawn_dusk = COALESCE(enclosure_dawn_dusk, ?),
@@ -2124,7 +2028,7 @@ class DataManager:
                             dish_data.get('notes'),
                             enclosure.get('room'),
                             enclosure.get('temperature'),
-                            enclosure.get('in_beaker'),
+                            enclosure.get('container_type', 'petri_dish'),
                             enclosure.get('vol_water_total'),
                             light_cycle.get('light_duration'),
                             light_cycle.get('dawn_dusk'),

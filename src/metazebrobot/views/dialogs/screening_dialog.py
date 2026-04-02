@@ -158,25 +158,27 @@ class ScreeningDialog(QDialog):
         self.step_dpf.setEnabled(False)
         add_step_layout.addRow("DPF Screened:", self.step_dpf)
 
-        self.step_indicator = QLineEdit()
-        self.step_indicator.setPlaceholderText("Suggested by protocol or e.g., GFP, Pigment")
-        add_step_layout.addRow("Indicator(s) Screened:", self.step_indicator)
+        self.step_indicators = QLineEdit()
+        self.step_indicators.setPlaceholderText("Comma-separated, e.g. GFP, jRGECO (leave empty for pigment-only)")
+        add_step_layout.addRow("Indicators Screened:", self.step_indicators)
+
+        self.step_pigment_screened = QCheckBox()
+        self.step_pigment_screened.setToolTip("Check if pigmentation was assessed this step")
+        add_step_layout.addRow("Pigment Screened?", self.step_pigment_screened)
 
         self.step_criteria = QLineEdit()
-        self.step_criteria.setPlaceholderText("Suggested by protocol or brief description")
+        self.step_criteria.setPlaceholderText("e.g. fluorescence, brightest")
         add_step_layout.addRow("Criteria:", self.step_criteria)
 
-        # --- FIELD ADDED ---
         self.step_count_screened = QSpinBox()
-        self.step_count_screened.setRange(0, 1000) # Adjust range as needed
+        self.step_count_screened.setRange(0, 1000)
         self.step_count_screened.setToolTip("Enter the total number of fish actually screened in this step.")
         add_step_layout.addRow("Total Screened This Step:", self.step_count_screened)
-        # --------------------
 
-        self.step_number_positive = QSpinBox()
-        self.step_number_positive.setRange(0, 1000) # Range should accommodate count_screened
-        self.step_number_positive.setToolTip("Enter the number of fish positive for the indicator(s) in this step.")
-        add_step_layout.addRow("Number Positive:", self.step_number_positive)
+        self.step_number_kept = QSpinBox()
+        self.step_number_kept.setRange(0, 1000)
+        self.step_number_kept.setToolTip("Enter the number of fish kept (passed all criteria) in this step.")
+        add_step_layout.addRow("Number Kept:", self.step_number_kept)
 
         # --- REMOVAL TRACKING FIELDS ---
         self.step_removed_pigmented = QSpinBox()
@@ -221,6 +223,33 @@ class ScreeningDialog(QDialog):
         finalize_layout.addRow(finalize_button)
         content_layout.addWidget(finalize_group)
 
+        # --- Create Derived Dish ---
+        derive_group = QGroupBox("Create Derived Dish")
+        derive_layout = QFormLayout(derive_group)
+        derive_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        self.derive_fish_count = QSpinBox()
+        self.derive_fish_count.setRange(1, 1000)
+        self.derive_fish_count.setToolTip("Number of fish going into the new dish")
+        derive_layout.addRow("Fish Count:", self.derive_fish_count)
+
+        self.derive_container_type = QComboBox()
+        self.derive_container_type.addItems(["(same as parent)", "petri_dish", "beaker", "well_plate", "tank"])
+        derive_layout.addRow("Container Type:", self.derive_container_type)
+
+        self.derive_population_type = QComboBox()
+        self.derive_population_type.addItems(["positive_screened", "negative_screened", "other"])
+        derive_layout.addRow("Population Type:", self.derive_population_type)
+
+        self.derive_notes = QLineEdit()
+        self.derive_notes.setPlaceholderText("(optional)")
+        derive_layout.addRow("Notes:", self.derive_notes)
+
+        derive_button = QPushButton("Create Derived Dish")
+        derive_button.clicked.connect(self.create_derived_dish)
+        derive_layout.addRow(derive_button)
+        content_layout.addWidget(derive_group)
+
         # Set the scroll area's widget
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area, 1)  # Give scroll area stretch priority
@@ -238,10 +267,9 @@ class ScreeningDialog(QDialog):
 
     def setup_steps_table(self):
         """Configure the appearance and columns of the steps table."""
-        # --- Adjusted column count and labels ---
-        self.steps_table.setColumnCount(11) # Increased for removal tracking columns
+        self.steps_table.setColumnCount(12)
         self.steps_table.setHorizontalHeaderLabels([
-            "DateTime", "DPF", "Indicator(s)", "Criteria", "Total Screened", "Positive",
+            "DateTime", "DPF", "Indicators", "Pigment?", "Criteria", "Screened", "Kept",
             "Rm Pigment", "Rm Neg", "Rm Other", "Tricaine?", "Notes"
         ])
         # -----------------------------------------
@@ -395,28 +423,24 @@ class ScreeningDialog(QDialog):
                      logger.warning(f"Could not parse screening datetime for display: {datetime_str}")
                      display_datetime = datetime_str + " (Invalid Format)"
 
-            # --- Populate table with new structure ---
             self.steps_table.setItem(i, 0, QTableWidgetItem(display_datetime))
             self.steps_table.setItem(i, 1, QTableWidgetItem(str(getattr(step, 'dpf_screened', 'N/A'))))
-            self.steps_table.setItem(i, 2, QTableWidgetItem(getattr(step, 'indicator_screened', 'N/A')))
-            self.steps_table.setItem(i, 3, QTableWidgetItem(getattr(step, 'criteria', 'N/A')))
-            # Add count_screened_this_step
-            self.steps_table.setItem(i, 4, QTableWidgetItem(str(getattr(step, 'count_screened_this_step', 0))))
-            # Get number_positive
-            self.steps_table.setItem(i, 5, QTableWidgetItem(str(getattr(step, 'number_positive', 0))))
-            # Removal tracking columns
+            indicators = getattr(step, 'indicators_screened', [])
+            self.steps_table.setItem(i, 2, QTableWidgetItem(", ".join(indicators) if indicators else "-"))
+            pigment = getattr(step, 'pigment_screened', False)
+            self.steps_table.setItem(i, 3, QTableWidgetItem("Yes" if pigment else "No"))
+            self.steps_table.setItem(i, 4, QTableWidgetItem(getattr(step, 'criteria', '') or "-"))
+            self.steps_table.setItem(i, 5, QTableWidgetItem(str(getattr(step, 'count_screened_this_step', 0))))
+            self.steps_table.setItem(i, 6, QTableWidgetItem(str(getattr(step, 'number_kept', 0))))
             rm_pigment = getattr(step, 'number_removed_pigmented', None)
-            self.steps_table.setItem(i, 6, QTableWidgetItem(str(rm_pigment) if rm_pigment is not None else "-"))
+            self.steps_table.setItem(i, 7, QTableWidgetItem(str(rm_pigment) if rm_pigment is not None else "-"))
             rm_neg = getattr(step, 'number_removed_negative', None)
-            self.steps_table.setItem(i, 7, QTableWidgetItem(str(rm_neg) if rm_neg is not None else "-"))
+            self.steps_table.setItem(i, 8, QTableWidgetItem(str(rm_neg) if rm_neg is not None else "-"))
             rm_other = getattr(step, 'number_removed_other', None)
-            self.steps_table.setItem(i, 8, QTableWidgetItem(str(rm_other) if rm_other is not None else "-"))
-            # Tricaine and notes
-            tricaine_val = getattr(step, 'tricaine_used', False)
-            tricaine_text = "Yes" if tricaine_val else "No"
-            self.steps_table.setItem(i, 9, QTableWidgetItem(tricaine_text))
-            self.steps_table.setItem(i, 10, QTableWidgetItem(getattr(step, 'notes', "") or ""))
-            # -------------------------------------------------------
+            self.steps_table.setItem(i, 9, QTableWidgetItem(str(rm_other) if rm_other is not None else "-"))
+            tricaine_text = "Yes" if getattr(step, 'tricaine_used', False) else "No"
+            self.steps_table.setItem(i, 10, QTableWidgetItem(tricaine_text))
+            self.steps_table.setItem(i, 11, QTableWidgetItem(getattr(step, 'notes', "") or ""))
 
         logger.debug(f"Populated table with {len(steps)} screening steps for dish {self.dish_id}")
 
@@ -564,23 +588,22 @@ class ScreeningDialog(QDialog):
             QMessageBox.warning(self, "Error", "Dish data not loaded.")
             return
 
-        indicator = self.step_indicator.text().strip()
+        indicators_text = self.step_indicators.text().strip()
+        indicators_list = [ind.strip() for ind in indicators_text.split(",") if ind.strip()]
+        pigment_screened = self.step_pigment_screened.isChecked()
         criteria = self.step_criteria.text().strip()
-        count_screened = self.step_count_screened.value() # Get total screened count
-        num_positive = self.step_number_positive.value()
+        count_screened = self.step_count_screened.value()
+        number_kept = self.step_number_kept.value()
 
         # Validation
-        if not indicator:
-             QMessageBox.warning(self, "Input Error", "Indicator(s) Screened cannot be empty.")
-             return
-        if not criteria:
-             QMessageBox.warning(self, "Input Error", "Criteria cannot be empty.")
+        if not indicators_list and not pigment_screened:
+             QMessageBox.warning(self, "Input Error", "Enter at least one indicator or check 'Pigment Screened'.")
              return
         if count_screened <= 0:
              QMessageBox.warning(self, "Input Error", "Total Screened This Step must be greater than zero.")
              return
-        if num_positive > count_screened:
-             QMessageBox.warning(self, "Input Error", "Number Positive cannot be greater than Total Screened This Step.")
+        if number_kept > count_screened:
+             QMessageBox.warning(self, "Input Error", "Number Kept cannot be greater than Total Screened This Step.")
              return
 
 
@@ -609,10 +632,11 @@ class ScreeningDialog(QDialog):
         step_data = {
             "screening_datetime": screening_datetime_str,
             "dpf_screened": current_dpf_value,
-            "indicator_screened": indicator,
-            "criteria": criteria,
-            "count_screened_this_step": count_screened, # Pass new field
-            "number_positive": num_positive,
+            "indicators_screened": indicators_list,
+            "pigment_screened": pigment_screened,
+            "criteria": criteria or None,
+            "count_screened_this_step": count_screened,
+            "number_kept": number_kept,
             "number_removed_pigmented": removed_pigmented,
             "number_removed_negative": removed_negative,
             "number_removed_other": removed_other,
@@ -625,59 +649,56 @@ class ScreeningDialog(QDialog):
 
         if success:
             QMessageBox.information(self, "Success", "Screening step added successfully.")
-            self.load_dish_data() # Reload data to show the new step in the table
-            self.clear_add_step_fields() # Clear form
-
-            # --- Splitting Logic ---
-            if validated_step_obj: # Check if we got the step object back
-                negatives_count = validated_step_obj.count_screened_this_step - validated_step_obj.number_positive
-                if negatives_count > 0:
-                    reply = QMessageBox.question(self, 'Create Derived Dish?',
-                                                 f"Screening step added.\n\n"
-                                                 f"Calculated {negatives_count} negative fish "
-                                                 f"(Total: {validated_step_obj.count_screened_this_step}, "
-                                                 f"Positive: {validated_step_obj.number_positive}).\n\n"
-                                                 f"Do you want to create a new dish record for these negatives?",
-                                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                                 QMessageBox.StandardButton.No)
-
-                    if reply == QMessageBox.StandardButton.Yes:
-                        logger.info(f"User chose to create dish for {negatives_count} negatives from dish {self.dish_id}")
-                        # Call the new controller method
-                        derive_success, derive_message, new_dish = fish_dish_controller.create_derived_dish(
-                            parent_dish_id=self.dish_id,
-                            population_type="negative_screened",
-                            originating_screening_step=validated_step_obj
-                        )
-                        if derive_success:
-                             QMessageBox.information(self, "Success", f"Successfully created derived dish: {derive_message}")
-                             # Optionally, refresh the main dish table in the background if possible?
-                        else:
-                             QMessageBox.critical(self, "Error", f"Failed to create derived dish:\n{derive_message}")
-                else:
-                     logger.info("No negative fish calculated, skipping split prompt.")
-            else:
-                 logger.error("Validated screening step object was not returned from controller. Cannot prompt for split.")
-            # --- End Splitting Logic ---
-
+            self.load_dish_data()
+            self.clear_add_step_fields()
         else:
             QMessageBox.critical(self, "Error", f"Failed to add screening step:\n{message}")
 
     def clear_add_step_fields(self):
         """Clear the input fields for adding a new step."""
         self.set_current_datetime()
-        self.step_indicator.clear(); self.step_indicator.setPlaceholderText("e.g., GFP, Pigment")
-        self.step_criteria.clear(); self.step_criteria.setPlaceholderText("Brief description of criteria")
+        self.step_indicators.clear(); self.step_indicators.setPlaceholderText("e.g. GFP, jRGECO")
+        self.step_pigment_screened.setChecked(False)
+        self.step_criteria.clear(); self.step_criteria.setPlaceholderText("e.g. fluorescence, brightest")
         self.step_notes.clear(); self.step_notes.setPlaceholderText("(Optional) Notes for this step")
         self.step_count_screened.setValue(0)
-        self.step_number_positive.setValue(0)
-        # Reset removal tracking fields
+        self.step_number_kept.setValue(0)
         self.step_removed_pigmented.setValue(0)
         self.step_removed_negative.setValue(0)
         self.step_removed_other.setValue(0)
         self.step_tricaine_used.setChecked(False)
         # Trigger DPF update and suggestions based on current date/time
         self.update_dpf()
+
+    @Slot()
+    def create_derived_dish(self):
+        """Create a derived dish from the current dish."""
+        if not self.dish:
+            QMessageBox.warning(self, "Error", "Dish data not loaded.")
+            return
+
+        fish_count = self.derive_fish_count.value()
+        population_type = self.derive_population_type.currentText()
+        container_text = self.derive_container_type.currentText()
+        container_type = None if container_text == "(same as parent)" else container_text
+        notes = self.derive_notes.text().strip() or None
+
+        success, message, new_dish = fish_dish_controller.create_derived_dish(
+            parent_dish_id=self.dish_id,
+            population_type=population_type,
+            fish_count=fish_count,
+            container_type=container_type,
+            notes=notes,
+        )
+
+        if success:
+            QMessageBox.information(self, "Success", f"Created derived dish: {message}")
+            self.derive_fish_count.setValue(1)
+            self.derive_container_type.setCurrentIndex(0)
+            self.derive_population_type.setCurrentIndex(0)
+            self.derive_notes.clear()
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to create derived dish:\n{message}")
 
     @Slot()
     def finalize_screening(self):

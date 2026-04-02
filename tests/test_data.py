@@ -65,15 +65,16 @@ class TestFishSubjectData:
         assert data_manager.get_fish_subject(fish_id) is None
         assert len(data_manager.get_fish_images(fish_id)) == 0
 
-    def test_delete_cascades_to_fish_runs(self, client, seed_dish):
+    def test_delete_cascades_to_occupancy(self, client, seed_dish):
         fish_id = data_manager.create_fish_subject(dish_id=seed_dish)
-        session_uuid = str(uuid.uuid4())
-        data_manager.create_experiment_session(session_uuid=session_uuid)
-        data_manager.create_fish_run(fish_id=fish_id, session_uuid=session_uuid)
-        assert len(data_manager.get_fish_runs(fish_id)) == 1
+        unit_id = data_manager.create_housing_unit(
+            dish_id=seed_dish, position_label="cascade-test"
+        )
+        data_manager.assign_fish_to_unit(fish_id, unit_id)
+        assert len(data_manager.get_fish_occupancy_history(fish_id)) == 1
         data_manager.delete_fish_subject(fish_id)
-        # fish_runs should be gone (ON DELETE CASCADE)
-        assert len(data_manager.get_fish_runs(fish_id)) == 0
+        # occupancy should be gone (ON DELETE CASCADE)
+        assert len(data_manager.get_fish_occupancy_history(fish_id)) == 0
 
 
 class TestHousingUnitData:
@@ -184,13 +185,3 @@ class TestDishImageData:
         assert images[1]["caption"] == "second"
 
 
-class TestFishRunData:
-    """data_manager experiment session / fish_run methods."""
-
-    def test_create_fish_run_unique(self, client, seed_dish):
-        fish_id = data_manager.create_fish_subject(dish_id=seed_dish)
-        session_uuid = str(uuid.uuid4())
-        data_manager.create_experiment_session(session_uuid=session_uuid)
-        assert data_manager.create_fish_run(fish_id=fish_id, session_uuid=session_uuid)
-        # Duplicate should fail
-        assert not data_manager.create_fish_run(fish_id=fish_id, session_uuid=session_uuid)

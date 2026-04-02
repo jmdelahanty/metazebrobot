@@ -49,7 +49,7 @@ def get_survivability_data() -> pl.DataFrame:
                 'termination_date': dish_data.get('termination_date'),
                 'termination_reason': dish_data.get('termination_reason'),
                 'responsible': dish_data.get('responsible'),
-                'in_beaker': 'Yes' if dish_data.get('enclosure', {}).get('in_beaker') else 'No',
+                'container_type': dish_data.get('enclosure', {}).get('container_type', 'petri_dish'),
                 'vol_water_total': dish_data.get('enclosure', {}).get('vol_water_total', 0),
                 'room': dish_data.get('enclosure', {}).get('room')
             }
@@ -89,7 +89,7 @@ def get_survivability_data() -> pl.DataFrame:
         'date_fertilized': pl.Utf8, 'date_created': pl.Utf8,
         'initial_count': pl.Int64, 'status': pl.Categorical,
         'termination_date': pl.Utf8, 'termination_reason': pl.Utf8,
-        'responsible': pl.Utf8, 'in_beaker': pl.Categorical,
+        'responsible': pl.Utf8, 'container_type': pl.Categorical,
         'vol_water_total': pl.Int64, 'room': pl.Utf8,
         'check_date': pl.Utf8, 'check_time': pl.Utf8,
         'fish_deaths': pl.Int64, 'water_changed': pl.Categorical,

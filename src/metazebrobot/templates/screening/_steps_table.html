@@ -11,9 +11,10 @@
         <tr>
             <th>Date/Time</th>
             <th>DPF</th>
-            <th>Indicator</th>
+            <th>Indicators</th>
+            <th>Pigment?</th>
             <th>Screened</th>
-            <th>Positive</th>
+            <th>Kept</th>
             <th>Removed</th>
             <th>Tricaine</th>
             <th>Notes</th>
@@ -21,16 +22,15 @@
     </thead>
     <tbody>
         {% for s in steps %}
+        {% set removed = (s.number_removed_pigmented or 0) + (s.number_removed_negative or 0) + (s.number_removed_other or 0) %}
         <tr>
             <td>{{ s.screening_datetime }}</td>
             <td>{{ s.dpf_screened }}</td>
-            <td>{{ s.indicator_screened }}</td>
+            <td>{{ s.indicators_screened | join(", ") if s.indicators_screened else "-" }}</td>
+            <td>{{ "Yes" if s.pigment_screened else "No" }}</td>
             <td>{{ s.count_screened_this_step }}</td>
-            <td>{{ s.number_positive }}</td>
-            <td>
-                {% set removed = (s.number_removed_pigmented or 0) + (s.number_removed_negative or 0) + (s.number_removed_other or 0) %}
-                {{ removed if removed > 0 else "-" }}
-            </td>
+            <td>{{ s.number_kept }}</td>
+            <td>{{ removed if removed > 0 else "-" }}</td>
             <td>{{ "Yes" if s.tricaine_used else "No" }}</td>
             <td>{{ s.notes or "-" }}</td>
         </tr>
@@ -40,4 +40,45 @@
 </figure>
 {% else %}
 <p><em>No screening steps recorded yet.</em></p>
+{% endif %}
+
+{% if steps and dish_id is defined %}
+<details>
+    <summary><strong>Create Derived Dish</strong></summary>
+    <p>Move fish from this dish into a new container after screening.</p>
+    <form method="post" action="/screening/{{ dish_id }}/split">
+        <div class="grid">
+            <label>
+                Fish Count
+                <input type="number" name="fish_count" min="1" required
+                       placeholder="How many fish go into the new dish">
+            </label>
+            <label>
+                Container Type
+                <select name="container_type">
+                    <option value="">Same as parent</option>
+                    <option value="petri_dish">Petri Dish</option>
+                    <option value="beaker">Beaker</option>
+                    <option value="well_plate">Well Plate</option>
+                    <option value="tank">Tank</option>
+                </select>
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                Population Type
+                <select name="population_type">
+                    <option value="positive_screened">Positive (screened)</option>
+                    <option value="negative_screened">Negative (screened)</option>
+                    <option value="other">Other</option>
+                </select>
+            </label>
+            <label>
+                Notes
+                <input type="text" name="notes" placeholder="(optional)">
+            </label>
+        </div>
+        <button type="submit" class="secondary">Create Derived Dish</button>
+    </form>
+</details>
 {% endif %}

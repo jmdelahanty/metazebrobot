@@ -19,7 +19,9 @@ class Enclosure(BaseModel):
     temperature: Optional[float] = Field(default=None, ge=18, le=30)  # Temperature in Celsius
     light_cycle: Optional[LightCycle] = None
     room: Optional[str] = "2E.282"  # Default room
-    in_beaker: Optional[bool] = False  # Whether the fish are in a beaker
+    container_type: Optional[Literal[
+        "petri_dish", "beaker", "well_plate", "tank"
+    ]] = "petri_dish"
     vol_water_total: Optional[int] = None  # Total volume of water in the enclosure
 
 
@@ -63,20 +65,23 @@ class QualityCheckData(BaseModel):
         return v
 
 class ScreeningStep(BaseModel):
-    """Data for a single screening step performed on a dish."""
-    screening_datetime: str # Format: YYYYMMDDTHH:MM:SS
-    dpf_screened: int
-    indicator_screened: str # e.g., "GFP", "RGECO1b", "Pigment", "Both/Final"
-    criteria: str
-    # --- FIELD ADDED ---
+    """Data for a single screening step performed on a dish.
+
+    Supports multiple screening scenarios:
+    - Pigment-only removal (indicators_screened=[], pigment_screened=True)
+    - Single indicator screen (indicators_screened=["GFP"])
+    - Multi-indicator + pigment (indicators_screened=["GFP","jRGECO"], pigment_screened=True)
+    """
+    screening_datetime: str  # Format: YYYYMMDDTHH:MM:SS
+    dpf_screened: int = Field(..., ge=0)
+    indicators_screened: List[str] = Field(default_factory=list, description="Indicators assessed (e.g. ['GFP','jRGECO']); empty for pigment-only")
+    pigment_screened: bool = Field(default=False, description="Whether pigmentation was assessed this step")
+    criteria: Optional[str] = Field(default=None, description="Free-text screening criteria (e.g. 'fluorescence', 'brightest')")
     count_screened_this_step: int = Field(..., ge=0, description="Total number of fish actually screened in this specific step")
-    # --- FIELD KEPT ---
-    number_positive: int = Field(..., ge=0, description="Number of fish positive for the indicator(s) in this step")
-    # --- REMOVAL TRACKING FIELDS ---
+    number_kept: int = Field(..., ge=0, description="Number of fish kept (passed all criteria)")
     number_removed_pigmented: Optional[int] = Field(default=None, ge=0, description="Number removed due to pigmentation")
     number_removed_negative: Optional[int] = Field(default=None, ge=0, description="Number removed for being negative for indicator")
     number_removed_other: Optional[int] = Field(default=None, ge=0, description="Number removed for other reasons")
-    # ---------------------
     tricaine_used: bool = False
     notes: Optional[str] = None
 
@@ -179,7 +184,7 @@ class FishDish(BaseModel):
         light_duration: str = "14:10",
         dawn_dusk: str = "8:00",
         room: str = "2E.282",
-        in_beaker: bool = False,
+        container_type: str = "petri_dish",
         vol_water_total: Optional[int] = None,
         notes: Optional[str] = None,
         parent_dish_id: Optional[str] = None,
@@ -227,7 +232,7 @@ class FishDish(BaseModel):
                     dawn_dusk=dawn_dusk
                 ),
                 room=room,
-                in_beaker=in_beaker,
+                container_type=container_type,
                 vol_water_total=vol_water_total
             ),
             quality_checks={},

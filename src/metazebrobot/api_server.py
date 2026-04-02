@@ -184,36 +184,42 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_fish_subject_images_fish_id
                 ON fish_subject_images(fish_id)
             """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS experiment_sessions (
-                    session_uuid TEXT PRIMARY KEY,
-                    run_at_utc TEXT,
-                    rig_id TEXT,
-                    arena_id TEXT,
-                    protocol_name TEXT,
-                    h5_path TEXT
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS fish_runs (
-                    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    fish_id TEXT NOT NULL,
-                    session_uuid TEXT NOT NULL,
-                    dpf_at_run INTEGER,
-                    notes TEXT,
-                    FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE,
-                    FOREIGN KEY (session_uuid) REFERENCES experiment_sessions(session_uuid) ON DELETE CASCADE,
-                    UNIQUE (fish_id, session_uuid)
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_fish_runs_fish_id
-                ON fish_runs(fish_id)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_fish_runs_session_uuid
-                ON fish_runs(session_uuid)
-            """)
+            # Migrate enclosure_in_beaker → container_type
+            dish_cols = [r[1] for r in conn.execute("PRAGMA table_info(dishes)").fetchall()]
+            if 'container_type' not in dish_cols:
+                conn.execute("ALTER TABLE dishes ADD COLUMN container_type TEXT")
+                conn.execute("""
+                    UPDATE dishes SET container_type = CASE
+                        WHEN enclosure_in_beaker = 1 THEN 'beaker'
+                        ELSE 'petri_dish'
+                    END
+                    WHERE container_type IS NULL
+                """)
+            # Migrate screening_steps: indicator_screened → indicators_screened, number_positive → number_kept
+            ss_cols = [r[1] for r in conn.execute("PRAGMA table_info(screening_steps)").fetchall()]
+            if ss_cols:  # Table exists
+                if 'indicators_screened' not in ss_cols:
+                    conn.execute("ALTER TABLE screening_steps ADD COLUMN indicators_screened TEXT")
+                    if 'indicator_screened' in ss_cols:
+                        conn.execute("""
+                            UPDATE screening_steps
+                            SET indicators_screened = CASE
+                                WHEN indicator_screened IS NOT NULL AND indicator_screened != ''
+                                THEN '["' || indicator_screened || '"]'
+                                ELSE '[]'
+                            END
+                            WHERE indicators_screened IS NULL
+                        """)
+                if 'pigment_screened' not in ss_cols:
+                    conn.execute("ALTER TABLE screening_steps ADD COLUMN pigment_screened BOOLEAN DEFAULT FALSE")
+                if 'number_kept' not in ss_cols:
+                    conn.execute("ALTER TABLE screening_steps ADD COLUMN number_kept INTEGER")
+                    if 'number_positive' in ss_cols:
+                        conn.execute("""
+                            UPDATE screening_steps
+                            SET number_kept = number_positive
+                            WHERE number_kept IS NULL AND number_positive IS NOT NULL
+                        """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS dish_images (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -372,7 +378,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         db_path = _require_db_path()
         query = """
             SELECT dish_id, cross_id, genotype, responsible, fish_count, dof,
-                   status, date_created
+                   status, date_created, parent_dish_id, dish_population_type
             FROM dishes
             WHERE 1=1
         """
@@ -606,6 +612,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return templates.TemplateResponse("screening/_steps_table.html", {
             "request": request,
             "steps": steps,
+            "dish_id": dish_id,
         })
 
     @app.post("/screening/{dish_id}/steps", response_class=HTMLResponse)
@@ -614,10 +621,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         dish_id: str,
         screening_datetime: str = Form(...),
         dpf_screened: int = Form(...),
-        indicator_screened: str = Form(...),
-        criteria: str = Form(...),
+        indicators_screened: str = Form(default=""),
+        pigment_screened: bool = Form(default=False),
+        criteria: Optional[str] = Form(default=None),
         count_screened_this_step: int = Form(...),
-        number_positive: int = Form(...),
+        number_kept: int = Form(...),
         number_removed_pigmented: Optional[int] = Form(default=None),
         number_removed_negative: Optional[int] = Form(default=None),
         number_removed_other: Optional[int] = Form(default=None),
@@ -625,13 +633,18 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         notes: Optional[str] = Form(default=None),
     ):
         """Submit a new screening step, return HTMX partial."""
+        # Parse comma-separated indicators into a list
+        indicators_list = [
+            ind.strip() for ind in indicators_screened.split(",") if ind.strip()
+        ]
         step_data = {
             "screening_datetime": screening_datetime,
             "dpf_screened": dpf_screened,
-            "indicator_screened": indicator_screened,
-            "criteria": criteria,
+            "indicators_screened": indicators_list,
+            "pigment_screened": pigment_screened,
+            "criteria": criteria or None,
             "count_screened_this_step": count_screened_this_step,
-            "number_positive": number_positive,
+            "number_kept": number_kept,
             "number_removed_pigmented": number_removed_pigmented,
             "number_removed_negative": number_removed_negative,
             "number_removed_other": number_removed_other,
@@ -654,6 +667,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return templates.TemplateResponse("screening/_steps_table.html", {
             "request": request,
             "steps": steps,
+            "dish_id": dish_id,
             "flash_message": message,
             "flash_level": "success",
         })
@@ -678,6 +692,37 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             })
 
         # Redirect to the screening form to show updated state
+        return RedirectResponse(
+            url=f"/screening/{dish_id}",
+            status_code=303,
+        )
+
+    @app.post("/screening/{dish_id}/split", response_class=HTMLResponse)
+    def split_dish(
+        request: Request,
+        dish_id: str,
+        fish_count: int = Form(...),
+        population_type: str = Form(default="positive_screened"),
+        container_type: Optional[str] = Form(default=None),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Create a derived dish from a screening step."""
+        success, message, new_dish = fish_dish_ctrl.create_derived_dish(
+            parent_dish_id=dish_id,
+            population_type=population_type,
+            fish_count=fish_count,
+            container_type=container_type or None,
+            notes=notes or None,
+        )
+
+        if not success:
+            return templates.TemplateResponse("screening/_flash_message.html", {
+                "request": request,
+                "message": message,
+                "level": "error",
+            })
+
+        # Redirect back to screening page with success
         return RedirectResponse(
             url=f"/screening/{dish_id}",
             status_code=303,
@@ -1258,82 +1303,6 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "dish_id": dish_id,
             "images": images,
         })
-
-    # ------------------------------------------------------------------
-    # Experiment sessions and fish runs
-    # ------------------------------------------------------------------
-
-    @app.post("/sessions", status_code=201)
-    def create_session(body: Dict[str, Any] = {}) -> Dict[str, Any]:
-        """Register an experiment session."""
-        _require_db_path()
-        session_uuid = body.get("session_uuid")
-        if not session_uuid:
-            raise HTTPException(status_code=422, detail="session_uuid is required")
-        if data_manager.get_experiment_session(session_uuid) is not None:
-            raise HTTPException(status_code=409, detail="Session already exists")
-        success = data_manager.create_experiment_session(
-            session_uuid=session_uuid,
-            run_at_utc=body.get("run_at_utc"),
-            rig_id=body.get("rig_id"),
-            arena_id=body.get("arena_id"),
-            protocol_name=body.get("protocol_name"),
-            h5_path=body.get("h5_path"),
-        )
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to create session")
-        return data_manager.get_experiment_session(session_uuid)
-
-    @app.get("/sessions/{session_uuid}")
-    def get_session(session_uuid: str) -> Dict[str, Any]:
-        """Fetch an experiment session."""
-        _require_db_path()
-        session = data_manager.get_experiment_session(session_uuid)
-        if session is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-        return session
-
-    @app.post("/sessions/{session_uuid}/fish", status_code=201)
-    def link_fish_to_session(
-        session_uuid: str,
-        body: Dict[str, Any] = {},
-    ) -> Dict[str, str]:
-        """Link a fish to an experiment session (create a fish_run)."""
-        _require_db_path()
-        if data_manager.get_experiment_session(session_uuid) is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-        fish_id = body.get("fish_id")
-        if not fish_id:
-            raise HTTPException(status_code=422, detail="fish_id is required")
-        if data_manager.get_fish_subject(fish_id) is None:
-            raise HTTPException(status_code=404, detail="Fish not found")
-        success = data_manager.create_fish_run(
-            fish_id=fish_id,
-            session_uuid=session_uuid,
-            dpf_at_run=body.get("dpf_at_run"),
-            notes=body.get("notes"),
-        )
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to link fish to session")
-        return {"status": "ok", "fish_id": fish_id, "session_uuid": session_uuid}
-
-    @app.get("/sessions/{session_uuid}/fish")
-    def list_session_fish(session_uuid: str) -> Dict[str, Any]:
-        """List all fish in a session."""
-        _require_db_path()
-        if data_manager.get_experiment_session(session_uuid) is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-        fish = data_manager.get_session_fish(session_uuid)
-        return {"items": fish}
-
-    @app.get("/fish/{fish_id}/sessions")
-    def list_fish_sessions(fish_id: str) -> Dict[str, Any]:
-        """List all experiment sessions for a fish."""
-        _require_db_path()
-        if data_manager.get_fish_subject(fish_id) is None:
-            raise HTTPException(status_code=404, detail="Fish not found")
-        runs = data_manager.get_fish_runs(fish_id)
-        return {"items": runs}
 
     return app
 

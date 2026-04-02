@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from metazebrobot.models.fish_dish import (
+    Enclosure,
     FishDish,
     QualityCheckData,
     ScreeningStep,
@@ -40,23 +41,37 @@ class TestScreeningStep:
     VALID_STEP = dict(
         screening_datetime="20260401T14:00:00",
         dpf_screened=5,
-        indicator_screened="GFP",
+        indicators_screened=["GFP"],
+        pigment_screened=False,
         criteria="fluorescence",
         count_screened_this_step=20,
-        number_positive=12,
+        number_kept=12,
     )
 
     def test_valid_step(self):
         step = ScreeningStep(**self.VALID_STEP)
-        assert step.number_positive == 12
+        assert step.number_kept == 12
+        assert step.indicators_screened == ["GFP"]
+
+    def test_pigment_only_step(self):
+        data = {**self.VALID_STEP, "indicators_screened": [], "pigment_screened": True}
+        step = ScreeningStep(**data)
+        assert step.indicators_screened == []
+        assert step.pigment_screened is True
+
+    def test_multi_indicator_step(self):
+        data = {**self.VALID_STEP, "indicators_screened": ["GFP", "jRGECO"], "pigment_screened": True}
+        step = ScreeningStep(**data)
+        assert step.indicators_screened == ["GFP", "jRGECO"]
+        assert step.pigment_screened is True
 
     def test_negative_count_screened(self):
         data = {**self.VALID_STEP, "count_screened_this_step": -1}
         with pytest.raises(ValidationError):
             ScreeningStep(**data)
 
-    def test_negative_number_positive(self):
-        data = {**self.VALID_STEP, "number_positive": -5}
+    def test_negative_number_kept(self):
+        data = {**self.VALID_STEP, "number_kept": -5}
         with pytest.raises(ValidationError):
             ScreeningStep(**data)
 
@@ -74,6 +89,30 @@ class TestScreeningStep:
         data = {**self.VALID_STEP, "number_removed_pigmented": -1}
         with pytest.raises(ValidationError):
             ScreeningStep(**data)
+
+
+class TestEnclosure:
+    """Validate Enclosure container_type Literal."""
+
+    def test_default_container_type(self):
+        enc = Enclosure()
+        assert enc.container_type == "petri_dish"
+
+    def test_valid_container_types(self):
+        for ct in ("petri_dish", "beaker", "well_plate", "tank"):
+            enc = Enclosure(container_type=ct)
+            assert enc.container_type == ct
+
+    def test_invalid_container_type(self):
+        from pydantic import ValidationError as VE
+        with pytest.raises(VE):
+            Enclosure(container_type="bucket")
+
+    def test_no_in_beaker_field(self):
+        """in_beaker was removed — it should not appear on the model."""
+        enc = Enclosure()
+        assert not hasattr(enc, "in_beaker")
+        assert enc.container_type == "petri_dish"
 
 
 class TestFishDish:

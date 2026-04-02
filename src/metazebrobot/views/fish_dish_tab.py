@@ -180,10 +180,10 @@ class FishDishTab(QWidget):
         form_layout.addWidget(self.dawn_dusk, row, 3)
 
         row += 1
-        form_layout.addWidget(QLabel("In a beaker?"), row, 0)
-        self.beaker_housing = QCheckBox()
-        self.beaker_housing.setChecked(False)
-        form_layout.addWidget(self.beaker_housing, row, 1)
+        form_layout.addWidget(QLabel("Container Type:"), row, 0)
+        self.container_type = QComboBox()
+        self.container_type.addItems(["petri_dish", "beaker", "well_plate", "tank"])
+        form_layout.addWidget(self.container_type, row, 1)
         form_layout.addWidget(QLabel("Volume Water Total (mL):"), row, 2) # Moved Label
         self.vol_water_total = QLineEdit()
         self.vol_water_total.setPlaceholderText("e.g., 80")
@@ -709,7 +709,7 @@ class FishDishTab(QWidget):
         self.room.setText("2E.282")
         self.light_duration.setText("14:10")
         self.dawn_dusk.setText("8:00")
-        self.beaker_housing.setChecked(False)
+        self.container_type.setCurrentText("petri_dish")
         self.fish_count.setValue(0)
         self.vol_water_total.clear()
         self.source_group_id.clear()
@@ -761,7 +761,7 @@ class FishDishTab(QWidget):
                 light_duration=self.light_duration.text().strip(),
                 dawn_dusk=self.dawn_dusk.text().strip(),
                 room=self.room.text().strip(),
-                in_beaker=self.beaker_housing.isChecked(),
+                container_type=self.container_type.currentText(),
                 vol_water_total=vol_water_total_val,
                 notes=notes
             )

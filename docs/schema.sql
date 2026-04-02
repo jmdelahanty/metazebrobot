@@ -20,7 +20,7 @@ CREATE TABLE dishes (
             fish_count INTEGER,
             data JSON,  -- Full JSON data
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, screening_final_positive_count INTEGER, screening_date_finalized TEXT, species TEXT DEFAULT 'Danio rerio', sex TEXT DEFAULT 'unknown', parent_dish_id TEXT, dish_population_type TEXT, notes TEXT, room TEXT, enclosure_temperature REAL, enclosure_in_beaker BOOLEAN, enclosure_vol_water_total INTEGER, enclosure_light_duration TEXT, enclosure_dawn_dusk TEXT, breeding_parents TEXT, termination_date TEXT, termination_reason TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, screening_final_positive_count INTEGER, screening_date_finalized TEXT, species TEXT DEFAULT 'Danio rerio', sex TEXT DEFAULT 'unknown', parent_dish_id TEXT, dish_population_type TEXT, notes TEXT, room TEXT, enclosure_temperature REAL, container_type TEXT DEFAULT 'petri_dish', enclosure_vol_water_total INTEGER, enclosure_light_duration TEXT, enclosure_dawn_dusk TEXT, breeding_parents TEXT, termination_date TEXT, termination_reason TEXT,
             FOREIGN KEY (cross_id) REFERENCES crosses (cross_id)
         );
 CREATE TABLE quality_checks (
@@ -87,13 +87,17 @@ CREATE TABLE screening_steps (
                         dish_id TEXT NOT NULL,
                         screening_datetime TEXT NOT NULL,
                         dpf_screened INTEGER,
-                        indicator_screened TEXT,
+                        indicators_screened TEXT,
+                        pigment_screened BOOLEAN DEFAULT FALSE,
                         criteria TEXT,
                         count_screened_this_step INTEGER,
-                        number_positive INTEGER,
+                        number_kept INTEGER,
+                        number_removed_pigmented INTEGER,
+                        number_removed_negative INTEGER,
+                        number_removed_other INTEGER,
                         tricaine_used BOOLEAN DEFAULT FALSE,
                         notes TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, number_removed_pigmented INTEGER, number_removed_negative INTEGER, number_removed_other INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (dish_id) REFERENCES dishes(dish_id),
                         UNIQUE(dish_id, screening_datetime)
                     );
@@ -132,23 +136,4 @@ CREATE TABLE fish_subjects (
   notes TEXT,
   FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
 );
-CREATE TABLE experiment_sessions (
-  session_uuid TEXT PRIMARY KEY,
-  run_at_utc TEXT,
-  rig_id TEXT,
-  arena_id TEXT,
-  protocol_name TEXT,
-  h5_path TEXT
-);
-CREATE TABLE fish_runs (
-  run_id INTEGER PRIMARY KEY AUTOINCREMENT,
-  fish_id TEXT NOT NULL,
-  session_uuid TEXT NOT NULL,
-  notes TEXT,
-  FOREIGN KEY (fish_id) REFERENCES fish_subjects(fish_id) ON DELETE CASCADE,
-  FOREIGN KEY (session_uuid) REFERENCES experiment_sessions(session_uuid) ON DELETE CASCADE,
-  UNIQUE (fish_id, session_uuid)
-);
 CREATE INDEX idx_fish_subjects_dish_id ON fish_subjects(dish_id);
-CREATE INDEX idx_fish_runs_fish_id ON fish_runs(fish_id);
-CREATE INDEX idx_fish_runs_session_uuid ON fish_runs(session_uuid);

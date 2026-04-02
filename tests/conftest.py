@@ -34,7 +34,8 @@ def tmp_db_path(tmp_path_factory) -> Path:
             dof TEXT,
             responsible TEXT,
             parent_dish_id TEXT,
-            dish_population_type TEXT DEFAULT 'primary'
+            dish_population_type TEXT DEFAULT 'primary',
+            container_type TEXT DEFAULT 'petri_dish'
         )
     """)
     conn.execute("""

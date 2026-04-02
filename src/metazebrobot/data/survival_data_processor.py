@@ -386,25 +386,23 @@ def create_survival_summary(df: pl.DataFrame) -> pl.DataFrame:
             summary = summary.join(volume_stats, on='genotype', how='left')
 
         # Add housing type stats if available
-        if 'in_beaker' in latest_records.columns:
-            # Create housing column (ensure 'in_beaker' is Utf8 for string operations)
-            latest_records = latest_records.with_columns(
-                pl.when(pl.col('in_beaker').cast(pl.Utf8).str.to_lowercase() == 'yes')
-                .then(pl.lit('Beaker'))
-                .otherwise(pl.lit('Dish'))
-                .cast(pl.Categorical) # Cast to categorical
-                .alias('housing')
-            )
-
-            # Create housing stats for each housing type
-            for housing in ['Beaker', 'Dish']:
-                housing_data = latest_records.filter(pl.col('housing') == housing)
-                if housing_data.height > 0:
-                    housing_stats = housing_data.group_by('genotype').agg([
-                        pl.n_unique('dish_id').alias(f'{housing.lower()}_count'),
-                        pl.mean('survival_rate').alias(f'{housing.lower()}_mean_survival') # Already cast survival_rate
+        if 'container_type' in latest_records.columns:
+            container_stats = latest_records.group_by(['genotype', 'container_type']).agg([
+                pl.n_unique('dish_id').alias('container_count'),
+                pl.mean('survival_rate').alias('container_mean_survival')
+            ])
+            # Pivot so each container type becomes its own column pair
+            for ct in latest_records['container_type'].unique().to_list():
+                if ct is None:
+                    continue
+                ct_data = container_stats.filter(pl.col('container_type') == ct)
+                if ct_data.height > 0:
+                    ct_renamed = ct_data.select([
+                        'genotype',
+                        pl.col('container_count').alias(f'{ct}_count'),
+                        pl.col('container_mean_survival').alias(f'{ct}_mean_survival'),
                     ])
-                    summary = summary.join(housing_stats, on='genotype', how='left')
+                    summary = summary.join(ct_renamed, on='genotype', how='left')
 
         logger.info(f"Created summary with {summary.height} rows")
         return summary

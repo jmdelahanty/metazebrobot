@@ -118,7 +118,7 @@ class FishDishController:
         light_duration: str = "14:10",
         dawn_dusk: str = "8:00",
         room: str = "2E.282",
-        in_beaker: bool = False,
+        container_type: str = "petri_dish",
         vol_water_total: Optional[int] = None,
         notes: Optional[str] = None
         # Lineage fields default to primary here
@@ -143,7 +143,7 @@ class FishDishController:
                 light_duration=light_duration,
                 dawn_dusk=dawn_dusk,
                 room=room,
-                in_beaker=in_beaker,
+                container_type=container_type,
                 vol_water_total=vol_water_total,
                 notes=notes,
                 parent_dish_id=None, # Explicitly None for primary
@@ -184,102 +184,76 @@ class FishDishController:
     def create_derived_dish(
         self,
         parent_dish_id: str,
-        population_type: DishPopulationType, # e.g., "negative_screened"
-        originating_screening_step: ScreeningStep # Pass the step object
+        population_type: DishPopulationType,
+        fish_count: int,
+        container_type: Optional[str] = None,
+        notes: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[FishDish]]:
         """
-        Creates a new dish derived from a screening step of a parent dish.
+        Creates a new dish derived from a parent dish.
 
         Args:
             parent_dish_id: The ID of the dish this new one is split from.
-            population_type: The type of the new dish population (e.g., "negative_screened").
-            originating_screening_step: The ScreeningStep object from the parent dish
-                                         that triggered this split.
+            population_type: The type of the new dish population.
+            fish_count: Number of fish going into the new dish.
+            container_type: Container for the new dish (defaults to parent's).
+            notes: Optional notes for the new dish.
 
         Returns:
-            Tuple containing:
-            - Success flag (bool)
-            - New Dish ID or error message (str)
-            - Created FishDish object or None if failed
+            Tuple of (success, new_dish_id_or_message, FishDish_or_None).
         """
-        logger.info(f"Attempting to create derived dish from parent {parent_dish_id} (type: {population_type})")
+        logger.info(f"Attempting to create derived dish from parent {parent_dish_id} "
+                     f"(type: {population_type}, count: {fish_count})")
 
         try:
-            # 1. Get Parent Dish Data
             parent_dish = self.get_dish(parent_dish_id)
             if not parent_dish:
                 return False, f"Parent dish {parent_dish_id} not found.", None
 
-            # 2. Validate Screening Step Data & Calculate Count
-            if not hasattr(originating_screening_step, 'count_screened_this_step') or \
-               not hasattr(originating_screening_step, 'number_positive'):
-                msg = "Originating screening step data is missing required count fields."
-                logger.error(msg)
-                return False, msg, None
+            if fish_count <= 0:
+                return False, "Fish count must be greater than zero.", None
 
-            count_screened = originating_screening_step.count_screened_this_step
-            num_positive = originating_screening_step.number_positive
+            # Generate ID suffix from population type
+            suffix_map = {
+                "positive_screened": "_pos",
+                "negative_screened": "_neg",
+                "other": "_other",
+                "primary": "_split",
+            }
+            id_suffix_base = suffix_map.get(population_type, "_derived")
 
-            if count_screened < num_positive:
-                msg = f"Error: Count screened ({count_screened}) is less than number positive ({num_positive}) for parent {parent_dish_id}, step {originating_screening_step.screening_datetime}."
-                logger.error(msg)
-                return False, msg, None
-
-            new_dish_count = 0
-            id_suffix_base = ""
-            if population_type == "negative_screened":
-                new_dish_count = count_screened - num_positive
-                id_suffix_base = "_neg"
-            elif population_type == "positive_screened": # If splitting positives
-                new_dish_count = num_positive
-                id_suffix_base = "_pos"
-            else:
-                msg = f"Unsupported population_type '{population_type}' for splitting."
-                logger.error(msg)
-                return False, msg, None
-
-            # Optional: Check if new_fish_count is zero
-            if new_dish_count <= 0:
-                 msg = f"No fish calculated for new {population_type} dish (Screened: {count_screened}, Positive: {num_positive}). Dish not created."
-                 logger.warning(msg)
-                 return True, msg, None # Operation valid, but no dish needed
-
-
-            # 3. Generate New Dish ID (Handles potential collisions)
+            # Generate unique dish ID
             i = 1
             new_dish_id = f"{parent_dish_id}{id_suffix_base}{i}"
-            while data_manager.load_single_dish(new_dish_id): # Check if ID exists
+            while data_manager.load_single_dish(new_dish_id):
                 i += 1
                 new_dish_id = f"{parent_dish_id}{id_suffix_base}{i}"
-                # Add a safety break for excessive loops if necessary
-                if i > 99: # Example limit
-                    msg = f"Could not generate unique derived dish ID for parent {parent_dish_id} after many attempts."
+                if i > 99:
+                    msg = f"Could not generate unique derived dish ID for parent {parent_dish_id}."
                     logger.error(msg)
                     return False, msg, None
             logger.debug(f"Generated new derived dish ID: {new_dish_id}")
 
-            # 4. Create New Dish Object using the model's classmethod
             new_dish = FishDish.create_new(
-                dish_id=new_dish_id, # Provide the generated ID
+                dish_id=new_dish_id,
                 cross_id=parent_dish.cross_id,
                 genotype=parent_dish.genotype,
                 responsible=parent_dish.responsible,
                 dof=parent_dish.dof,
-                fish_count=new_dish_count, # Use calculated count
-                parent_dish_id=parent_dish_id, # Set parent link
-                dish_population_type=population_type, # Set population type
-                # Inherit other relevant fields
+                fish_count=fish_count,
+                parent_dish_id=parent_dish_id,
+                dish_population_type=population_type,
                 species=parent_dish.species,
                 sex=parent_dish.sex,
                 parents=parent_dish.breeding.parents,
                 temperature=parent_dish.enclosure.temperature,
-                light_duration=parent_dish.enclosure.light_cycle.light_duration,
-                dawn_dusk=parent_dish.enclosure.light_cycle.dawn_dusk,
+                light_duration=parent_dish.enclosure.light_cycle.light_duration if parent_dish.enclosure.light_cycle else None,
+                dawn_dusk=parent_dish.enclosure.light_cycle.dawn_dusk if parent_dish.enclosure.light_cycle else None,
                 room=parent_dish.enclosure.room,
-                in_beaker=parent_dish.enclosure.in_beaker,
-                vol_water_total=parent_dish.enclosure.vol_water_total, # Defaulting to parent's volume
-                notes=f"Derived ({population_type}) from {parent_dish_id} on {datetime.now().strftime('%Y%m%d')}.",
-                dish_number=None # Derived dishes don't use dish_number
+                container_type=container_type or parent_dish.enclosure.container_type,
+                vol_water_total=parent_dish.enclosure.vol_water_total,
+                notes=notes or f"Derived ({population_type}) from {parent_dish_id} on {datetime.now().strftime('%Y%m%d')}.",
+                dish_number=None,
             )
 
             # 5. Save the new dish
@@ -591,9 +565,10 @@ class FishDishController:
                     for step in dish.screening_results.screenings:
                         if step.notes:
                             fields_to_check.append(step.notes)
-                        # Also search indicator and criteria
-                        fields_to_check.append(step.indicator_screened)
-                        fields_to_check.append(step.criteria)
+                        # Also search indicators and criteria
+                        fields_to_check.extend(step.indicators_screened)
+                        if step.criteria:
+                            fields_to_check.append(step.criteria)
 
 
                 # Perform search

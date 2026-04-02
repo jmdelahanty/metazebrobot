@@ -47,7 +47,7 @@
 <h3>Step Images</h3>
 {% for s in steps %}
 <details{% if loop.last %} open{% endif %}>
-    <summary>{{ s.screening_datetime }} — {{ s.indicator_screened }}</summary>
+    <summary>{{ s.screening_datetime }} — {{ s.indicators_screened | join(", ") if s.indicators_screened else "pigment" }}</summary>
     <div
         hx-get="/screening/{{ dish.dish_id }}/steps/{{ s.screening_datetime }}/images"
         hx-trigger="revealed"
@@ -89,18 +89,23 @@
 
         <div class="grid">
             <label>
-                Indicator
-                <input type="text" name="indicator_screened"
+                Indicators (comma-separated)
+                <input type="text" name="indicators_screened"
                        value="{{ current_step.indicators | join(', ') if current_step and current_step.indicators else '' }}"
-                       required>
+                       placeholder="e.g. GFP, jRGECO (leave empty for pigment-only)">
             </label>
             <label>
                 Criteria
                 <input type="text" name="criteria"
                        value="{{ current_step.criteria_suggestion if current_step else '' }}"
-                       required>
+                       placeholder="e.g. fluorescence, brightest">
             </label>
         </div>
+
+        <label>
+            <input type="checkbox" name="pigment_screened" value="true">
+            Pigment screened
+        </label>
 
         <div class="grid">
             <label>
@@ -108,8 +113,8 @@
                 <input type="number" name="count_screened_this_step" min="0" required>
             </label>
             <label>
-                Number Positive
-                <input type="number" name="number_positive" min="0" required>
+                Number Kept
+                <input type="number" name="number_kept" min="0" required>
             </label>
         </div>
 
