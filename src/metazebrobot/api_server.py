@@ -428,6 +428,293 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return templates.TemplateResponse(request, "home.html", {})
 
     # ------------------------------------------------------------------
+    # Dish creation (web UI)
+    # ------------------------------------------------------------------
+
+    @app.get("/dishes/new", response_class=HTMLResponse)
+    def new_dish_form(request: Request):
+        """Dish creation form with optional PyRAT cross auto-fill."""
+        # Try to load cross IDs for the datalist
+        crosses = []
+        try:
+            db_path = _require_db_path()
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                rows = conn.execute(
+                    """SELECT c.cross_id,
+       COUNT(d.dish_id) AS total_dishes,
+       COUNT(CASE WHEN d.status = 'active' THEN 1 END) AS active_dishes
+FROM crosses c
+LEFT JOIN dishes d ON d.cross_id = c.cross_id
+GROUP BY c.cross_id
+HAVING active_dishes > 0           -- has active dishes (active)
+    OR total_dishes = 0             -- new cross, no dishes yet
+ORDER BY active_dishes DESC, c.cross_id DESC
+LIMIT 100"""
+                ).fetchall()
+                crosses = [r["cross_id"] for r in rows]
+        except Exception:
+            pass
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        return templates.TemplateResponse(request, "dishes/new_dish.html", {
+            "crosses": crosses,
+            "today": today,
+            "form": {},
+            "genotype": "",
+            "responsible": "",
+            "parents": "",
+        })
+
+    @app.get("/dishes/new/cross-info", response_class=HTMLResponse)
+    def cross_info_partial(request: Request, cross_id: str = Query(...)):
+        """HTMX partial: auto-fill genotype/responsible/parents from PyRAT cross."""
+        genotype = ""
+        responsible = ""
+        parents = ""
+        error_msg = None
+
+        try:
+            # Reuse the existing GET /crosses/{cross_id} logic
+            import requests as http_requests
+            pyrat_base = os.environ.get("PYRAT_API_URL", "")
+            pyrat_token = os.environ.get("PYRAT_API_TOKEN", "")
+
+            if pyrat_base and pyrat_token:
+                resp = http_requests.get(
+                    f"{pyrat_base}/api/v3/tanks/crossings",
+                    params={"crossing_id": cross_id},
+                    headers={"Authorization": f"token {pyrat_token}"},
+                    timeout=5,
+                )
+                if resp.status_code == 200:
+                    items = resp.json()
+                    if items:
+                        cross = items[0] if isinstance(items, list) else items
+                        genotype = cross.get("strain_name") or cross.get("strain_name_with_id", "")
+                        responsible = cross.get("responsible_fullname", "")
+                        parent_tanks = cross.get("parent_tanks", [])
+                        if parent_tanks:
+                            parents = ", ".join(
+                                t.get("location_display", t.get("tank_label", ""))
+                                for t in parent_tanks
+                            )
+                else:
+                    error_msg = f"PyRAT returned {resp.status_code}"
+            else:
+                # No PyRAT configured — try local DB for cross data
+                db_path = _require_db_path()
+                with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                    row = conn.execute(
+                        "SELECT genotype FROM dishes WHERE cross_id = ? LIMIT 1",
+                        (cross_id,),
+                    ).fetchone()
+                    if row:
+                        genotype = row["genotype"] or ""
+        except Exception as e:
+            error_msg = f"Could not fetch cross info: {e}"
+
+        return templates.TemplateResponse(request, "dishes/_cross_info.html", {
+            "genotype": genotype,
+            "responsible": responsible,
+            "parents": parents,
+            "error": error_msg,
+        })
+
+    @app.post("/dishes/new/refresh-crosses", response_class=HTMLResponse)
+    def refresh_crosses_from_pyrat(
+        request: Request,
+        all_crosses: bool = Form(default=False),
+    ):
+        """Fetch recent crosses from PyRAT and update local crosses table."""
+        import keyring
+        import requests as http_requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        base_url = keyring.get_password("pyrat-api", "base_url")
+        client_token = keyring.get_password("pyrat-api", "client_token")
+        user_token = keyring.get_password("pyrat-api", "user_token")
+
+        if not all([base_url, client_token, user_token]):
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": "PyRAT credentials not configured. Set them via the desktop app.",
+                "level": "error",
+            })
+
+        if not base_url.endswith("/"):
+            base_url += "/"
+
+        params = {
+            "l": 50 if not all_crosses else 200,
+            "s": ["date_of_record:desc"],
+            "k": [
+                "crossing_id", "status", "date_of_record",
+                "responsible_fullname", "strain_name", "strain_name_with_id",
+            ],
+        }
+        # Filter by responsible user (same as desktop app)
+        pyrat_user = os.environ.get("PYRAT_USERNAME", "delahantyj")
+        try:
+            user_mapping_path = os.path.expanduser("~/.pyrat_user_mapping.json")
+            if os.path.exists(user_mapping_path):
+                with open(user_mapping_path) as f:
+                    user_map = json.load(f)
+                responsible_id = user_map.get(pyrat_user)
+                if responsible_id:
+                    params["responsible_id"] = responsible_id
+        except Exception:
+            pass  # No filter if mapping unavailable
+
+        # Only fetch recent crosses unless "all" is requested
+        if not all_crosses:
+            cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+            params["date_of_record_from"] = cutoff
+
+        try:
+            resp = http_requests.get(
+                f"{base_url}api/v3/tanks/crossings",
+                auth=(client_token, user_token),
+                headers={"Accept": "application/json"},
+                params=params,
+                verify=False,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                    "message": f"PyRAT returned {resp.status_code}.",
+                    "level": "error",
+                })
+
+            crossings = resp.json()
+            # Upsert into local crosses table
+            with data_manager.get_connection() as conn:
+                for c in crossings:
+                    cid = c.get("crossing_id")
+                    if not cid:
+                        continue
+                    conn.execute("""
+                        INSERT OR REPLACE INTO crosses
+                        (cross_id, cross_status, line_strain, data, updated_at)
+                        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (
+                        str(cid),
+                        c.get("status"),
+                        c.get("strain_name") or c.get("strain_name_with_id"),
+                        json.dumps(c),
+                    ))
+                conn.commit()
+
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": f"Synced {len(crossings)} crosses from PyRAT.",
+                "level": "success",
+            })
+        except Exception as e:
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": f"PyRAT sync failed: {e}",
+                "level": "error",
+            })
+
+    @app.post("/dishes/new", response_class=HTMLResponse)
+    def create_dish_web(
+        request: Request,
+        cross_id: str = Form(...),
+        dish_number: int = Form(...),
+        genotype: str = Form(...),
+        responsible: str = Form(...),
+        dof: str = Form(...),
+        fish_count: int = Form(default=0),
+        species: str = Form(default="Danio rerio"),
+        sex: str = Form(default="unknown"),
+        parents: str = Form(default=""),
+        container_type: str = Form(default="petri_dish"),
+        temperature: float = Form(default=28.5),
+        room: str = Form(default="2E.282"),
+        light_duration: str = Form(default="14:10"),
+        dawn_dusk: str = Form(default="8:00"),
+        vol_water_total: Optional[int] = Form(default=None),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Create a new dish from the web form."""
+        _require_db_path()
+
+        # Convert date format: YYYY-MM-DD → YYYYMMDD
+        dof_formatted = dof.replace("-", "")
+
+        # Parse parents string into list
+        parents_list = [p.strip() for p in parents.split(",") if p.strip()] if parents else []
+
+        success, message, dish = fish_dish_ctrl.create_dish(
+            cross_id=cross_id,
+            dish_number=dish_number,
+            genotype=genotype,
+            responsible=responsible,
+            dof=dof_formatted,
+            fish_count=fish_count,
+            species=species,
+            sex=sex,
+            parents=parents_list,
+            temperature=temperature,
+            light_duration=light_duration,
+            dawn_dusk=dawn_dusk,
+            room=room,
+            container_type=container_type,
+            vol_water_total=vol_water_total,
+            notes=notes or None,
+        )
+
+        if success:
+            return RedirectResponse(
+                url=f"/screening/{message}",  # message is the dish_id on success
+                status_code=303,
+            )
+
+        # Re-render form with error
+        crosses = []
+        try:
+            db_path = _require_db_path()
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                rows = conn.execute(
+                    """SELECT c.cross_id,
+       COUNT(d.dish_id) AS total_dishes,
+       COUNT(CASE WHEN d.status = 'active' THEN 1 END) AS active_dishes
+FROM crosses c
+LEFT JOIN dishes d ON d.cross_id = c.cross_id
+GROUP BY c.cross_id
+HAVING active_dishes > 0           -- has active dishes (active)
+    OR total_dishes = 0             -- new cross, no dishes yet
+ORDER BY active_dishes DESC, c.cross_id DESC
+LIMIT 100"""
+                ).fetchall()
+                crosses = [r["cross_id"] for r in rows]
+        except Exception:
+            pass
+
+        return templates.TemplateResponse(request, "dishes/new_dish.html", {
+            "crosses": crosses,
+            "today": datetime.now().strftime("%Y-%m-%d"),
+            "form": {
+                "cross_id": cross_id,
+                "dish_number": dish_number,
+                "dof": dof,
+                "fish_count": fish_count,
+                "species": species,
+                "sex": sex,
+                "container_type": container_type,
+                "temperature": temperature,
+                "room": room,
+                "light_duration": light_duration,
+                "dawn_dusk": dawn_dusk,
+                "vol_water_total": vol_water_total,
+                "notes": notes,
+            },
+            "genotype": genotype,
+            "responsible": responsible,
+            "parents": parents,
+            "flash_message": message,
+            "flash_level": "error",
+        })
+
+    # ------------------------------------------------------------------
     # JSON API — health + dishes
     # ------------------------------------------------------------------
 

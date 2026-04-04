@@ -1,0 +1,18 @@
+{# HTMX partial: auto-filled fields from PyRAT cross data #}
+{% if error %}
+<small style="color: var(--pico-del-color)">{{ error }}</small>
+{% endif %}
+<div class="grid">
+    <label>
+        Genotype
+        <input type="text" name="genotype" value="{{ genotype or '' }}" required>
+    </label>
+    <label>
+        Responsible
+        <input type="text" name="responsible" value="{{ responsible or '' }}" required>
+    </label>
+</div>
+<label>
+    Parents <small>(comma-separated)</small>
+    <input type="text" name="parents" value="{{ parents or '' }}">
+</label>

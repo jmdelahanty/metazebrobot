@@ -7,7 +7,10 @@
     <p>Log feeding, water changes, and mortality for active dishes.</p>
 </hgroup>
 
-<input type="text" id="scan-input" data-navigate="/care/" placeholder="Scan barcode or type dish ID..." autofocus>
+<div class="grid">
+    <input type="text" id="scan-input" data-navigate="/care/" placeholder="Scan barcode or type dish ID..." autofocus>
+    <a href="/dishes/new" role="button" class="outline" style="white-space:nowrap">New Dish</a>
+</div>
 
 {% if dishes %}
 <figure>

@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}New Dish{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Create New Dish</h2>
+    <p>Register a new dish from a PyRAT crossing or manual entry.</p>
+</hgroup>
+
+{% if flash_message is defined and flash_message %}
+<div class="flash flash-{{ flash_level }}" role="alert">
+    {{ flash_message }}
+</div>
+{% endif %}
+
+<div id="pyrat-sync-status"></div>
+<details>
+    <summary><strong>Refresh Crosses from PyRAT</strong></summary>
+    <form hx-post="/dishes/new/refresh-crosses" hx-target="#pyrat-sync-status" hx-swap="innerHTML">
+        <label>
+            <input type="checkbox" name="all_crosses" value="true">
+            Fetch all crosses (not just last 30 days)
+        </label>
+        <button type="submit" class="outline secondary">Sync from PyRAT</button>
+    </form>
+    <small>After syncing, reload the page to see updated crosses in the dropdown.</small>
+</details>
+
+<form method="post" action="/dishes/new">
+    {# Cross ID with datalist autocomplete #}
+    <div class="grid">
+        <label>
+            Cross ID
+            <input type="text" name="cross_id" list="cross-list"
+                   value="{{ form.cross_id or '' }}" required
+                   hx-get="/dishes/new/cross-info"
+                   hx-trigger="change"
+                   hx-target="#cross-info"
+                   hx-include="[name='cross_id']">
+            <datalist id="cross-list">
+                {% for c in crosses %}
+                <option value="{{ c }}">
+                {% endfor %}
+            </datalist>
+        </label>
+        <label>
+            Dish Number
+            <input type="number" name="dish_number" min="1" value="{{ form.dish_number or 1 }}" required>
+        </label>
+    </div>
+
+    {# Cross-dependent fields (auto-filled via HTMX or manual) #}
+    <div id="cross-info">
+        {% include "dishes/_cross_info.html" %}
+    </div>
+
+    {# Dish details #}
+    <div class="grid">
+        <label>
+            Date of Fertilization
+            <input type="date" name="dof" value="{{ form.dof or today }}" required>
+        </label>
+        <label>
+            Initial Fish Count
+            <input type="number" name="fish_count" min="0" max="1000" value="{{ form.fish_count or 0 }}">
+        </label>
+    </div>
+
+    <div class="grid">
+        <label>
+            Species
+            <input type="text" name="species" value="{{ form.species or 'Danio rerio' }}">
+        </label>
+        <label>
+            Sex
+            <select name="sex">
+                <option value="unknown"{% if not form.sex or form.sex == 'unknown' %} selected{% endif %}>Unknown</option>
+                <option value="M"{% if form.sex == 'M' %} selected{% endif %}>Male</option>
+                <option value="F"{% if form.sex == 'F' %} selected{% endif %}>Female</option>
+            </select>
+        </label>
+    </div>
+
+    {# Enclosure #}
+    <details>
+        <summary><strong>Enclosure Settings</strong></summary>
+        <div class="grid">
+            <label>
+                Container Type
+                <select name="container_type">
+                    {% for ct in ["petri_dish", "beaker", "well_plate", "tank"] %}
+                    <option value="{{ ct }}"{% if form.container_type == ct %} selected{% endif %}>{{ ct | replace("_", " ") }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Temperature (&deg;C)
+                <input type="number" name="temperature" min="18" max="30" step="0.5" value="{{ form.temperature or 28.5 }}">
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                Room
+                <input type="text" name="room" value="{{ form.room or '2E.282' }}">
+            </label>
+            <label>
+                Vol Water (mL)
+                <input type="number" name="vol_water_total" min="0" value="{{ form.vol_water_total or '' }}">
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                Light Duration
+                <input type="text" name="light_duration" value="{{ form.light_duration or '14:10' }}">
+            </label>
+            <label>
+                Dawn/Dusk
+                <input type="text" name="dawn_dusk" value="{{ form.dawn_dusk or '8:00' }}">
+            </label>
+        </div>
+    </details>
+
+    <label>
+        Notes
+        <textarea name="notes" rows="2">{{ form.notes or '' }}</textarea>
+    </label>
+
+    <button type="submit">Create Dish</button>
+</form>
+
+<p><a href="/screening/">&larr; Screening</a> | <a href="/care/">Care</a> | <a href="/">Home</a></p>
+{% endblock %}

@@ -535,6 +535,71 @@ class TestDailyCare:
 # -------------------------------------------------------------------
 
 
+class TestDishCreation:
+    """Web dish creation form."""
+
+    def test_new_dish_form_renders(self, client):
+        resp = client.get("/dishes/new")
+        assert resp.status_code == 200
+        assert "Create New Dish" in resp.text
+
+    def test_create_dish_success(self, client):
+        resp = client.post(
+            "/dishes/new",
+            data={
+                "cross_id": "TEST_CROSS",
+                "dish_number": 1,
+                "genotype": "Tg(elavl3:GCaMP6s)",
+                "responsible": "test-user",
+                "dof": "2026-03-27",
+                "fish_count": 10,
+                "species": "Danio rerio",
+                "sex": "unknown",
+                "container_type": "petri_dish",
+                "temperature": 28.5,
+                "room": "2E.282",
+                "light_duration": "14:10",
+                "dawn_dusk": "8:00",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "/screening/TEST_CROSS_1" in resp.headers["location"]
+
+    def test_create_dish_duplicate(self, client):
+        # Create first
+        client.post(
+            "/dishes/new",
+            data={
+                "cross_id": "DUP_CROSS",
+                "dish_number": 1,
+                "genotype": "wt",
+                "responsible": "test",
+                "dof": "2026-03-27",
+            },
+            follow_redirects=False,
+        )
+        # Try duplicate
+        resp = client.post(
+            "/dishes/new",
+            data={
+                "cross_id": "DUP_CROSS",
+                "dish_number": 1,
+                "genotype": "wt",
+                "responsible": "test",
+                "dof": "2026-03-27",
+            },
+        )
+        assert resp.status_code == 200
+        assert "already exists" in resp.text.lower()
+
+    def test_cross_info_partial(self, client):
+        resp = client.get("/dishes/new/cross-info?cross_id=NO_SUCH_CROSS")
+        assert resp.status_code == 200
+        # Should render the partial with empty fields (no PyRAT configured in tests)
+        assert "Genotype" in resp.text
+
+
 class TestDishLabel:
     """GET /dishes/{dish_id}/label — PNG label with QR code."""
 

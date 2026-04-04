@@ -4,7 +4,10 @@
 {% block content %}
 <h2>Active Dishes</h2>
 
-<input type="text" id="scan-input" data-navigate="/screening/" placeholder="Scan barcode or type dish ID..." autofocus>
+<div class="grid">
+    <input type="text" id="scan-input" data-navigate="/screening/" placeholder="Scan barcode or type dish ID..." autofocus>
+    <a href="/dishes/new" role="button" class="outline" style="white-space:nowrap">New Dish</a>
+</div>
 
 {% if dishes %}
 <figure>
