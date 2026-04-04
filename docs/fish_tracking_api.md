@@ -342,6 +342,43 @@ query the database directly or use the file paths from the gallery.
 
 ---
 
+### Plate map visualization
+
+```
+GET /dishes/{dish_id}/plate-map
+```
+
+HTMX partial. For well plates, renders a CSS grid with occupied wells (green)
+and fish labels. For open containers, renders a simple occupant list.
+Includes an "Unassigned fish" section for fish not assigned to any unit.
+
+---
+
+### Dish labels (QR code)
+
+```
+GET /dishes/{dish_id}/label
+```
+
+Returns a PNG image (62x29mm at 300 DPI) with dish ID, genotype, DOF,
+fish count, and a QR code encoding the dish_id. Designed for label
+printers (Brother QL series) or browser printing.
+
+---
+
+### Transgene data
+
+The `dish_transgenes` table stores parsed promoter/reporter/fluorophore
+data for each dish. Auto-populated when a dish is saved.
+
+Filter dishes by promoter:
+
+```
+GET /dishes?promoter=elavl3
+```
+
+---
+
 ## Acquisition workflow
 
 ### Path A — fish already registered

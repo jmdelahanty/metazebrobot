@@ -156,17 +156,17 @@ position) for bench use — the UUID is the real identity.
 
 ---
 
-## 6. Remaining work
+## 6. Completed since initial design
 
-### Near-term
+- [x] Automated tests for `POST /screening/{dish_id}/split`
+- [x] Visual plate map (CSS grid on fish list page)
+- [x] mapzebrain atlas reference images on screening form
+- [x] Normalized `dish_transgenes` table with fuzzy protocol matching
+- [x] Daily care web form (`/care/`)
+- [x] Dish label generation with QR codes
+- [x] In-browser guided tour (Driver.js)
+- [x] Home page
 
-- [x] Add automated tests for `POST /screening/{dish_id}/split`
-- [ ] Coordinate with Citrus on identity assignment API calls
-- [ ] Define H5 snapshot schema_version=2 format (per-fish metadata)
+## 7. Remaining work
 
-### Future
-
-- [ ] Design `POST /dishes/{dish_id}/fish/place` batch endpoint
-  (register N fish + create wells + assign in one call)
-- [ ] Optional automatic well creation when splitting into well_plate
-- [ ] Palette integration: read-only session count display on fish pages
+See `docs/next_steps.md` for the full list.

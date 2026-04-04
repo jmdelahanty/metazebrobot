@@ -161,27 +161,100 @@ SQLite in WAL mode allows safe concurrent access. Readers never block writers an
 
 ---
 
-## Files to Create
+## Phase 4: Atlas, Transgenes, and Labels
+
+### mapzebrain Atlas Reference Images
+
+- [x] Fetch + cache mapzebrain markers catalog (738 lines) on startup
+- [x] `lookup_mapzebrain_lines()` matches genotype promoters to atlas entries
+- [x] "Atlas Reference" section on screening form with dorsal-view brain images
+- [x] Offline fallback: "Could not load catalog" message when unavailable
+
+### Normalized Transgenes
+
+- [x] `dish_transgenes` table (promoter, reporter, fluorophore, per dish)
+- [x] `parse_genotype()` extracts structured transgene data from genotype strings
+- [x] Auto-populated on dish save, one-time backfill on startup
+- [x] Fuzzy protocol matching (promoter-set comparison when exact string fails)
+- [x] `GET /dishes?promoter=elavl3` filter
+
+### Labels and Barcode Scanning
+
+- [x] `GET /dishes/{dish_id}/label` — PNG label (62x29mm) with QR code encoding dish_id
+- [x] Scan-to-navigate `<input data-navigate="/care/">` on dish list pages
+- [x] "Print Label" button on care and screening forms
+
+---
+
+## Phase 5: Daily Care
+
+- [x] `GET /care/` — dish list with last-check date, red highlight for unchecked
+- [x] `GET /care/{dish_id}` — adaptive form: dish-level or per-unit checks
+- [x] `POST /care/{dish_id}/check` — dish-level quality check
+- [x] `POST /care/{dish_id}/unit-checks` — batch per-unit checks
+- [x] `GET /care/{dish_id}/checks-table` — HTMX partial for check history
+- [x] "Apply to all" toggles for fed/water on per-unit form
+
+---
+
+## Phase 6: Home Page and Guided Tour
+
+### Home Page
+
+- [x] `GET /` — landing page with cards for Screening, Care, Fish
+- [x] "Start Guided Tour" button
+
+### In-Browser Guided Tour (Driver.js)
+
+- [x] Vendor Driver.js v1.4.0 (MIT, ~7KB gzipped)
+- [x] `POST /walkthrough/setup` — creates TOUR_ test data (dish, screening, fish, wells)
+- [x] `POST /walkthrough/cleanup` — sweeps all TOUR_ dishes from database
+- [x] Multi-page tour via localStorage step tracking
+- [x] Click-to-advance steps, optional steps, custom button labels
+- [x] Stale data cleanup on page load and tour start
+
+---
+
+## Files Created
 
 ```
 src/metazebrobot/static/
   htmx.min.js
   pico.min.css
+  driver.js.iife.js          (Phase 6)
+  driver.css                 (Phase 6)
+  walkthrough.js             (Phase 6)
 
 src/metazebrobot/templates/
   base.html
+  home.html                  (Phase 6)
   screening/
     dish_list.html
     screening_form.html
     _steps_table.html
     _flash_message.html
     _image_gallery.html      (Phase 2)
+  care/
+    dish_list.html           (Phase 5)
+    care_form.html           (Phase 5)
+    _checks_table.html       (Phase 5)
+  fish/
+    fish_list.html
+    _fish_table.html
+    _plate_map.html          (Phase 4)
+    _image_gallery.html
+    _dish_image_gallery.html
+    fish_index.html
+    fish_cross.html
+
+src/metazebrobot/utils/
+  label_generator.py         (Phase 4)
 ```
 
-## Files to Modify
+## Files Modified
 
 ```
-src/metazebrobot/api_server.py    -- Jinja2, static mounts, write endpoints, WAL mode, lifespan init
-src/metazebrobot/data/data_manager.py  -- screening_step_images table, image methods, WAL pragma
-pyproject.toml                    -- explicit jinja2 dep, package data for templates/static
+src/metazebrobot/api_server.py       -- all web endpoints, lifespan, walkthrough setup/cleanup
+src/metazebrobot/data/data_manager.py -- screening, care, transgenes, mapzebrain, housing queries
+pyproject.toml                       -- jinja2, qrcode dependencies, package data
 ```
