@@ -27,11 +27,21 @@
   }
 
   var STEPS = [
+    // -- Home page --
+    {
+      page: "/",
+      element: null,
+      title: "Welcome to MetaZebrobot!",
+      description: "This tour walks you through the full workflow: screening, daily care, fish tracking, plate maps, and labels. Test data has been created for you.",
+      waitFor: "next",
+      navigateTo: "/screening/",
+      doneBtnText: "Begin Tour &rarr;",
+    },
     // -- Screening dish list --
     {
       page: "/screening/",
       element: "#scan-input",
-      title: "Welcome to MetaZebrobot!",
+      title: "Scan Input",
       description: "This input lets you scan a barcode or type a dish ID. We've pre-filled the first dish — press Enter to navigate to it, or click Next to continue the tour.",
       waitFor: "next",
       onShow: function () {
@@ -72,6 +82,18 @@
       description: "Expression pattern images from the mapzebrain atlas are shown automatically for recognised transgenic lines.",
       waitFor: "next",
       optional: true,
+      onShow: function () {
+        var el = document.querySelector("details.protocol-box:nth-of-type(2)");
+        if (el && !el.open) {
+          el.open = true;
+          // Let the DOM reflow, then refresh the Driver.js overlay
+          setTimeout(function () { if (window._activeTourDriver) window._activeTourDriver.refresh(); }, 100);
+        }
+      },
+      onLeave: function () {
+        var el = document.querySelector("details.protocol-box:nth-of-type(2)");
+        if (el) el.open = false;
+      },
     },
     {
       page: "/screening/*",
@@ -140,7 +162,22 @@
       description: "Click 'Fish' to manage individual fish, housing units, and see the plate map.",
       waitFor: "click",
     },
-    // -- Fish list --
+    // -- Fish index --
+    {
+      page: "/fish/",
+      element: null,
+      title: "Fish Index",
+      description: "This page lists all crosses that have registered fish. Let's look at the tour dish's fish and plate map.",
+      waitFor: "next",
+      doneBtnText: "Let's Check &rarr;",
+      getNavigateTo: function () {
+        try {
+          var data = JSON.parse(localStorage.getItem(KEY_DATA) || "{}");
+          return data.pos_dish ? "/dishes/" + data.pos_dish + "/fish/" : "/screening/";
+        } catch (e) { return "/screening/"; }
+      },
+    },
+    // -- Fish list (specific dish) --
     {
       page: "/dishes/*/fish/",
       element: "#plate-map",
@@ -193,18 +230,17 @@
   }
 
   function stopTour() {
-    // Cleanup test data if any
+    // Always call cleanup — even without localStorage data, the server
+    // sweeps any TOUR_ dishes left in the database from crashed tours.
     var dataStr = localStorage.getItem(KEY_DATA);
-    if (dataStr) {
-      try {
-        var data = JSON.parse(dataStr);
-        var xhr = new XMLHttpRequest();
-        xhr.open("POST", "/walkthrough/cleanup", false); // synchronous so it finishes before nav
-        xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.send(JSON.stringify(data));
-      } catch (e) {
-        console.warn("Walkthrough cleanup failed:", e);
-      }
+    var payload = dataStr || "{}";
+    try {
+      navigator.sendBeacon(
+        "/walkthrough/cleanup",
+        new Blob([payload], { type: "application/json" })
+      );
+    } catch (e) {
+      console.warn("Walkthrough cleanup failed:", e);
     }
     localStorage.removeItem(KEY_ACTIVE);
     localStorage.removeItem(KEY_STEP);
@@ -212,6 +248,9 @@
   }
 
   function startTour() {
+    // Clean up any stale data from a previous tour (e.g. tab was closed mid-tour)
+    stopTour();
+
     // Setup test data via API
     var xhr = new XMLHttpRequest();
     xhr.open("POST", "/walkthrough/setup", false); // synchronous
@@ -223,7 +262,11 @@
     }
     localStorage.setItem(KEY_ACTIVE, "true");
     localStorage.setItem(KEY_STEP, "0");
-    window.location.href = "/screening/";
+    if (window.location.pathname === "/") {
+      runTour();
+    } else {
+      window.location.href = "/";
+    }
   }
 
   // ── Tour runner ────────────────────────────────────────────────
@@ -253,9 +296,37 @@
           break;
         }
       }
-      // Still doesn't match — navigate
+      // Still doesn't match — show a floating hint with a real link
       if (!pathMatches(step.page, currentPath)) {
-        return; // Don't navigate automatically, wait for user
+        var resumeUrl = step.page;
+        // Replace wildcards with real IDs from tour data
+        var dataStr = localStorage.getItem(KEY_DATA);
+        if (dataStr) {
+          try {
+            var data = JSON.parse(dataStr);
+            var id = data.pos_dish || data.parent_dish || "";
+            resumeUrl = resumeUrl.replace("*", id);
+          } catch (e) {}
+        }
+        // Fall back to a known safe page if still has wildcards
+        if (resumeUrl.includes("*")) resumeUrl = "/screening/";
+
+        var hintDriver = window.driver.js.driver({
+          showProgress: false,
+          showButtons: ["close"],
+          steps: [{
+            popover: {
+              title: "Tour in progress",
+              description: 'The next tour step is on a different page. <a href="' + resumeUrl + '">Click here to continue</a>, or close to end the tour.',
+            },
+          }],
+          onCloseClick: function () {
+            stopTour();
+            hintDriver.destroy();
+          },
+        });
+        hintDriver.drive();
+        return;
       }
     }
 
@@ -283,8 +354,14 @@
       if (ps.def.element) {
         dStep.element = ps.def.element;
       }
+      if (ps.def.doneBtnText) {
+        dStep.popover.doneBtnText = ps.def.doneBtnText;
+      }
       if (ps.def.onShow) {
         dStep.onHighlighted = ps.def.onShow;
+      }
+      if (ps.def.onLeave) {
+        dStep.onDeselected = ps.def.onLeave;
       }
       return dStep;
     });
@@ -320,9 +397,10 @@
 
         setGlobalStep(nextGlobal);
 
-        if (ps.def.navigateTo) {
+        var navTo = ps.def.navigateTo || (ps.def.getNavigateTo && ps.def.getNavigateTo());
+        if (navTo) {
           driverObj.destroy();
-          window.location.href = ps.def.navigateTo;
+          window.location.href = navTo;
           return;
         }
 
@@ -352,6 +430,9 @@
       }
     });
 
+    // Store globally so onShow callbacks can call refresh()
+    window._activeTourDriver = driverObj;
+
     // Start the driver
     driverObj.drive();
   }
@@ -361,11 +442,23 @@
   // Expose startTour globally for the nav button
   window.startWalkthrough = startTour;
 
-  // Run tour on page load if active
   document.addEventListener("DOMContentLoaded", function () {
+    // Clean up stale tour data (tour not active but data remains — tab was closed mid-tour)
+    if (!isActive() && localStorage.getItem(KEY_DATA)) {
+      stopTour();
+    }
+
+    // Run tour on page load if active
     if (isActive()) {
       // Small delay to let HTMX partials load
       setTimeout(runTour, 300);
     }
   });
+
+  // Note: no beforeunload handler — it fires on every page navigation,
+  // not just tab close, and would destroy tour data mid-tour.
+  // Stale data is cleaned up by:
+  //   1. stopTour() when the user explicitly ends the tour
+  //   2. startTour() cleaning up before creating new data
+  //   3. DOMContentLoaded detecting orphaned data on next visit
 })();

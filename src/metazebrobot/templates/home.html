@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}MetaZebrobot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>MetaZebrobot</h2>
+    <p>Zebrafish colony management and tracking</p>
+</hgroup>
+
+<div class="grid">
+    <article>
+        <header><strong>Screening</strong></header>
+        <p>Log screening steps, upload images, create derived dishes, and view atlas reference patterns.</p>
+        <a href="/screening/" role="button">Open Screening</a>
+    </article>
+    <article>
+        <header><strong>Daily Care</strong></header>
+        <p>Log feeding, water changes, and mortality for active dishes and housing units.</p>
+        <a href="/care/" role="button">Open Care</a>
+    </article>
+    <article>
+        <header><strong>Fish Tracking</strong></header>
+        <p>Register individual fish, manage housing units, view plate maps, and print labels.</p>
+        <a href="/fish/" role="button">Open Fish</a>
+    </article>
+</div>
+
+<div style="text-align: center; margin-top: 2rem;">
+    <button class="outline" onclick="startWalkthrough()">Start Guided Tour</button>
+    <p><small>New here? The guided tour walks you through the full workflow with sample data.</small></p>
+</div>
+{% endblock %}

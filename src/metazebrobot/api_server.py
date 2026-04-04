@@ -410,6 +410,15 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return proto, None
 
     # ------------------------------------------------------------------
+    # Home page
+    # ------------------------------------------------------------------
+
+    @app.get("/", response_class=HTMLResponse)
+    def home_page(request: Request):
+        """Landing page."""
+        return templates.TemplateResponse(request, "home.html", {})
+
+    # ------------------------------------------------------------------
     # JSON API — health + dishes
     # ------------------------------------------------------------------
 
@@ -1571,11 +1580,28 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         }
 
     @app.post("/walkthrough/cleanup")
-    def walkthrough_cleanup(body: Dict[str, Any] = {}) -> Dict[str, str]:
+    def walkthrough_cleanup(body: Dict[str, Any] = {}) -> Dict[str, Any]:
         """Remove all test data created by walkthrough/setup."""
         _require_db_path()
-        dish_ids = body.get("dish_ids", [])
+        # Only allow deletion of tour-prefixed dishes to prevent misuse
+        dish_ids = [d for d in body.get("dish_ids", []) if d.startswith("TOUR_")]
         fish_ids = body.get("fish_ids", [])
+
+        # Also find any other TOUR_ dishes in the database (stale from previous tours)
+        with data_manager.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT dish_id FROM dishes WHERE dish_id LIKE 'TOUR_%'"
+            ).fetchall()
+            for row in rows:
+                if row["dish_id"] not in dish_ids:
+                    dish_ids.append(row["dish_id"])
+            # Find fish belonging to any TOUR_ dishes
+            fish_rows = conn.execute(
+                "SELECT fish_id FROM fish_subjects WHERE dish_id LIKE 'TOUR_%'"
+            ).fetchall()
+            for row in fish_rows:
+                if row["fish_id"] not in fish_ids:
+                    fish_ids.append(row["fish_id"])
 
         # Delete fish via data_manager (cascades to images, occupancy)
         for fid in fish_ids:
