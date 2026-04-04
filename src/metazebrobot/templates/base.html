@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}MetaZebrobot{% endblock %}</title>
     <link rel="stylesheet" href="/static/pico.min.css">
+    <link rel="stylesheet" href="/static/driver.css">
     <script src="/static/htmx.min.js"></script>
+    <script src="/static/driver.js.iife.js"></script>
+    <script src="/static/walkthrough.js"></script>
     <style>
         .flash { padding: 0.75rem 1rem; border-radius: var(--pico-border-radius); margin-bottom: 1rem; }
         .flash-success { background: var(--pico-ins-color); }
@@ -49,10 +52,23 @@
             <li><a href="/care/">Care</a></li>
             <li><a href="/fish/">Fish</a></li>
             <li><a href="/health">API Health</a></li>
+            <li><a href="#" onclick="startWalkthrough(); return false;" style="font-size:0.85rem">Tour</a></li>
         </ul>
     </nav>
     <main class="container">
         {% block content %}{% endblock %}
     </main>
+    <script>
+    document.addEventListener("DOMContentLoaded", function() {
+        var el = document.getElementById("scan-input");
+        if (el) {
+            el.addEventListener("keydown", function(e) {
+                if (e.key === "Enter" && this.value.trim()) {
+                    window.location.href = this.dataset.navigate + encodeURIComponent(this.value.trim());
+                }
+            });
+        }
+    });
+    </script>
 </body>
 </html>

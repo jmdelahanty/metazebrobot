@@ -8,7 +8,7 @@ import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -600,22 +600,31 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     @app.get("/screening/", response_class=HTMLResponse)
     def screening_dish_list(request: Request):
         """Dish picker — show active dishes with screening info."""
-        all_dishes = fish_dish_ctrl.get_all_dishes(include_inactive=False)
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            rows = conn.execute("""
+                SELECT d.dish_id, d.genotype, d.dof, d.fish_count, d.responsible,
+                       d.screening_final_positive_count,
+                       COUNT(s.id) AS step_count
+                FROM dishes d
+                LEFT JOIN screening_steps s ON s.dish_id = d.dish_id
+                WHERE d.status = 'active'
+                GROUP BY d.dish_id
+                ORDER BY d.date_created DESC
+            """).fetchall()
         dishes = []
-        for dish_id, dish in sorted(all_dishes.items()):
-            ref_date = _last_screening_date(dish)
-            dpf = _dpf_from_dof(dish.dof, ref_date)
-            step_count = len(dish.screening_results.screenings) if dish.screening_results else 0
-            finalized = dish.screening_results.final_positive_count is not None if dish.screening_results else False
+        for row in rows:
+            d = _row_to_dict(row)
+            dpf = _dpf_from_dof(d.get("dof") or "", None)
             dishes.append({
-                "dish_id": dish_id,
-                "genotype": dish.genotype,
-                "dof": dish.dof,
+                "dish_id": d["dish_id"],
+                "genotype": d.get("genotype"),
+                "dof": d.get("dof"),
                 "dpf": dpf,
-                "fish_count": dish.fish_count,
-                "responsible": dish.responsible,
-                "step_count": step_count,
-                "finalized": finalized,
+                "fish_count": d.get("fish_count"),
+                "responsible": d.get("responsible"),
+                "step_count": d.get("step_count", 0),
+                "finalized": d.get("screening_final_positive_count") is not None,
             })
         return templates.TemplateResponse(request, "screening/dish_list.html", {
             "dishes": dishes,
@@ -802,9 +811,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             rows = conn.execute("""
                 SELECT d.dish_id, d.genotype, d.fish_count, d.container_type,
-                       (SELECT MAX(check_time) FROM quality_checks q WHERE q.dish_id = d.dish_id) AS last_check
+                       MAX(q.check_time) AS last_check
                 FROM dishes d
+                LEFT JOIN quality_checks q ON q.dish_id = d.dish_id
                 WHERE d.status = 'active'
+                GROUP BY d.dish_id
                 ORDER BY d.date_created DESC
             """).fetchall()
         dishes = []
@@ -1455,6 +1466,152 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "fish_id": fish_id,
             "images": images,
         })
+
+    # ------------------------------------------------------------------
+    # In-browser walkthrough setup / cleanup
+    # ------------------------------------------------------------------
+
+    @app.post("/walkthrough/setup")
+    def walkthrough_setup() -> Dict[str, Any]:
+        """Create test data for the in-browser guided tour.
+
+        Creates a dish, screening step, derived dishes, fish, housing units,
+        and a care check.  Returns all created IDs for later cleanup.
+        """
+        db_path = _require_db_path()
+
+        # Find a cross_id to attach to
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            row = conn.execute(
+                "SELECT cross_id FROM dishes WHERE cross_id IS NOT NULL LIMIT 1"
+            ).fetchone()
+        cross_id = row["cross_id"] if row else "TOUR_CROSS"
+
+        dish_id = f"TOUR_{cross_id}_1"
+
+        # 1. Create parent dish
+        with data_manager.get_connection() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO dishes
+                   (dish_id, data, genotype, species, cross_id, status,
+                    dish_population_type, date_created, dof, responsible,
+                    fish_count, container_type, room)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    dish_id,
+                    json.dumps({"dish_id": dish_id, "fish_count": 20}),
+                    "Tg(gfap:TRPV1-T2A-GFP);Tg(elavl3:jRGECO1b)",
+                    "Danio rerio",
+                    cross_id,
+                    "active",
+                    "primary",
+                    datetime.now().strftime("%Y%m%d"),
+                    (datetime.now() - timedelta(days=5)).strftime("%Y%m%d"),
+                    "tour",
+                    20,
+                    "petri_dish",
+                    "2E.282",
+                ),
+            )
+            conn.commit()
+
+        dish_ids = [dish_id]
+
+        # 2. Screening step
+        step_data = {
+            "screening_datetime": datetime.now().strftime("%Y%m%dT%H:%M:%S"),
+            "dpf_screened": 5,
+            "indicators_screened": ["gfap:TRPV1-T2A-GFP"],
+            "pigment_screened": False,
+            "criteria": "Check pan-glial expression",
+            "count_screened_this_step": 20,
+            "number_kept": 12,
+            "number_removed_negative": 8,
+            "tricaine_used": True,
+            "notes": "Tour: DPF 5 gfap screen",
+        }
+        fish_dish_ctrl.add_screening_step(dish_id, step_data)
+
+        # 3. Derived dish (positive → well plate)
+        success, pos_id_or_msg, _ = fish_dish_ctrl.create_derived_dish(
+            parent_dish_id=dish_id,
+            population_type="positive_screened",
+            fish_count=12,
+            container_type="well_plate",
+            notes="Tour: kept fish moved to well plate",
+        )
+        pos_dish = pos_id_or_msg if success else None
+        if pos_dish:
+            dish_ids.append(pos_dish)
+
+        # 4. Register fish + housing units on derived dish
+        fish_ids = []
+        if pos_dish:
+            for i in range(1, 5):
+                fid = data_manager.create_fish_subject(
+                    dish_id=pos_dish,
+                    subject_label=f"wt-{i:02d}",
+                    genotype="Tg(gfap:TRPV1-T2A-GFP);Tg(elavl3:jRGECO1b)",
+                    species="Danio rerio",
+                )
+                if fid:
+                    fish_ids.append(fid)
+
+            unit_ids = data_manager.create_housing_units_for_dish(
+                dish_id=pos_dish, unit_kind="well", count=4, label_format="well_plate",
+            )
+            for fid, uid in zip(fish_ids, unit_ids):
+                data_manager.assign_fish_to_unit(fid, uid, reason="initial")
+
+        return {
+            "dish_ids": dish_ids,
+            "fish_ids": fish_ids,
+            "pos_dish": pos_dish,
+            "parent_dish": dish_id,
+        }
+
+    @app.post("/walkthrough/cleanup")
+    def walkthrough_cleanup(body: Dict[str, Any] = {}) -> Dict[str, str]:
+        """Remove all test data created by walkthrough/setup."""
+        _require_db_path()
+        dish_ids = body.get("dish_ids", [])
+        fish_ids = body.get("fish_ids", [])
+
+        # Delete fish via data_manager (cascades to images, occupancy)
+        for fid in fish_ids:
+            data_manager.delete_fish_subject(fid)
+
+        # SQL cleanup for remaining data
+        with data_manager.get_connection() as conn:
+            for did in dish_ids:
+                conn.execute(
+                    "DELETE FROM housing_unit_occupancy WHERE unit_id IN "
+                    "(SELECT unit_id FROM housing_units WHERE dish_id = ?)", (did,))
+                conn.execute(
+                    "DELETE FROM housing_unit_checks WHERE unit_id IN "
+                    "(SELECT unit_id FROM housing_units WHERE dish_id = ?)", (did,))
+                conn.execute("DELETE FROM housing_units WHERE dish_id = ?", (did,))
+                conn.execute("DELETE FROM dish_images WHERE dish_id = ?", (did,))
+                conn.execute("DELETE FROM quality_checks WHERE dish_id = ?", (did,))
+                conn.execute("DELETE FROM dish_transgenes WHERE dish_id = ?", (did,))
+                conn.execute("DELETE FROM screening_step_images WHERE dish_id = ?", (did,))
+                conn.execute("DELETE FROM screening_steps WHERE dish_id = ?", (did,))
+                conn.execute("DELETE FROM dishes WHERE dish_id = ?", (did,))
+            conn.commit()
+
+        # Clean up image files
+        db_dir = Path(_require_db_path()).parent
+        for subdir in ("dish_images", "fish_images", "screening_images"):
+            img_dir = db_dir / subdir
+            if img_dir.exists():
+                for did in dish_ids:
+                    d = img_dir / did
+                    if d.exists():
+                        for f in d.iterdir():
+                            f.unlink()
+                        d.rmdir()
+
+        return {"status": "ok", "cleaned": len(dish_ids)}
 
     # ------------------------------------------------------------------
     # Dish labels (QR code + metadata)

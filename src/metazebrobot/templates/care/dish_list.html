@@ -7,14 +7,7 @@
     <p>Log feeding, water changes, and mortality for active dishes.</p>
 </hgroup>
 
-<input type="text" id="scan-input" placeholder="Scan barcode or type dish ID..." autofocus>
-<script>
-document.getElementById('scan-input').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && this.value.trim()) {
-        window.location.href = '/care/' + encodeURIComponent(this.value.trim());
-    }
-});
-</script>
+<input type="text" id="scan-input" data-navigate="/care/" placeholder="Scan barcode or type dish ID..." autofocus>
 
 {% if dishes %}
 <figure>
