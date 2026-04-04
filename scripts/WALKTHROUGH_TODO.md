@@ -15,6 +15,9 @@ A guided, interactive script (`scripts/walkthrough.py`) that exercises the full 
 - [ ] Pick a real cross_id from the live DB (GET /crosses)
 - [ ] Create a test dish (`E2E_TEST_{cross_id}_1`) linked to that cross
 - [ ] **Pause** — check `/screening/` to see the dish appear
+- [ ] Generate a printable label with QR code (GET /dishes/{dish_id}/label)
+- [ ] **Pause** — view the label PNG in the browser
+- [ ] **Pause** — try the scan input on `/care/` (type the dish ID + Enter)
 
 ### Phase 2: Screening
 - [ ] Log a screening step on the test dish (POST screening step)
@@ -43,7 +46,14 @@ A guided, interactive script (`scripts/walkthrough.py`) that exercises the full 
 - [ ] Register one more fish WITHOUT assigning to a well
 - [ ] **Pause** — check `/dishes/{dish_id}/fish/` to see the plate map with the "Unassigned fish" section
 
-### Phase 8: Cross-level view
+### Phase 8: Daily care
+- [ ] **Pause** — check `/care/` to see dish list with red highlight for unchecked dishes
+- [ ] Submit a dish-level check on the parent dish (fed, water changed)
+- [ ] **Pause** — check `/care/{parent_dish_id}` to see the check in history
+- [ ] Submit per-unit checks on the positive (well plate) dish
+- [ ] **Pause** — check `/care/{pos_dish_id}` to see per-unit check history
+
+### Phase 9: Cross-level view
 - [ ] **Pause** — check `/fish/` index, then drill into the cross to see the full hierarchy
 
 ### Cleanup

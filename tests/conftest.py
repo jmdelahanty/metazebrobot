@@ -102,6 +102,12 @@ def tmp_db_path(tmp_path_factory) -> Path:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             dish_id TEXT NOT NULL,
             check_time TEXT NOT NULL,
+            fed BOOLEAN,
+            feed_type TEXT,
+            water_changed BOOLEAN,
+            vol_water_changed INTEGER,
+            num_dead INTEGER DEFAULT 0,
+            notes TEXT,
             data TEXT,
             UNIQUE(dish_id, check_time)
         )

@@ -13,12 +13,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .controllers.fish_dish_controller import FishDishController
 from .data.data_manager import data_manager
+from .utils.label_generator import generate_dish_label
 
 logger = logging.getLogger(__name__)
 
@@ -790,6 +791,164 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         )
 
     # ------------------------------------------------------------------
+    # Daily care (web UI)
+    # ------------------------------------------------------------------
+
+    @app.get("/care/", response_class=HTMLResponse)
+    def care_dish_list(request: Request):
+        """Dish list for daily care logging."""
+        db_path = _require_db_path()
+        today = datetime.now().strftime("%Y%m%d")
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            rows = conn.execute("""
+                SELECT d.dish_id, d.genotype, d.fish_count, d.container_type,
+                       (SELECT MAX(check_time) FROM quality_checks q WHERE q.dish_id = d.dish_id) AS last_check
+                FROM dishes d
+                WHERE d.status = 'active'
+                ORDER BY d.date_created DESC
+            """).fetchall()
+        dishes = []
+        for row in rows:
+            d = _row_to_dict(row)
+            last = d.get("last_check") or ""
+            d["checked_today"] = last.startswith(today)
+            dishes.append(d)
+        return templates.TemplateResponse(request, "care/dish_list.html", {
+            "dishes": dishes,
+        })
+
+    @app.get("/care/{dish_id}", response_class=HTMLResponse)
+    def care_form(request: Request, dish_id: str):
+        """Care form page — adapts to dish type."""
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            row = conn.execute(
+                "SELECT dish_id, genotype, fish_count, container_type FROM dishes WHERE dish_id = ?",
+                (dish_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Dish not found")
+            dish = _row_to_dict(row)
+        units = data_manager.get_housing_units_with_fish(dish_id)
+        has_units = len(units) > 1 or (len(units) == 1 and units[0]["unit_kind"] != "open")
+        now = datetime.now().strftime("%Y%m%dT%H:%M:%S")
+        return templates.TemplateResponse(request, "care/care_form.html", {
+            "dish_id": dish_id,
+            "genotype": dish.get("genotype"),
+            "fish_count": dish.get("fish_count"),
+            "container_type": dish.get("container_type"),
+            "units": units,
+            "has_units": has_units,
+            "now": now,
+        })
+
+    @app.get("/care/{dish_id}/checks-table", response_class=HTMLResponse)
+    def care_checks_table(request: Request, dish_id: str):
+        """HTMX partial — recent check history."""
+        _require_db_path()
+        units = data_manager.get_housing_units_with_fish(dish_id)
+        has_units = len(units) > 1 or (len(units) == 1 and units[0]["unit_kind"] != "open")
+
+        if has_units:
+            # Gather checks across all units
+            checks = []
+            for u in units:
+                for c in data_manager.get_housing_unit_checks(u["unit_id"]):
+                    c["unit_id"] = u["unit_id"]
+                    checks.append(c)
+            checks.sort(key=lambda c: c.get("check_time", ""), reverse=True)
+            checks = checks[:50]
+        else:
+            checks = data_manager.get_dish_quality_checks(dish_id)
+
+        return templates.TemplateResponse(request, "care/_checks_table.html", {
+            "checks": checks,
+            "unit_level": has_units,
+        })
+
+    @app.post("/care/{dish_id}/check", response_class=HTMLResponse)
+    def submit_dish_check(
+        request: Request,
+        dish_id: str,
+        check_time: str = Form(...),
+        fed: bool = Form(default=False),
+        feed_type: Optional[str] = Form(default=None),
+        water_changed: bool = Form(default=False),
+        vol_water_changed: Optional[int] = Form(default=None),
+        num_dead: int = Form(default=0),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Submit a dish-level quality check."""
+        _require_db_path()
+        check_data = {
+            "check_time": check_time,
+            "fed": fed,
+            "feed_type": feed_type or None,
+            "water_changed": water_changed,
+            "vol_water_changed": vol_water_changed,
+            "num_dead": num_dead,
+            "notes": notes or None,
+        }
+        success = data_manager.save_dish_quality_check(dish_id, check_data)
+        checks = data_manager.get_dish_quality_checks(dish_id)
+        return templates.TemplateResponse(request, "care/_checks_table.html", {
+            "checks": checks,
+            "unit_level": False,
+            "flash_message": "Check saved." if success else "Failed to save check.",
+            "flash_level": "success" if success else "error",
+        })
+
+    @app.post("/care/{dish_id}/unit-checks", response_class=HTMLResponse)
+    async def submit_unit_checks(request: Request, dish_id: str):
+        """Submit checks for all housing units at once."""
+        _require_db_path()
+        form = await request.form()
+        check_time = form.get("check_time", datetime.now().strftime("%Y%m%dT%H:%M:%S"))
+
+        units = data_manager.get_housing_units_with_fish(dish_id)
+        saved = 0
+        for u in units:
+            uid = u["unit_id"]
+            fed = form.get(f"fed_{uid}") == "on"
+            water = form.get(f"water_changed_{uid}") == "on"
+            feed_type = form.get(f"feed_type_{uid}") or None
+            vol_str = form.get(f"vol_water_changed_{uid}")
+            vol = int(vol_str) if vol_str else None
+            dead_str = form.get(f"num_dead_{uid}")
+            num_dead = int(dead_str) if dead_str else 0
+            unit_notes = form.get(f"notes_{uid}") or None
+
+            if fed or water or num_dead > 0 or unit_notes:
+                ok = data_manager.log_housing_unit_check(
+                    unit_id=uid,
+                    check_time=check_time,
+                    fed=fed,
+                    feed_type=feed_type,
+                    water_changed=water,
+                    vol_water_changed=vol,
+                    num_dead=num_dead,
+                    notes=unit_notes,
+                )
+                if ok:
+                    saved += 1
+
+        # Return updated checks
+        checks = []
+        for u in units:
+            for c in data_manager.get_housing_unit_checks(u["unit_id"]):
+                c["unit_id"] = u["unit_id"]
+                checks.append(c)
+        checks.sort(key=lambda c: c.get("check_time", ""), reverse=True)
+        checks = checks[:50]
+
+        return templates.TemplateResponse(request, "care/_checks_table.html", {
+            "checks": checks,
+            "unit_level": True,
+            "flash_message": f"Saved {saved} unit checks." if saved else "No checks to save (nothing filled in).",
+            "flash_level": "success" if saved else "error",
+        })
+
+    # ------------------------------------------------------------------
     # Screening images
     # ------------------------------------------------------------------
 
@@ -1296,6 +1455,31 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "fish_id": fish_id,
             "images": images,
         })
+
+    # ------------------------------------------------------------------
+    # Dish labels (QR code + metadata)
+    # ------------------------------------------------------------------
+
+    @app.get("/dishes/{dish_id}/label")
+    def dish_label(dish_id: str):
+        """Generate a printable label PNG with QR code for a dish."""
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            row = conn.execute(
+                "SELECT dish_id, genotype, dof, fish_count, container_type FROM dishes WHERE dish_id = ?",
+                (dish_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Dish not found")
+            dish = _row_to_dict(row)
+        png_bytes = generate_dish_label(
+            dish_id=dish["dish_id"],
+            genotype=dish.get("genotype"),
+            dof=dish.get("dof"),
+            fish_count=dish.get("fish_count"),
+            container_type=dish.get("container_type"),
+        )
+        return Response(content=png_bytes, media_type="image/png")
 
     # ------------------------------------------------------------------
     # Dish-level reference images

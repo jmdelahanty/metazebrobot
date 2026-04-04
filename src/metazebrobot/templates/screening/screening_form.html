@@ -192,7 +192,12 @@
 
 {% endif %}
 
-<p><a href="/screening/">&larr; Back to dish list</a> | <a href="/dishes/{{ dish.dish_id }}/fish/">Manage fish</a></p>
+<p>
+    <a href="/screening/">&larr; Back to dish list</a> |
+    <a href="/dishes/{{ dish.dish_id }}/fish/">Manage fish</a> |
+    <a href="/care/{{ dish.dish_id }}">Care</a> |
+    <a href="/dishes/{{ dish.dish_id }}/label" target="_blank" role="button" class="outline secondary" style="padding:0.25rem 0.75rem; font-size:0.85rem">Print Label</a>
+</p>
 
 <script>
 function formatDT(val) {

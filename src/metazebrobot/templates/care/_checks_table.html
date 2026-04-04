@@ -1,0 +1,42 @@
+{# HTMX partial: recent quality check history #}
+
+{% if flash_message is defined and flash_message %}
+<div class="flash flash-{{ flash_level }}" role="alert">
+    {{ flash_message }}
+</div>
+{% endif %}
+
+{% if checks %}
+<figure>
+<table role="grid" class="screening-steps-table">
+    <thead>
+        <tr>
+            <th>Date/Time</th>
+            {% if unit_level %}<th>Unit</th>{% endif %}
+            <th>Fed</th>
+            <th>Feed Type</th>
+            <th>Water</th>
+            <th>Vol (mL)</th>
+            <th>Dead</th>
+            <th>Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in checks %}
+        <tr>
+            <td>{{ c.check_time }}</td>
+            {% if unit_level %}<td>{{ c.unit_id.split(":")[-1] if c.unit_id else "-" }}</td>{% endif %}
+            <td>{{ "Yes" if c.fed else "No" }}</td>
+            <td>{{ c.feed_type or "-" }}</td>
+            <td>{{ "Yes" if c.water_changed else "No" }}</td>
+            <td>{{ c.vol_water_changed if c.vol_water_changed else "-" }}</td>
+            <td>{{ c.num_dead if c.num_dead else "0" }}</td>
+            <td>{{ c.notes or "-" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p><em>No checks recorded yet.</em></p>
+{% endif %}

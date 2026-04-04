@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Care — {{ dish_id }}{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Care — {{ dish_id }}</h2>
+    <p>{{ genotype or "Unknown genotype" }} &mdash; {{ fish_count or "?" }} fish &mdash; {{ container_type or "petri_dish" }}</p>
+</hgroup>
+
+{# Recent check history #}
+<h3>Recent Checks</h3>
+<div id="checks-table"
+     hx-get="/care/{{ dish_id }}/checks-table"
+     hx-trigger="revealed"
+     hx-swap="innerHTML">
+    Loading...
+</div>
+
+{% if has_units %}
+{# ── Well plate / multi-unit check form ── #}
+<h3>Log Unit Checks</h3>
+<form
+    hx-post="/care/{{ dish_id }}/unit-checks"
+    hx-target="#checks-table"
+    hx-swap="innerHTML"
+>
+    <div class="grid">
+        <label>
+            Date/Time
+            <input type="text" name="check_time" value="{{ now }}" required>
+        </label>
+    </div>
+
+    <details>
+        <summary><strong>Apply to all units</strong></summary>
+        <div class="grid">
+            <label>
+                <input type="checkbox" id="all-fed" onchange="document.querySelectorAll('.unit-fed').forEach(cb => cb.checked = this.checked)">
+                All fed
+            </label>
+            <label>
+                <input type="checkbox" id="all-water" onchange="document.querySelectorAll('.unit-water').forEach(cb => cb.checked = this.checked)">
+                All water changed
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                Feed type for all
+                <input type="text" id="all-feed-type" placeholder="e.g. paramecia"
+                       onchange="document.querySelectorAll('.unit-feed-type').forEach(el => { if (!el.value) el.value = this.value })">
+            </label>
+        </div>
+    </details>
+
+    <figure>
+    <table role="grid" class="screening-steps-table">
+        <thead>
+            <tr>
+                <th>Unit</th>
+                <th>Occupant</th>
+                <th>Fed</th>
+                <th>Feed Type</th>
+                <th>Water</th>
+                <th>Vol (mL)</th>
+                <th>Dead</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in units %}
+            <tr>
+                <td><strong>{{ u.position_label }}</strong></td>
+                <td>
+                    {% if u.fish %}
+                        {% for f in u.fish %}{{ f.subject_label or f.fish_id[:8] }}{% if not loop.last %}, {% endif %}{% endfor %}
+                    {% else %}
+                        <em>empty</em>
+                    {% endif %}
+                </td>
+                <td><input type="checkbox" class="unit-fed" name="fed_{{ u.unit_id }}"></td>
+                <td><input type="text" class="unit-feed-type" name="feed_type_{{ u.unit_id }}" style="min-width:5rem"></td>
+                <td><input type="checkbox" class="unit-water" name="water_changed_{{ u.unit_id }}"></td>
+                <td><input type="number" name="vol_water_changed_{{ u.unit_id }}" min="0" style="width:5rem"></td>
+                <td><input type="number" name="num_dead_{{ u.unit_id }}" min="0" value="0" style="width:4rem"></td>
+                <td><input type="text" name="notes_{{ u.unit_id }}" style="min-width:6rem"></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+
+    <button type="submit">Save All Checks</button>
+</form>
+
+{% else %}
+{# ── Simple dish-level check form ── #}
+<h3>Log Check</h3>
+<form
+    hx-post="/care/{{ dish_id }}/check"
+    hx-target="#checks-table"
+    hx-swap="innerHTML"
+>
+    <div class="grid">
+        <label>
+            Date/Time
+            <input type="text" name="check_time" value="{{ now }}" required>
+        </label>
+    </div>
+
+    <div class="grid">
+        <label>
+            <input type="checkbox" name="fed" value="true">
+            Fed
+        </label>
+        <label>
+            Feed Type
+            <input type="text" name="feed_type" placeholder="e.g. paramecia">
+        </label>
+    </div>
+
+    <div class="grid">
+        <label>
+            <input type="checkbox" name="water_changed" value="true">
+            Water Changed
+        </label>
+        <label>
+            Volume Changed (mL)
+            <input type="number" name="vol_water_changed" min="0">
+        </label>
+    </div>
+
+    <div class="grid">
+        <label>
+            Number Dead
+            <input type="number" name="num_dead" min="0" value="0">
+        </label>
+        <label>
+            Notes
+            <input type="text" name="notes" placeholder="Observations...">
+        </label>
+    </div>
+
+    <button type="submit">Save Check</button>
+</form>
+{% endif %}
+
+<p>
+    <a href="/care/">&larr; Back to dish list</a> |
+    <a href="/screening/{{ dish_id }}">Screening</a> |
+    <a href="/dishes/{{ dish_id }}/fish/">Fish</a> |
+    <a href="/dishes/{{ dish_id }}/label" target="_blank" role="button" class="outline secondary" style="padding:0.25rem 0.75rem; font-size:0.85rem">Print Label</a>
+</p>
+{% endblock %}

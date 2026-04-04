@@ -4,6 +4,15 @@
 {% block content %}
 <h2>Active Dishes</h2>
 
+<input type="text" id="scan-input" placeholder="Scan barcode or type dish ID..." autofocus>
+<script>
+document.getElementById('scan-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && this.value.trim()) {
+        window.location.href = '/screening/' + encodeURIComponent(this.value.trim());
+    }
+});
+</script>
+
 {% if dishes %}
 <figure>
 <table role="grid">

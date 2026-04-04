@@ -192,7 +192,19 @@ class Walkthrough:
         self.dish_ids.append(dish_id)
         info(f"Dish created: {dish_id}")
 
-        pause(f"{self.base}/screening/", self.interactive)
+        step("Generating a printable label with QR code...")
+        resp = requests.get(f"{self.base}/dishes/{dish_id}/label")
+        if resp.status_code == 200 and resp.headers.get("content-type") == "image/png":
+            info(f"  Label PNG: {len(resp.content)} bytes")
+        else:
+            warn(f"  Label generation failed (status {resp.status_code})")
+        info("Open the label URL in a browser to see/print it.")
+        info("The QR code encodes the dish_id for barcode scanner navigation.")
+        pause(f"{self.base}/dishes/{dish_id}/label", self.interactive)
+
+        info("Try the scan input on the dish list pages:")
+        pause(f"{self.base}/care/", self.interactive)
+
         return dish_id
 
     # ── Phase 2: Screening ───────────────────────────────────────
@@ -384,10 +396,60 @@ class Walkthrough:
 
         pause(f"{self.base}/dishes/{dish_id}/fish/", self.interactive)
 
-    # ── Phase 8: Cross-level view ────────────────────────────────
+    # ── Phase 8: Daily care ────────────────────────────────────
 
-    def phase_8_cross_level_view(self) -> None:
-        banner("Phase 8: Cross-Level View")
+    def phase_8_daily_care(self, parent_dish_id: str, pos_dish_id: str) -> None:
+        banner("Phase 8: Daily Care")
+
+        info("The /care/ page lists active dishes with a red highlight if not checked today.")
+        pause(f"{self.base}/care/", self.interactive)
+
+        step(f"Submitting a dish-level check on parent dish {parent_dish_id}...")
+        api(
+            "POST",
+            f"/care/{parent_dish_id}/check",
+            self.base,
+            data={
+                "check_time": "20260401T09:00:00",
+                "fed": "true",
+                "feed_type": "paramecia",
+                "water_changed": "true",
+                "vol_water_changed": 80,
+                "num_dead": 0,
+                "notes": "E2E walkthrough: morning check",
+            },
+        )
+        info("Dish-level check saved. The parent dish should no longer be highlighted red.")
+        pause(f"{self.base}/care/{parent_dish_id}", self.interactive)
+
+        step(f"Submitting per-unit checks on well plate dish {pos_dish_id}...")
+        # Get unit IDs for the positive dish
+        units_resp = api("GET", f"/dishes/{pos_dish_id}/units", self.base)
+        unit_ids = [u["unit_id"] for u in (units_resp or {}).get("items", [])]
+
+        if unit_ids:
+            form_data = {"check_time": "20260401T09:30:00"}
+            for uid in unit_ids:
+                form_data[f"fed_{uid}"] = "on"
+                form_data[f"feed_type_{uid}"] = "paramecia"
+                form_data[f"num_dead_{uid}"] = "0"
+            api(
+                "POST",
+                f"/care/{pos_dish_id}/unit-checks",
+                self.base,
+                data=form_data,
+            )
+            info(f"Submitted checks for {len(unit_ids)} units.")
+        else:
+            warn("No housing units found on positive dish — skipping unit checks.")
+
+        info("Check the per-unit care form and history table.")
+        pause(f"{self.base}/care/{pos_dish_id}", self.interactive)
+
+    # ── Phase 9: Cross-level view ────────────────────────────────
+
+    def phase_9_cross_level_view(self) -> None:
+        banner("Phase 9: Cross-Level View")
 
         info("Check the fish index, then drill into the cross to see the full hierarchy.")
         pause(f"{self.base}/fish/", self.interactive)
@@ -430,8 +492,10 @@ class Walkthrough:
             step(f"Deleting dish images for {dish_id} (SQL)")
             conn.execute("DELETE FROM dish_images WHERE dish_id = ?", (dish_id,))
 
-        # Delete screening data
+        # Delete quality checks, transgenes, screening data
         for dish_id in self.dish_ids:
+            conn.execute("DELETE FROM quality_checks WHERE dish_id = ?", (dish_id,))
+            conn.execute("DELETE FROM dish_transgenes WHERE dish_id = ?", (dish_id,))
             conn.execute("DELETE FROM screening_step_images WHERE dish_id = ?", (dish_id,))
             conn.execute("DELETE FROM screening_steps WHERE dish_id = ?", (dish_id,))
 
@@ -445,7 +509,7 @@ class Walkthrough:
 
         # Remove uploaded test images from disk
         db_dir = Path(self.db_path).parent
-        for subdir in ("dish_images", "fish_images"):
+        for subdir in ("dish_images", "fish_images", "screening_images"):
             img_dir = db_dir / subdir
             if img_dir.exists():
                 for dish_id in self.dish_ids:
@@ -532,8 +596,11 @@ def main() -> None:
         # Phase 7: Plate map visualization
         wt.phase_7_plate_map(pos_dish, fish_ids)
 
-        # Phase 8: Cross-level view
-        wt.phase_8_cross_level_view()
+        # Phase 8: Daily care
+        wt.phase_8_daily_care(dish_id, pos_dish)
+
+        # Phase 9: Cross-level view
+        wt.phase_9_cross_level_view()
 
         # Done!
         banner("Walkthrough Complete!")

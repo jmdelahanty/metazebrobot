@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Daily Care{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Daily Care</h2>
+    <p>Log feeding, water changes, and mortality for active dishes.</p>
+</hgroup>
+
+<input type="text" id="scan-input" placeholder="Scan barcode or type dish ID..." autofocus>
+<script>
+document.getElementById('scan-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && this.value.trim()) {
+        window.location.href = '/care/' + encodeURIComponent(this.value.trim());
+    }
+});
+</script>
+
+{% if dishes %}
+<figure>
+<table role="grid">
+    <thead>
+        <tr>
+            <th>Dish</th>
+            <th>Genotype</th>
+            <th>Fish</th>
+            <th>Container</th>
+            <th>Last Check</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in dishes %}
+        <tr{% if not d.checked_today %} style="background: var(--pico-del-color)"{% endif %}>
+            <td>{{ d.dish_id }}</td>
+            <td>{{ d.genotype or "-" }}</td>
+            <td>{{ d.fish_count or "-" }}</td>
+            <td>{{ d.container_type or "petri_dish" }}</td>
+            <td>{{ d.last_check or "Never" }}</td>
+            <td>
+                <a href="/care/{{ d.dish_id }}" role="button" class="outline">Check</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p><em>No active dishes found.</em></p>
+{% endif %}
+
+<p><a href="/screening/">&larr; Screening</a> | <a href="/fish/">Fish</a></p>
+{% endblock %}

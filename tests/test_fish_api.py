@@ -452,6 +452,105 @@ class TestPlateMap:
 
 
 # -------------------------------------------------------------------
+# Daily care
+# -------------------------------------------------------------------
+
+
+class TestDailyCare:
+    """Daily care web form endpoints."""
+
+    def test_care_dish_list(self, client, seed_dish):
+        resp = client.get("/care/")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+
+    def test_care_form_simple_dish(self, client, seed_dish):
+        resp = client.get(f"/care/{seed_dish}")
+        assert resp.status_code == 200
+        assert "Log Check" in resp.text
+
+    def test_care_form_nonexistent_dish(self, client):
+        resp = client.get("/care/NO_SUCH_DISH")
+        assert resp.status_code == 404
+
+    def test_submit_dish_check(self, client, seed_dish):
+        resp = client.post(
+            f"/care/{seed_dish}/check",
+            data={
+                "check_time": "20260403T09:00:00",
+                "fed": "true",
+                "feed_type": "paramecia",
+                "water_changed": "true",
+                "vol_water_changed": 50,
+                "num_dead": 1,
+                "notes": "test check",
+            },
+        )
+        assert resp.status_code == 200
+        assert "Check saved" in resp.text
+
+    def test_checks_table_partial(self, client, seed_dish):
+        # Submit a check first
+        client.post(
+            f"/care/{seed_dish}/check",
+            data={"check_time": "20260403T10:00:00", "num_dead": 0},
+        )
+        resp = client.get(f"/care/{seed_dish}/checks-table")
+        assert resp.status_code == 200
+        assert "20260403T10:00:00" in resp.text
+
+    def test_unit_checks_well_plate(self, client, seed_dish):
+        # Create wells and submit unit checks
+        client.post(
+            f"/dishes/{seed_dish}/units",
+            json={"unit_kind": "well", "count": 3, "label_format": "well_plate"},
+        )
+        unit_id = f"{seed_dish}:A1"
+        resp = client.post(
+            f"/care/{seed_dish}/unit-checks",
+            data={
+                "check_time": "20260403T11:00:00",
+                f"fed_{unit_id}": "on",
+                f"feed_type_{unit_id}": "rotifers",
+                f"num_dead_{unit_id}": "0",
+            },
+        )
+        assert resp.status_code == 200
+        assert "Saved 1 unit checks" in resp.text
+
+    def test_care_form_shows_units(self, client, seed_dish):
+        # Create wells
+        client.post(
+            f"/dishes/{seed_dish}/units",
+            json={"unit_kind": "well", "count": 4, "label_format": "well_plate"},
+        )
+        resp = client.get(f"/care/{seed_dish}")
+        assert resp.status_code == 200
+        assert "Log Unit Checks" in resp.text
+        assert "A1" in resp.text
+
+
+# -------------------------------------------------------------------
+# Dish labels
+# -------------------------------------------------------------------
+
+
+class TestDishLabel:
+    """GET /dishes/{dish_id}/label — PNG label with QR code."""
+
+    def test_label_returns_png(self, client, seed_dish):
+        resp = client.get(f"/dishes/{seed_dish}/label")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/png"
+        # PNG magic bytes
+        assert resp.content[:4] == b"\x89PNG"
+
+    def test_label_nonexistent_dish(self, client):
+        resp = client.get("/dishes/NO_SUCH_DISH/label")
+        assert resp.status_code == 404
+
+
+# -------------------------------------------------------------------
 # Cross-level fish views
 # -------------------------------------------------------------------
 

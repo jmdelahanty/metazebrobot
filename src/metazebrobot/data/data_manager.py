@@ -1152,6 +1152,55 @@ class DataManager:
             logger.error(f"Error loading dishes from database: {e}")
             return {}
 
+    # --- Dish-Level Quality Checks (Web API) ---
+
+    def save_dish_quality_check(self, dish_id: str, check_data: Dict[str, Any]) -> bool:
+        """Save a single dish-level quality check."""
+        if not self.is_initialized:
+            return False
+        try:
+            with self.get_connection() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO quality_checks
+                    (dish_id, check_time, fed, feed_type, water_changed,
+                     vol_water_changed, num_dead, notes, data)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    dish_id,
+                    check_data["check_time"],
+                    check_data.get("fed", False),
+                    check_data.get("feed_type"),
+                    check_data.get("water_changed", False),
+                    check_data.get("vol_water_changed"),
+                    check_data.get("num_dead", 0),
+                    check_data.get("notes"),
+                    json.dumps(check_data),
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error saving quality check for {dish_id}: {e}")
+            return False
+
+    def get_dish_quality_checks(self, dish_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recent quality checks for a dish."""
+        if not self.is_initialized:
+            return []
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute("""
+                    SELECT check_time, fed, feed_type, water_changed,
+                           vol_water_changed, num_dead, notes
+                    FROM quality_checks
+                    WHERE dish_id = ?
+                    ORDER BY check_time DESC
+                    LIMIT ?
+                """, (dish_id, limit)).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying quality checks for {dish_id}: {e}")
+            return []
+
     def get_screening_protocols(self) -> Dict[str, Dict[str, Any]]:
         """Get the loaded screening protocols."""
         protocols = self.get_category_data('screening_protocols')

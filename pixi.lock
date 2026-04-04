@@ -234,6 +234,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/pyyaml-6.0.2-py312h178313f_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/pyzmq-26.3.0-py312hbf22597_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/qhull-2020.2-h434a139_5.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/qrcode-8.2-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/qt6-main-6.8.3-h588cce1_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/readline-8.2-h8c095d6_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/referencing-0.36.2-pyh29332c3_0.conda
@@ -2561,7 +2562,7 @@ packages:
 - pypi: .
   name: metazebrobot
   version: 0.1.0
-  sha256: e982ab7b03d63623dc424708f1dab3cc1184099c8b633ad4c69f32f3e28f22e6
+  sha256: ba6074540fbb86c5b162e3b26e141119c82473cb4167b90aa4a4b59b4c1d937c
   requires_dist:
   - pyside6>=6.8.1,<7
   - numpy>=2.2.3,<3
@@ -3375,6 +3376,20 @@ packages:
   purls: []
   size: 552937
   timestamp: 1720813982144
+- conda: https://conda.anaconda.org/conda-forge/noarch/qrcode-8.2-pyhd8ed1ab_0.conda
+  sha256: 06d36c560c9fad54d241c3c3904fc32b704992674d621de19e4bbd6f0eaa761b
+  md5: f720b5182a5ae92b0d2f2ae210231ac4
+  depends:
+  - colorama
+  - python >=3.9.0,<4.0.0
+  constrains:
+  - pillow >=9.1.0
+  license: BSD-3-Clause
+  license_family: BSD
+  purls:
+  - pkg:pypi/qrcode?source=hash-mapping
+  size: 43600
+  timestamp: 1746215092815
 - conda: https://conda.anaconda.org/conda-forge/linux-64/qt6-main-6.8.3-h588cce1_0.conda
   sha256: e822243adaafa72f4a15201ca32a05fddf2bbcd790cef7072a157af502b1dc95
   md5: a91776218fcb57ccda6878ab2030dc3b
