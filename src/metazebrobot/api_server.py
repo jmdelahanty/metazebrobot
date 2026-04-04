@@ -25,6 +25,39 @@ logger = logging.getLogger(__name__)
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_BUSY_TIMEOUT_MS = 250
+_USER_MAPPING_PATH = os.path.expanduser("~/.pyrat_user_mapping.json")
+
+
+def _load_user_list() -> List[str]:
+    """Load available usernames from the PyRAT user mapping file."""
+    try:
+        if os.path.exists(_USER_MAPPING_PATH):
+            with open(_USER_MAPPING_PATH) as f:
+                return sorted(json.load(f).keys())
+    except Exception:
+        pass
+    return []
+
+
+def _current_user(request: Request) -> str:
+    """Read the current username from the metazebrobot_user cookie."""
+    cookie_val = request.cookies.get("metazebrobot_user")
+    if cookie_val:
+        return cookie_val
+    # Fall back to first user in mapping, or "unknown"
+    users = _load_user_list()
+    return users[0] if users else "unknown"
+
+
+def _pyrat_user_id(username: str) -> Optional[int]:
+    """Look up a PyRAT user ID from the mapping file."""
+    try:
+        if os.path.exists(_USER_MAPPING_PATH):
+            with open(_USER_MAPPING_PATH) as f:
+                return json.load(f).get(username)
+    except Exception:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +452,32 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return proto, None
 
     # ------------------------------------------------------------------
+    # User switcher
+    # ------------------------------------------------------------------
+
+    # Make user info available to all templates via Jinja2 globals
+    @app.middleware("http")
+    async def inject_user_context(request: Request, call_next):
+        """Add current_user and user_list to Jinja2 template globals."""
+        templates.env.globals["current_user"] = _current_user(request)
+        templates.env.globals["user_list"] = _load_user_list()
+        response = await call_next(request)
+        return response
+
+    @app.post("/set-user")
+    def set_user(request: Request, username: str = Form(...)):
+        """Set the active user via cookie and redirect back."""
+        referer = request.headers.get("referer", "/")
+        response = RedirectResponse(url=referer, status_code=303)
+        response.set_cookie(
+            "metazebrobot_user", username,
+            max_age=30 * 24 * 3600,  # 30 days
+            httponly=True,
+            samesite="lax",
+        )
+        return response
+
+    # ------------------------------------------------------------------
     # Home page
     # ------------------------------------------------------------------
 
@@ -552,18 +611,10 @@ LIMIT 100"""
                 "responsible_fullname", "strain_name", "strain_name_with_id",
             ],
         }
-        # Filter by responsible user (same as desktop app)
-        pyrat_user = os.environ.get("PYRAT_USERNAME", "delahantyj")
-        try:
-            user_mapping_path = os.path.expanduser("~/.pyrat_user_mapping.json")
-            if os.path.exists(user_mapping_path):
-                with open(user_mapping_path) as f:
-                    user_map = json.load(f)
-                responsible_id = user_map.get(pyrat_user)
-                if responsible_id:
-                    params["responsible_id"] = responsible_id
-        except Exception:
-            pass  # No filter if mapping unavailable
+        # Filter by responsible user (from cookie)
+        responsible_id = _pyrat_user_id(_current_user(request))
+        if responsible_id:
+            params["responsible_id"] = responsible_id
 
         # Only fetch recent crosses unless "all" is requested
         if not all_crosses:

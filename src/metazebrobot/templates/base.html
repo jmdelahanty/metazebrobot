@@ -58,6 +58,18 @@
             <li><a href="/fish/">Fish</a></li>
             <li><a href="/health">API Health</a></li>
             <li><a href="#" onclick="startWalkthrough(); return false;" style="font-size:0.85rem">Tour</a></li>
+            <li>
+                <form action="/set-user" method="post" style="margin:0; display:inline">
+                    <select name="username" onchange="this.form.submit()" style="padding:0.25rem 0.5rem; font-size:0.8rem; width:auto; margin:0;">
+                        {% for u in user_list %}
+                        <option value="{{ u }}"{% if u == current_user %} selected{% endif %}>{{ u }}</option>
+                        {% endfor %}
+                        {% if current_user and current_user not in user_list %}
+                        <option value="{{ current_user }}" selected>{{ current_user }}</option>
+                        {% endif %}
+                    </select>
+                </form>
+            </li>
         </ul>
     </nav>
     <main class="container">
