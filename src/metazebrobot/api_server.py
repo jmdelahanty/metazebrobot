@@ -230,6 +230,9 @@ async def lifespan(app: FastAPI):
                     promoter TEXT NOT NULL,
                     reporter TEXT,
                     fluorophore TEXT,
+                    excitation_nm INTEGER,
+                    emission_nm INTEGER,
+                    fluorophore_color TEXT,
                     FOREIGN KEY (dish_id) REFERENCES dishes(dish_id),
                     UNIQUE(dish_id, construct)
                 )
@@ -242,6 +245,12 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_dish_transgenes_promoter
                 ON dish_transgenes(promoter)
             """)
+            # Migrate dish_transgenes: add spectral columns if missing
+            tg_cols = [r[1] for r in conn.execute("PRAGMA table_info(dish_transgenes)").fetchall()]
+            if 'excitation_nm' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN excitation_nm INTEGER")
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN emission_nm INTEGER")
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN fluorophore_color TEXT")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS dish_images (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -673,6 +682,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             dish_id=dish_id, genotype=dish.genotype
         )
 
+        transgenes = data_manager.get_dish_transgenes(dish_id)
+
         return templates.TemplateResponse(request, "screening/screening_form.html", {
             "dish": dish,
             "dpf": dpf,
@@ -685,6 +696,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "step_images": step_images,
             "atlas_lines": atlas_lines,
             "atlas_catalog_available": atlas_catalog_available,
+            "transgenes": transgenes,
         })
 
     @app.get("/screening/{dish_id}/steps-table", response_class=HTMLResponse)
@@ -852,6 +864,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         units = data_manager.get_housing_units_with_fish(dish_id)
         has_units = len(units) > 1 or (len(units) == 1 and units[0]["unit_kind"] != "open")
         now = datetime.now().strftime("%Y%m%dT%H:%M:%S")
+        transgenes = data_manager.get_dish_transgenes(dish_id)
         return templates.TemplateResponse(request, "care/care_form.html", {
             "dish_id": dish_id,
             "genotype": dish.get("genotype"),
@@ -860,6 +873,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "units": units,
             "has_units": has_units,
             "now": now,
+            "transgenes": transgenes,
         })
 
     @app.get("/care/{dish_id}/checks-table", response_class=HTMLResponse)
@@ -1135,12 +1149,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """Fish management page for a dish."""
         dish = _dish_context_for_fish_page(dish_id)
         fish = data_manager.get_fish_subjects(dish_id)
+        transgenes = data_manager.get_dish_transgenes(dish_id)
         return templates.TemplateResponse(request, "fish/fish_list.html", {
             "dish_id": dish_id,
             "cross_id": dish.get("cross_id"),
             "genotype": dish.get("genotype"),
             "species": dish.get("species") or "Danio rerio",
             "fish": fish,
+            "transgenes": transgenes,
         })
 
     @app.get("/dishes/{dish_id}/plate-map", response_class=HTMLResponse)

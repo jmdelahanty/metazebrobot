@@ -144,6 +144,9 @@ CREATE TABLE dish_transgenes (
     promoter TEXT NOT NULL,
     reporter TEXT,
     fluorophore TEXT,
+    excitation_nm INTEGER,
+    emission_nm INTEGER,
+    fluorophore_color TEXT,
     FOREIGN KEY (dish_id) REFERENCES dishes(dish_id),
     UNIQUE(dish_id, construct)
 );

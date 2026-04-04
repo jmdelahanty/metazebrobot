@@ -3,19 +3,22 @@
       "steps": [
         {
           "dpf_range": [3, 3],
-          "indicators": ["Pigment", "elavl3:jRGECO1b"],
+          "indicators": ["elavl3:jRGECO1b"],
+          "pigment_screened": true,
           "criteria_suggestion": "Remove pigmented, check pan-neuronal expression (more obvious)",
           "notes_suggestion": "No tricaine needed."
         },
         {
           "dpf_range": [4, 5],
           "indicators": ["gfap:TRPV1-T2A-GFP"],
+          "pigment_screened": false,
           "criteria_suggestion": "Check pan-glial expression",
           "notes_suggestion": "Use tricaine, circle technique."
         },
         {
           "dpf_range": [6, 7],
-          "indicators": ["Both/Final Brightness"],
+          "indicators": ["gfap:TRPV1-T2A-GFP", "elavl3:jRGECO1b"],
+          "pigment_screened": false,
           "criteria_suggestion": "Screen brightest in correct regions",
           "notes_suggestion": "Individual droplets. To Vivarium by 3 PM if 7dpf."
         }
@@ -25,19 +28,22 @@
       "steps": [
         {
           "dpf_range": [3, 3],
-          "indicators": ["Pigment", "gfap:TRPV1-T2A-GFP"],
+          "indicators": ["gfap:TRPV1-T2A-GFP"],
+          "pigment_screened": true,
           "criteria_suggestion": "Remove pigmented, check pan-glial GFP expression (more obvious)",
           "notes_suggestion": "No tricaine needed."
         },
         {
           "dpf_range": [4, 5],
           "indicators": ["Her4.1:jRGECO1b"],
+          "pigment_screened": false,
           "criteria_suggestion": "Check Her4.1 Red FP expression",
           "notes_suggestion": "Use tricaine, circle technique."
         },
         {
           "dpf_range": [6, 7],
-          "indicators": ["Both/Final Brightness"],
+          "indicators": ["gfap:TRPV1-T2A-GFP", "Her4.1:jRGECO1b"],
+          "pigment_screened": false,
           "criteria_suggestion": "Screen brightest GFP and Red FP in correct regions",
           "notes_suggestion": "Individual droplets. To Vivarium by 3 PM if 7dpf."
         }
@@ -48,10 +54,10 @@
         {
           "dpf_range": [0, 999],
           "indicators": [],
+          "pigment_screened": false,
           "criteria_suggestion": "No standard protocol found for this genotype.",
           "notes_suggestion": "Refer to specific experimental plan."
         }
       ]
     }
   }
-  

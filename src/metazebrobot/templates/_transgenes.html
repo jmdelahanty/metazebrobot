@@ -1,0 +1,12 @@
+{# Reusable partial: display parsed transgenes as compact tags #}
+{% if transgenes %}
+<span class="transgene-tags">
+    {% for tg in transgenes %}
+    <span class="transgene-tag" title="{{ tg.construct }}"
+          {% if tg.spectra %}style="border-left: 3px solid {{ tg.spectra.color }}"{% endif %}>
+        <strong>{{ tg.promoter }}</strong>{% if tg.reporter %} : {{ tg.reporter }}{% endif %}
+        {% if tg.spectra %}<small class="transgene-spectra">{{ tg.spectra.ex }}/{{ tg.spectra.em }}nm</small>{% endif %}
+    </span>
+    {% endfor %}
+</span>
+{% endif %}

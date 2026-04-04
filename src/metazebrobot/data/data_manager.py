@@ -722,20 +722,25 @@ class DataManager:
         ))
 
     def _save_dish_transgenes(self, cursor, dish_id: str, genotype: str):
-        """Parse genotype and save normalized transgene rows."""
+        """Parse genotype and save normalized transgene rows with spectral data."""
         cursor.execute("DELETE FROM dish_transgenes WHERE dish_id = ?", (dish_id,))
         transgenes = self.parse_genotype(genotype)
         for tg in transgenes:
+            spectra = self.get_fluorophore_spectra(tg.get("fluorophore"))
             cursor.execute("""
                 INSERT OR IGNORE INTO dish_transgenes
-                (dish_id, construct, promoter, reporter, fluorophore)
-                VALUES (?, ?, ?, ?, ?)
+                (dish_id, construct, promoter, reporter, fluorophore,
+                 excitation_nm, emission_nm, fluorophore_color)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 dish_id,
                 tg["construct"],
                 tg["promoter"],
                 tg["reporter"],
                 tg["fluorophore"],
+                spectra["ex"] if spectra else None,
+                spectra["em"] if spectra else None,
+                spectra["color"] if spectra else None,
             ))
 
     def backfill_dish_transgenes(self):
@@ -754,11 +759,19 @@ class DataManager:
                 for row in rows:
                     tgs = self.parse_genotype(row["genotype"])
                     for tg in tgs:
+                        spectra = self.get_fluorophore_spectra(tg.get("fluorophore"))
                         cursor.execute("""
                             INSERT OR IGNORE INTO dish_transgenes
-                            (dish_id, construct, promoter, reporter, fluorophore)
-                            VALUES (?, ?, ?, ?, ?)
-                        """, (row["dish_id"], tg["construct"], tg["promoter"], tg["reporter"], tg["fluorophore"]))
+                            (dish_id, construct, promoter, reporter, fluorophore,
+                             excitation_nm, emission_nm, fluorophore_color)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            row["dish_id"], tg["construct"], tg["promoter"],
+                            tg["reporter"], tg["fluorophore"],
+                            spectra["ex"] if spectra else None,
+                            spectra["em"] if spectra else None,
+                            spectra["color"] if spectra else None,
+                        ))
                     if tgs:
                         filled += 1
                 conn.commit()
@@ -768,16 +781,31 @@ class DataManager:
             logger.warning(f"dish_transgenes backfill failed (table may not exist yet): {e}")
 
     def get_dish_transgenes(self, dish_id: str) -> List[Dict[str, Any]]:
-        """Get parsed transgenes for a dish."""
+        """Get parsed transgenes for a dish with spectral data from the database."""
         if not self.is_initialized:
             return []
         try:
             with self.get_connection() as conn:
                 rows = conn.execute(
-                    "SELECT construct, promoter, reporter, fluorophore FROM dish_transgenes WHERE dish_id = ?",
+                    """SELECT construct, promoter, reporter, fluorophore,
+                              excitation_nm, emission_nm, fluorophore_color
+                       FROM dish_transgenes WHERE dish_id = ?""",
                     (dish_id,),
                 ).fetchall()
-                return [{k: row[k] for k in row.keys()} for row in rows]
+                results = []
+                for row in rows:
+                    tg = {k: row[k] for k in row.keys()}
+                    # Build spectra dict from DB columns (or None if not available)
+                    if tg.get("excitation_nm") and tg.get("emission_nm"):
+                        tg["spectra"] = {
+                            "ex": tg["excitation_nm"],
+                            "em": tg["emission_nm"],
+                            "color": tg.get("fluorophore_color"),
+                        }
+                    else:
+                        tg["spectra"] = None
+                    results.append(tg)
+                return results
         except Exception as e:
             logger.error(f"Error querying dish transgenes: {e}")
             return []
@@ -1334,6 +1362,31 @@ class DataManager:
         ("bfp", "bfp"),
         ("tdtomato", "tdtomato"),
     ]
+
+    # Excitation/emission wavelengths (nm) for canonical fluorophores
+    _FLUOROPHORE_SPECTRA = {
+        "gfp":       {"ex": 488, "em": 509, "color": "green"},
+        "egfp":      {"ex": 488, "em": 507, "color": "green"},
+        "gcamp":     {"ex": 488, "em": 509, "color": "green"},
+        "yfp":       {"ex": 514, "em": 527, "color": "yellow"},
+        "cfp":       {"ex": 434, "em": 477, "color": "cyan"},
+        "bfp":       {"ex": 383, "em": 448, "color": "blue"},
+        "cerulean":  {"ex": 433, "em": 475, "color": "cyan"},
+        "mcherry":   {"ex": 587, "em": 610, "color": "red"},
+        "dsred":     {"ex": 558, "em": 583, "color": "red"},
+        "tdtomato":  {"ex": 554, "em": 581, "color": "red"},
+        "rfp":       {"ex": 555, "em": 584, "color": "red"},
+        "jrgeco":    {"ex": 565, "em": 600, "color": "red"},
+        "rgeco":     {"ex": 561, "em": 589, "color": "red"},
+        "campari":   {"ex": 488, "em": 513, "color": "green"},  # green form; photoconverts to red
+    }
+
+    @classmethod
+    def get_fluorophore_spectra(cls, fluorophore: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Return excitation/emission/color for a canonical fluorophore name."""
+        if not fluorophore:
+            return None
+        return cls._FLUOROPHORE_SPECTRA.get(fluorophore)
 
     @staticmethod
     def _extract_fluorophore(reporter: str) -> Optional[str]:

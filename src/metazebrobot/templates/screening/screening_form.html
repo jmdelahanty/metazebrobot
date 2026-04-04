@@ -5,6 +5,7 @@
 <hgroup>
     <h2>{{ dish.dish_id }}</h2>
     <p>{{ dish.genotype }} &mdash; {{ dish.fish_count }} fish &mdash; DPF {{ dpf if dpf is not none else "?" }}</p>
+    {% include "_transgenes.html" %}
 </hgroup>
 
 {# Protocol guidance #}
@@ -15,7 +16,7 @@
         {% for step in protocol.steps %}
         <li{% if current_step and step == current_step %} style="font-weight:bold"{% endif %}>
             <strong>DPF {{ step.dpf_range[0] }}{% if step.dpf_range[0] != step.dpf_range[1] %}-{{ step.dpf_range[1] }}{% endif %}:</strong>
-            {{ step.indicators | join(", ") }}
+            {{ step.indicators | join(", ") }}{% if step.pigment_screened %} + pigment{% endif %}
             — {{ step.criteria_suggestion }}
             {% if step.notes_suggestion %}<br><small>{{ step.notes_suggestion }}</small>{% endif %}
             {% if indicator_images %}
@@ -124,7 +125,8 @@
         </div>
 
         <label>
-            <input type="checkbox" name="pigment_screened" value="true">
+            <input type="checkbox" name="pigment_screened" value="true"
+                   {% if current_step and current_step.pigment_screened %}checked{% endif %}>
             Pigment screened
         </label>
 
