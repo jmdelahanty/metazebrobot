@@ -60,6 +60,47 @@ def _pyrat_user_id(username: str) -> Optional[int]:
     return None
 
 
+def _fetch_pyrat(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
+    """Fetch data from the PyRAT API using keyring credentials.
+
+    Args:
+        endpoint: API path after ``/api/v3/`` (e.g. ``"tanks"``).
+        params: Query parameters.
+
+    Returns:
+        Parsed JSON response.
+
+    Raises:
+        HTTPException: If credentials are missing or the API call fails.
+    """
+    import keyring
+    import requests as http_requests
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    base_url = keyring.get_password("pyrat-api", "base_url")
+    client_token = keyring.get_password("pyrat-api", "client_token")
+    user_token = keyring.get_password("pyrat-api", "user_token")
+    if not all([base_url, client_token, user_token]):
+        raise HTTPException(status_code=503, detail="PyRAT API credentials not configured")
+
+    if not base_url.endswith("/"):
+        base_url += "/"
+    url = f"{base_url}api/v3/{endpoint}"
+
+    resp = http_requests.get(
+        url,
+        auth=(client_token, user_token),
+        headers={"Accept": "application/json"},
+        params=params or {},
+        verify=False,
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"PyRAT API error: {resp.status_code}")
+    return resp.json()
+
+
 # ---------------------------------------------------------------------------
 # Database helpers (read-only JSON API still uses its own lightweight conn)
 # ---------------------------------------------------------------------------
@@ -1992,6 +2033,141 @@ LIMIT 100"""
                         d.rmdir()
 
         return {"status": "ok", "cleaned": len(dish_ids)}
+
+    # ------------------------------------------------------------------
+    # PyRAT browser (web UI)
+    # ------------------------------------------------------------------
+
+    @app.get("/pyrat/tanks/", response_class=HTMLResponse)
+    def pyrat_tanks_page(request: Request):
+        """Tank list with age monitoring."""
+        tanks = []
+        error_msg = None
+        try:
+            responsible_id = _pyrat_user_id(_current_user(request))
+            params = {
+                "l": 500,
+                "s": ["date_of_birth:asc"],
+                "k": [
+                    "tank_id", "tank_label", "status",
+                    "strain_name_with_id",
+                    "number_of_male", "number_of_female", "number_of_unknown",
+                    "date_of_birth",
+                    "location_rack_name", "tank_position",
+                ],
+            }
+            if responsible_id:
+                params["responsible_id"] = responsible_id
+            params["status"] = "open"
+
+            raw = _fetch_pyrat("tanks", params)
+            now = datetime.now()
+            for t in raw:
+                total = (t.get("number_of_male") or 0) + (t.get("number_of_female") or 0) + (t.get("number_of_unknown") or 0)
+                t["total_fish"] = total
+
+                dob = t.get("date_of_birth")
+                if dob:
+                    try:
+                        born = datetime.strptime(dob[:10], "%Y-%m-%d")
+                        age = (now - born).days
+                        t["age_days"] = age
+                        if age > 365:
+                            t["age_status"] = "URGENT"
+                        elif age > 315:
+                            t["age_status"] = "WARNING"
+                        else:
+                            t["age_status"] = "OK"
+                    except ValueError:
+                        t["age_days"] = None
+                        t["age_status"] = "UNKNOWN"
+                else:
+                    t["age_days"] = None
+                    t["age_status"] = "UNKNOWN"
+                tanks.append(t)
+            # Sort: urgent first, then by age descending
+            status_order = {"URGENT": 0, "WARNING": 1, "OK": 2, "UNKNOWN": 3}
+            tanks.sort(key=lambda x: (status_order.get(x["age_status"], 3), -(x["age_days"] or 0)))
+        except HTTPException as e:
+            error_msg = e.detail
+        except Exception as e:
+            error_msg = str(e)
+
+        return templates.TemplateResponse(request, "pyrat/tanks.html", {
+            "tanks": tanks,
+            "error": error_msg,
+        })
+
+    @app.get("/pyrat/crossings/", response_class=HTMLResponse)
+    def pyrat_crossings_page(request: Request):
+        """Crossing list with performance tracking."""
+        import re as _re
+        crossings = []
+        error_msg = None
+        try:
+            responsible_id = _pyrat_user_id(_current_user(request))
+            params = {
+                "l": 200,
+                "s": ["date_of_record:desc"],
+                "k": [
+                    "crossing_id", "status", "date_of_record", "date_of_set_up", "date_of_raise",
+                    "strain_name", "description", "tanks",
+                ],
+                "tk": [
+                    "tank_id", "tank_label", "status",
+                ],
+            }
+            if responsible_id:
+                params["responsible_id"] = responsible_id
+
+            raw = _fetch_pyrat("tanks/crossings", params)
+
+            # Get local dish counts per cross
+            db_path = _require_db_path()
+            dish_counts = {}
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                rows = conn.execute(
+                    "SELECT cross_id, COUNT(*) AS cnt FROM dishes WHERE status = 'active' GROUP BY cross_id"
+                ).fetchall()
+                dish_counts = {r["cross_id"]: r["cnt"] for r in rows}
+
+            for c in raw:
+                cid = str(c.get("crossing_id", ""))
+                # Best date
+                date_display = c.get("date_of_raise") or c.get("date_of_set_up") or c.get("date_of_record") or ""
+                if date_display:
+                    date_display = date_display[:10]
+                c["date_display"] = date_display
+
+                # Raised count from child tanks
+                tanks_data = c.get("tanks", {})
+                children = tanks_data.get("children", []) if isinstance(tanks_data, dict) else []
+                c["raised_count"] = len(children)
+
+                # Parse requested groups from description
+                desc = c.get("description", "") or ""
+                match = _re.search(r'(\d+)\s*(?:group|grp)', desc, _re.IGNORECASE)
+                c["requested_groups"] = int(match.group(1)) if match else None
+
+                # Performance
+                if c["requested_groups"] and c["requested_groups"] > 0:
+                    perf = c["raised_count"] / c["requested_groups"]
+                    c["performance_display"] = f"{perf:.0%}"
+                else:
+                    c["performance_display"] = None
+
+                c["local_dish_count"] = dish_counts.get(cid, 0)
+                c["crossing_id"] = cid
+                crossings.append(c)
+        except HTTPException as e:
+            error_msg = e.detail
+        except Exception as e:
+            error_msg = str(e)
+
+        return templates.TemplateResponse(request, "pyrat/crossings.html", {
+            "crossings": crossings,
+            "error": error_msg,
+        })
 
     # ------------------------------------------------------------------
     # Dish labels (QR code + metadata)

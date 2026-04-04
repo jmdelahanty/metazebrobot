@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}PyRAT Tanks{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>PyRAT Tanks</h2>
+    <p>Tanks for {{ current_user }} &mdash; {{ tanks | length }} total</p>
+</hgroup>
+
+{% if error %}
+<div class="flash flash-error" role="alert">{{ error }}</div>
+{% endif %}
+
+{% if tanks %}
+{# Summary bar #}
+{% set urgent = tanks | selectattr("age_status", "equalto", "URGENT") | list | length %}
+{% set warning = tanks | selectattr("age_status", "equalto", "WARNING") | list | length %}
+{% set ok = tanks | selectattr("age_status", "equalto", "OK") | list | length %}
+<div style="margin-bottom: 1rem; display: flex; gap: 1rem;">
+    {% if urgent %}<span class="age-urgent" style="padding: 0.3rem 0.75rem; border-radius: 0.5rem; font-weight: bold;">{{ urgent }} URGENT</span>{% endif %}
+    {% if warning %}<span class="age-warning" style="padding: 0.3rem 0.75rem; border-radius: 0.5rem;">{{ warning }} WARNING</span>{% endif %}
+    <span class="age-ok" style="padding: 0.3rem 0.75rem; border-radius: 0.5rem;">{{ ok }} OK</span>
+</div>
+
+<figure>
+<table role="grid" class="screening-steps-table">
+    <thead>
+        <tr>
+            <th class="sortable">Tank ID</th>
+            <th class="sortable">Label</th>
+            <th class="sortable">Rack</th>
+            <th class="sortable">Position</th>
+            <th class="sortable">Strain</th>
+            <th class="sortable">Fish</th>
+            <th class="sortable sort-desc">Age (days)</th>
+            <th class="sortable">Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in tanks %}
+        <tr class="age-{{ t.age_status | lower }}">
+            <td>{{ t.tank_id }}</td>
+            <td>{{ t.tank_label or "-" }}</td>
+            <td>{{ t.location_rack_name or "-" }}</td>
+            <td>{{ t.tank_position or "-" }}</td>
+            <td>{{ t.strain_name_with_id or "-" }}</td>
+            <td>{{ t.total_fish }}</td>
+            <td>{{ t.age_days if t.age_days is not none else "?" }}</td>
+            <td>{{ t.status or "-" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p><em>No tanks found. {% if not error %}Check that PyRAT credentials are configured.{% endif %}</em></p>
+{% endif %}
+
+<p><a href="/pyrat/crossings/">Crossings</a> | <a href="/">Home</a></p>
+{% endblock %}

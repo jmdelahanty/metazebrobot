@@ -45,6 +45,22 @@
         .transgene-tag { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 1rem; background: var(--pico-card-background-color); border: 1px solid var(--pico-muted-border-color); font-size: 0.8rem; white-space: nowrap; }
         .transgene-tag small { color: var(--pico-muted-color); }
         .transgene-spectra { margin-left: 0.3rem; font-size: 0.7rem; }
+        /* PyRAT age status */
+        .age-urgent { background: #ffc8c8 !important; }
+        .age-warning { background: #ffffc8 !important; }
+        .age-ok { background: #c8ffc8 !important; }
+        .age-unknown { background: #f0f0f0 !important; }
+        tr.age-urgent td, tr.age-warning td, tr.age-ok td, tr.age-unknown td { background: inherit !important; }
+        /* PyRAT crossing status */
+        tr.crossing-raised, tr.crossing-raised td { background: #c8ffc8 !important; }
+        tr.crossing-setup, tr.crossing-setup td { background: #c8dcff !important; }
+        tr.crossing-recorded, tr.crossing-recorded td { background: #ffffc8 !important; }
+        tr.crossing-discarded, tr.crossing-discarded td { background: #f0f0f0 !important; }
+        /* Sortable table headers */
+        th.sortable { cursor: pointer; user-select: none; }
+        th.sortable:hover { text-decoration: underline; }
+        th.sort-asc::after { content: " \25b2"; font-size: 0.7rem; }
+        th.sort-desc::after { content: " \25bc"; font-size: 0.7rem; }
     </style>
 </head>
 <body>
@@ -56,7 +72,8 @@
             <li><a href="/screening/">Screening</a></li>
             <li><a href="/care/">Care</a></li>
             <li><a href="/fish/">Fish</a></li>
-            <li><a href="/health">API Health</a></li>
+            <li><a href="/pyrat/tanks/">PyRAT Tanks</a></li>
+            <li><a href="/pyrat/crossings/">PyRAT Crossings</a></li>
             <li><a href="#" onclick="startWalkthrough(); return false;" style="font-size:0.85rem">Tour</a></li>
             <li>
                 <form action="/set-user" method="post" style="margin:0; display:inline">
@@ -77,6 +94,7 @@
     </main>
     <script>
     document.addEventListener("DOMContentLoaded", function() {
+        // Scan input handler
         var el = document.getElementById("scan-input");
         if (el) {
             el.addEventListener("keydown", function(e) {
@@ -85,6 +103,36 @@
                 }
             });
         }
+
+        // Sortable table columns
+        document.querySelectorAll("th.sortable").forEach(function(th) {
+            th.addEventListener("click", function() {
+                var table = th.closest("table");
+                var tbody = table.querySelector("tbody");
+                var colIdx = Array.from(th.parentNode.children).indexOf(th);
+                var rows = Array.from(tbody.querySelectorAll("tr"));
+                var isAsc = th.classList.contains("sort-asc");
+
+                // Clear all sort indicators
+                table.querySelectorAll("th.sortable").forEach(function(h) {
+                    h.classList.remove("sort-asc", "sort-desc");
+                });
+
+                rows.sort(function(a, b) {
+                    var aVal = a.children[colIdx].textContent.trim();
+                    var bVal = b.children[colIdx].textContent.trim();
+                    var aNum = parseFloat(aVal);
+                    var bNum = parseFloat(bVal);
+                    if (!isNaN(aNum) && !isNaN(bNum)) {
+                        return isAsc ? bNum - aNum : aNum - bNum;
+                    }
+                    return isAsc ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
+                });
+
+                th.classList.add(isAsc ? "sort-desc" : "sort-asc");
+                rows.forEach(function(r) { tbody.appendChild(r); });
+            });
+        });
     });
     </script>
 </body>
