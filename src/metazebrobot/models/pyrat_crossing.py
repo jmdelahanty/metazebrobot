@@ -61,6 +61,7 @@ class PyRATCrossing(BaseModel):
     date_of_record: Optional[str] = Field(default=None, description="Date recorded")
     date_of_set_up: Optional[str] = Field(default=None, description="Date set up")
     date_of_raise: Optional[str] = Field(default=None, description="Date raised")
+    completed: Optional[bool] = Field(default=None, description="Completed flag from backend/v1")
 
     # Responsible person
     responsible_id: Optional[int] = Field(default=None, description="Responsible person ID")
@@ -74,6 +75,11 @@ class PyRATCrossing(BaseModel):
     # Description
     description: Optional[str] = Field(default=None, description="Crossing description/notes")
 
+    # Performance-related fields from backend/v1 crossing detail
+    crossing_tanks: Optional[int] = Field(default=None, description="Authoritative denominator from backend/v1")
+    raised_tanks: Optional[int] = Field(default=None, description="Preferred raised tank count from backend/v1")
+    really_raised_tanks: Optional[int] = Field(default=None, description="Fallback raised tank count from backend/v1")
+
     # Related tanks
     parent_tanks: List[CrossingTank] = Field(default_factory=list, description="Parent tanks")
     child_tanks: List[CrossingTank] = Field(default_factory=list, description="Child/raised tanks")
@@ -81,8 +87,20 @@ class PyRATCrossing(BaseModel):
     @computed_field
     @property
     def raised_count(self) -> int:
-        """Number of tanks raised from this crossing."""
+        """Best available number of tanks raised from this crossing."""
+        if self.raised_tanks is not None:
+            return self.raised_tanks
+        if self.really_raised_tanks is not None:
+            return self.really_raised_tanks
         return len(self.child_tanks)
+
+    @computed_field
+    @property
+    def performance_target_count(self) -> Optional[int]:
+        """Best available denominator for crossing performance."""
+        if self.crossing_tanks is not None and self.crossing_tanks > 0:
+            return self.crossing_tanks
+        return self.requested_groups
 
     @computed_field
     @property
@@ -140,14 +158,14 @@ class PyRATCrossing(BaseModel):
     @property
     def performance(self) -> Optional[float]:
         """
-        Calculate performance as raised_count / requested_groups.
+        Calculate performance as raised_count / performance_target_count.
 
-        Returns None if requested_groups cannot be determined.
+        Returns None if no denominator can be determined.
         """
-        requested = self.requested_groups
-        if requested is None or requested == 0:
+        denominator = self.performance_target_count
+        if denominator is None or denominator == 0:
             return None
-        return self.raised_count / requested
+        return self.raised_count / denominator
 
     @computed_field
     @property
@@ -157,6 +175,15 @@ class PyRATCrossing(BaseModel):
         if perf is None:
             return "N/A"
         return f"{perf:.0%}"
+
+    @computed_field
+    @property
+    def performance_ratio_display(self) -> str:
+        """Formatted raised/target ratio for display."""
+        denominator = self.performance_target_count
+        if denominator is None or denominator == 0:
+            return "N/A"
+        return f"{self.raised_count} / {denominator}"
 
     @computed_field
     @property
@@ -224,12 +251,16 @@ class PyRATCrossing(BaseModel):
             date_of_record=data.get('date_of_record'),
             date_of_set_up=data.get('date_of_set_up'),
             date_of_raise=data.get('date_of_raise'),
+            completed=data.get('completed'),
             responsible_id=data.get('responsible_id'),
             responsible_fullname=data.get('responsible_fullname'),
             strain_id=data.get('strain_id'),
             strain_name=data.get('strain_name'),
             strain_name_with_id=data.get('strain_name_with_id'),
             description=data.get('description'),
+            crossing_tanks=data.get('crossing_tanks'),
+            raised_tanks=data.get('raised_tanks'),
+            really_raised_tanks=data.get('really_raised_tanks'),
             parent_tanks=parent_tanks,
             child_tanks=child_tanks,
         )

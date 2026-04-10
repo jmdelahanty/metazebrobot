@@ -20,7 +20,7 @@
             <th class="sortable">Date</th>
             <th class="sortable">Status</th>
             <th class="sortable">Strain</th>
-            <th class="sortable">Requested</th>
+            <th class="sortable">Crossing Tanks</th>
             <th class="sortable">Raised</th>
             <th class="sortable">Performance</th>
             <th class="sortable">Dishes</th>
@@ -29,18 +29,25 @@
     <tbody>
         {% for c in crossings %}
         <tr class="crossing-{{ c.status | lower | replace('-', '') }}">
-            <td>{{ c.crossing_id }}</td>
+            <td>
+                <a href="/dishes/new?cross_id={{ c.crossing_id }}"
+                   title="Create a new dish from crossing {{ c.crossing_id }}">
+                    {{ c.crossing_id }}
+                </a>
+            </td>
             <td>{{ c.date_display or "-" }}</td>
             <td>{{ c.status or "-" }}</td>
             <td>{{ c.strain_name or "-" }}</td>
-            <td>{{ c.requested_groups if c.requested_groups is not none else "?" }}</td>
+            <td>{{ c.performance_target_count if c.performance_target_count is not none else "?" }}</td>
             <td>{{ c.raised_count }}</td>
-            <td>{{ c.performance_display or "-" }}</td>
+            <td title="{{ c.performance_ratio_display or '' }}">{{ c.performance_display or "-" }}</td>
             <td>
                 {% if c.local_dish_count > 0 %}
                 <a href="/screening/?cross_id={{ c.crossing_id }}">{{ c.local_dish_count }} dish{{ "es" if c.local_dish_count != 1 }}</a>
+                |
+                <a href="/dishes/new?cross_id={{ c.crossing_id }}">New dish</a>
                 {% else %}
-                -
+                <a href="/dishes/new?cross_id={{ c.crossing_id }}">New dish</a>
                 {% endif %}
             </td>
         </tr>

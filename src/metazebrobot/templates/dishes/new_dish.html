@@ -57,9 +57,23 @@
     {# Dish details #}
     <div class="grid">
         <label>
-            Date of Fertilization
-            <input type="date" name="dof" value="{{ form.dof or today }}" required>
+            Cross Setup Date
+            <input id="cross-setup-date-input" type="date" name="cross_setup_date" value="{{ form.cross_setup_date or '' }}" readonly>
         </label>
+        <label>
+            Date of Fertilization
+            <input id="dof-input" type="date" name="dof" value="{{ form.dof or today }}" required>
+        </label>
+        <input id="dof-source-input" type="hidden" name="dof_source" value="{{ form.dof_source or '' }}">
+    </div>
+
+    {% if form.dof_source %}
+    <small id="dof-source-note">DOF prefilled from {{ form.dof_source | replace("_", " ") }}.</small>
+    {% else %}
+    <small id="dof-source-note">DOF is editable and can differ from the PyRAT cross setup date.</small>
+    {% endif %}
+
+    <div class="grid">
         <label>
             Initial Fish Count
             <input type="number" name="fish_count" min="0" max="1000" value="{{ form.fish_count or 0 }}">
@@ -127,6 +141,45 @@
 
     <button type="submit">Create Dish</button>
 </form>
+
+<script>
+function renderDofSourceNote() {
+    const sourceInput = document.getElementById("dof-source-input");
+    const note = document.getElementById("dof-source-note");
+    if (!note || !sourceInput) {
+        return;
+    }
+
+    if (!sourceInput.value) {
+        note.textContent = "DOF is editable and can differ from the PyRAT cross setup date.";
+        return;
+    }
+
+    if (sourceInput.value === "manual_override") {
+        note.textContent = "DOF has been manually adjusted.";
+        return;
+    }
+
+    note.textContent = `DOF prefilled from ${sourceInput.value.replaceAll("_", " ")}.`;
+}
+
+document.addEventListener("DOMContentLoaded", renderDofSourceNote);
+document.addEventListener("htmx:afterSwap", function(event) {
+    if (event.target && event.target.id === "cross-info") {
+        renderDofSourceNote();
+    }
+});
+document.addEventListener("input", function(event) {
+    if (event.target.id !== "dof-input") {
+        return;
+    }
+    const sourceInput = document.getElementById("dof-source-input");
+    if (sourceInput) {
+        sourceInput.value = "manual_override";
+    }
+    renderDofSourceNote();
+});
+</script>
 
 <p><a href="/screening/">&larr; Screening</a> | <a href="/care/">Care</a> | <a href="/">Home</a></p>
 {% endblock %}

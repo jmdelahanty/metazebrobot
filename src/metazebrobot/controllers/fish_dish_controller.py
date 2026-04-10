@@ -111,6 +111,8 @@ class FishDishController:
         dof: str, # Made DOF mandatory for primary dish creation
         fish_count: int = 1, # Initial estimate
         source_group_id: Optional[str] = None,
+        cross_setup_date: Optional[str] = None,
+        dof_source: Optional[str] = None,
         sex: str = "unknown",
         species: str = "Danio rerio",
         parents: Optional[List[str]] = None,
@@ -134,6 +136,8 @@ class FishDishController:
                 genotype=genotype,
                 responsible=responsible,
                 source_group_id=source_group_id,
+                cross_setup_date=cross_setup_date,
+                dof_source=dof_source,
                 dof=dof, # Pass validated DOF
                 sex=sex,
                 species=species,
@@ -239,6 +243,8 @@ class FishDishController:
                 cross_id=parent_dish.cross_id,
                 genotype=parent_dish.genotype,
                 responsible=parent_dish.responsible,
+                cross_setup_date=parent_dish.cross_setup_date,
+                dof_source=parent_dish.dof_source,
                 dof=parent_dish.dof,
                 fish_count=fish_count,
                 parent_dish_id=parent_dish_id,

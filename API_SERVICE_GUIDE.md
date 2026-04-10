@@ -1,6 +1,7 @@
-# MetaZebrobot API Service Guide
+# MetaZebrobot Web/API Service Guide
 
-This guide explains how to set up and manage the MetaZebrobot read-only API as a systemd service.
+This guide explains how to set up and manage the MetaZebrobot web/API server as
+a systemd service.
 
 ## Initial Setup
 
@@ -58,6 +59,10 @@ sudo systemctl status metazebrobot-api
 ## Testing the API
 
 ```bash
+# Browser entry points
+# http://localhost:8000/
+# http://localhost:8000/dishes/new
+
 # Health check (no database)
 curl http://localhost:8000/health
 
@@ -116,7 +121,8 @@ The service file is at: `/etc/systemd/system/metazebrobot-api.service`
 Key settings:
 - **Database path**: `/nvme1/zebrobot.db`
 - **Port**: 8000
-- **Bind address**: 0.0.0.0 (accessible from network)
+- **Bind address**: `127.0.0.1` in the checked-in unit file
+- **LAN access**: add `--lab-network` to `ExecStart` only if you intentionally want other machines to connect
 - **Auto-restart**: Yes, on failure (5 second delay)
 
 ---
@@ -125,6 +131,9 @@ Key settings:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/` | GET | Landing page for the web UI |
+| `/dishes/new` | GET | Dish creation form |
+| `/dishes/new` | POST | Create a dish from the web form |
 | `/health` | GET | Health check |
 | `/health?check_db=true` | GET | Health check with DB verification |
 | `/dishes` | GET | List dishes (params: status, cross_id, limit, offset) |

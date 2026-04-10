@@ -2,6 +2,11 @@
 {% if error %}
 <small style="color: var(--pico-del-color)">{{ error }}</small>
 {% endif %}
+{% if include_dof_oob %}
+<input id="cross-setup-date-input" type="date" name="cross_setup_date" value="{{ cross_setup_date or '' }}" readonly hx-swap-oob="true">
+<input id="dof-input" type="date" name="dof" value="{{ dof or '' }}" required hx-swap-oob="true">
+<input id="dof-source-input" type="hidden" name="dof_source" value="{{ dof_source or '' }}" hx-swap-oob="true">
+{% endif %}
 <div class="grid">
     <label>
         Genotype

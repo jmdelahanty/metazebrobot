@@ -1,0 +1,82 @@
+{
+  "constructs": [
+    {
+      "canonical_name": "GRAB-5HT",
+      "aliases": ["grab5ht", "grab_5ht", "grab-5ht", "GRAB5HT"],
+      "construct_role": "sensor",
+      "family": "GRAB",
+      "target": "serotonin",
+      "fluorophore": "gfp",
+      "excitation_nm": 488,
+      "emission_nm": 509,
+      "screen_color": "green",
+      "notes": "GPCR-based serotonin sensor with cpGFP-like green readout.",
+      "is_active": true
+    },
+    {
+      "canonical_name": "GCaMP6s",
+      "aliases": ["gcamp6s", "GCaMP", "gcamp"],
+      "construct_role": "sensor",
+      "family": "GCaMP",
+      "target": "calcium",
+      "fluorophore": "gcamp",
+      "excitation_nm": 488,
+      "emission_nm": 510,
+      "screen_color": "green",
+      "notes": "Green calcium indicator.",
+      "is_active": true
+    },
+    {
+      "canonical_name": "jRGECO1b",
+      "aliases": ["jrgeco1b", "jRGECO", "jrgeco"],
+      "construct_role": "sensor",
+      "family": "jRGECO",
+      "target": "calcium",
+      "fluorophore": "jrgeco",
+      "excitation_nm": 561,
+      "emission_nm": 589,
+      "screen_color": "red",
+      "notes": "Red calcium indicator.",
+      "is_active": true
+    },
+    {
+      "canonical_name": "CaMPARI",
+      "aliases": ["campari", "CaMPARI2"],
+      "construct_role": "sensor",
+      "family": "CaMPARI",
+      "target": "neural_activity",
+      "fluorophore": "campari",
+      "excitation_nm": 488,
+      "emission_nm": 513,
+      "screen_color": "green",
+      "notes": "Photoconvertible activity reporter.",
+      "is_active": true
+    },
+    {
+      "canonical_name": "TRPV1-T2A-GFP",
+      "aliases": ["trpv1t2agfp", "TRPV1", "trpv1"],
+      "construct_role": "effector",
+      "family": "TRPV1",
+      "target": null,
+      "fluorophore": "gfp",
+      "excitation_nm": 488,
+      "emission_nm": 509,
+      "screen_color": "green",
+      "notes": "TRPV1 effector construct with GFP marker.",
+      "is_active": true
+    },
+    {
+      "canonical_name": "CoChR-eGFP",
+      "aliases": ["cochregfp", "CoChR", "cochr"],
+      "construct_role": "effector",
+      "family": "CoChR",
+      "target": null,
+      "fluorophore": "gfp",
+      "excitation_nm": 488,
+      "emission_nm": 509,
+      "screen_color": "green",
+      "notes": "CoChR optogenetic effector with GFP marker.",
+      "is_active": true
+    }
+  ]
+}

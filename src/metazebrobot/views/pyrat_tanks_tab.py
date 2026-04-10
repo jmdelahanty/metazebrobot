@@ -241,7 +241,7 @@ class PyRATTanksTab(QWidget):
                 "Credentials Required",
                 "PyRAT API credentials are not configured.\n\n"
                 "Please run the following command in a terminal to set up credentials:\n\n"
-                "  python pyrat_query_tool.py --setup-credentials\n\n"
+                "  python pyrat_credentials_tool.py --setup-credentials\n\n"
                 "This will securely store your API credentials in the system keyring.",
             )
             return

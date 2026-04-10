@@ -15,10 +15,10 @@ This document captures what the local Cross model provides that PyRAT does not, 
 | Strain/genotype | `line_strain` (full genotype string) | `strain_name` (full genotype string) | **Equivalent** — see note below |
 | Parent identifiers | `parents[].identifier` (e.g., "M11:E5 (5187)") | `parent_tanks[].tank_id` (numeric) | Local is human-readable |
 | Parent genotypes | `parents[].genotype` | Not available | No PyRAT equivalent |
-| Requested groups | Direct field | Parsed from description text via regex | Fragile on PyRAT side |
+| Requested groups | Direct field | Parsed from description text via regex, but superseded by `crossing_tanks` on the detail endpoint when available | Fragile fallback only; not the same as the PyRAT UI denominator in all cases |
 | Transgenic indicators | Structured `TransgenicIndicator` objects (promoter, reporter, color, expected expression, computed standard notation) | Not available | No PyRAT equivalent |
 | Aggregate screening results | `AggregateResults` (yield %, totals, date) | Not available | No PyRAT equivalent |
-| Lifecycle status | Requested → Performed → Screening → Completed → Archived | recorded → set-up → raised / discarded | Different workflow |
+| Lifecycle status | Requested → Performed → Screening → Completed → Archived | recorded → set-up → raised / discarded, plus separate `completed` and raised-tank counts | Different workflow; PyRAT states do not appear to move in lockstep |
 | Cross type | Standard / Transgenic / unknown | Not available | No PyRAT equivalent |
 
 ## What Would Break
@@ -46,6 +46,37 @@ Note: The responsible person on the *crossing* can differ from the responsible p
 **Dish responsible auto-fill can use PyRAT's `responsible_fullname` directly.**
 
 ### Medium Risk — Data Exists but Differs
+
+**Crossing performance mismatch.** On April 9, 2026, crossing `17907` showed
+performance `2 / 2` in the PyRAT HTML page while the older
+`api/v3/tanks/crossings` response returned `tanks.children = []`,
+`date_of_raise = null`, and status `set-up`. The HTML also marked the numerator
+with CSS class `overwritten`. A newer authenticated detail response at
+`backend/v1/tanks/crossings/17907/details` did expose
+`raised_tanks = 2`, `really_raised_tanks = 2`, and `crossing_tanks = 2` while
+still returning `tanks.children = []`. This means MetaZebrobot metrics based on
+`len(child_tanks)` and description parsing are only approximations if they rely
+on the older crossing API; the newer detail endpoint is a better source when
+authenticated access is available.
+
+**Practical mapping for PyRAT parity.** A second live example on April 9, 2026
+showed crossing `14783` with `raised_tanks = 1`, `really_raised_tanks = 1`, and
+`crossing_tanks = 2`, matching a real-world `1 / 2` performance interpretation.
+The best current rule is:
+- denominator = `crossing_tanks`
+- numerator = `raised_tanks`
+- fallback numerator = `really_raised_tanks`
+- last-resort fallback = `len(child_tanks) / requested_groups`
+
+This means the local `requested_groups` concept should no longer be treated as
+the primary denominator when authenticated detail data is available.
+
+**Status progression mismatch.** Exploratory checks in both the production and
+test PyRAT UIs on April 9, 2026 suggested that many crossings can be effectively
+complete without their status string ever becoming `raised`. The PyRAT detail
+view exposes separate workflow-related fields like `status`, `completed`,
+`raised_tanks`, `really_raised_tanks`, and `crossing_tanks`, and these should be
+treated as independent signals rather than a single linear workflow.
 
 **Dish form auto-fill (remaining gaps).** When creating a new dish, the fish dish tab auto-fills three fields from the selected local Cross:
 - `genotype` ← `cross.line_strain` — **resolved**: PyRAT `strain_name` is equivalent

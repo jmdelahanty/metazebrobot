@@ -8,8 +8,10 @@ which initialises data_manager and creates all tables.
     pixi run pytest tests/test_data.py -v
 """
 
+import json
 import re
 import uuid
+from io import BytesIO
 
 import pytest
 
@@ -239,6 +241,23 @@ class TestGenotypeParser:
         terms = data_manager._parse_genotype_terms("Tg(elavl3:GCaMP6s)")
         assert terms == [("elavl3", "gcamp6s")]
 
+    def test_sensor_and_effector_classification(self):
+        result = data_manager.parse_genotype(
+            "Tg(gfap:TRPV1-T2A-GFP);Tg(elavl3:GRAB-5HT)"
+        )
+
+        assert result[0]["construct_role"] == "effector"
+        assert result[0]["effector_family"] == "TRPV1"
+        assert result[0]["fluorophore"] == "gfp"
+
+        assert result[1]["construct_role"] == "sensor"
+        assert result[1]["sensor_family"] == "GRAB"
+        assert result[1]["sensor_target"] == "serotonin"
+
+    def test_promoter_only_construct_is_driver(self):
+        result = data_manager.parse_genotype("Tg(elavl3)")
+        assert result[0]["construct_role"] == "driver"
+
 
 class TestDishTransgenes:
     """dish_transgenes table populated on save."""
@@ -256,6 +275,11 @@ class TestDishTransgenes:
         # what the parent has and verify child inherited it
         parent_tgs = data_manager.get_dish_transgenes(seed_full_dish)
         assert len(tgs) == len(parent_tgs)
+        assert tgs[0]["construct_role"] == "sensor"
+        assert tgs[0]["sensor_family"] == "GCaMP"
+        assert tgs[0]["sensor_target"] == "calcium"
+        assert tgs[0]["source_type"] == "parent_dish"
+        assert tgs[0]["source_id"] == seed_full_dish
 
     def test_get_transgenes_empty(self, client, seed_dish):
         """Minimal seed dish (genotype without Tg prefix) has no transgenes."""
@@ -265,4 +289,151 @@ class TestDishTransgenes:
         # so transgenes are NOT auto-populated
         assert tgs == []
 
+    def test_catalog_match_enriches_dish_transgenes(self, client):
+        dish_data = {
+            "dish_id": f"DISH_{uuid.uuid4().hex[:8]}",
+            "cross_id": "17907",
+            "date_created": "20260410",
+            "dof": "20260407",
+            "genotype": "Tg(elavl3:GRAB-5HT)",
+            "responsible": "test-user",
+            "fish_count": 10,
+            "species": "Danio rerio",
+            "sex": "unknown",
+            "status": "active",
+        }
 
+        assert data_manager.save_fish_dish(dish_data)
+        tgs = data_manager.get_dish_transgenes(dish_data["dish_id"])
+
+        assert len(tgs) == 1
+        assert tgs[0]["catalog_id"] is not None
+        assert tgs[0]["catalog_name"] == "GRAB-5HT"
+        assert tgs[0]["match_method"] == "alias_exact"
+        assert tgs[0]["source_type"] == "crossing"
+        assert tgs[0]["source_id"] == "17907"
+        assert tgs[0]["construct_role"] == "sensor"
+        assert tgs[0]["sensor_family"] == "GRAB"
+        assert tgs[0]["sensor_target"] == "serotonin"
+        assert tgs[0]["fluorophore"] == "gfp"
+        assert tgs[0]["spectra"]["ex"] == 488
+        assert tgs[0]["spectra"]["em"] == 509
+
+
+class TestCrossingIndicatorNormalization:
+    """crossing indicator rows should persist normalized construct metadata."""
+
+    def test_save_and_load_crossing_indicators_include_normalized_fields(self, client):
+        indicators = [
+            {
+                "modification_type": "tg",
+                "promoter_driver": "elavl3",
+                "reporter_effector": "GRAB-5HT",
+                "color": "Green",
+                "expected_expression": "pan-neuronal",
+            }
+        ]
+
+        assert data_manager.save_crossing_indicators("17907", indicators)
+        saved = data_manager.get_crossing_indicators("17907")
+
+        assert len(saved) == 1
+        assert saved[0]["promoter_norm"] == "elavl3"
+        assert saved[0]["reporter_norm"] == "grab-5ht"
+        assert saved[0]["catalog_id"] is not None
+        assert saved[0]["catalog_name"] == "GRAB-5HT"
+        assert saved[0]["match_method"] == "alias_exact"
+        assert saved[0]["construct_role"] == "sensor"
+        assert saved[0]["sensor_family"] == "GRAB"
+        assert saved[0]["sensor_target"] == "serotonin"
+        assert saved[0]["fluorophore"] == "gfp"
+        assert saved[0]["spectra"]["color"] == "green"
+
+
+class TestConstructCatalog:
+    """construct catalog seed and alias resolution."""
+
+    def test_alias_resolution_uses_seed_catalog(self, client):
+        catalog_id, match_method = data_manager.resolve_construct_catalog_match("grab_5ht")
+
+        assert catalog_id is not None
+        assert match_method == "alias_exact"
+
+
+class TestMapzebrainLookup:
+    """mapzebrain matching should not fall back to promoter-only hits."""
+
+    def test_best_catalog_match_requires_reporter_match(self):
+        catalog = [
+            {
+                "name": "jf9Tg",
+                "synonyms": "elavl3:CaMPARI, Tg[elavl3:CaMPARI]",
+                "stack": "https://api.mapzebrain.org/media/Lines/elavl3CaMPARI/average_data/T_AVG_jf9Tg.zip",
+            }
+        ]
+
+        assert data_manager._find_best_catalog_match(catalog, "elavl3", "grab-5ht") is None
+
+    def test_best_catalog_match_prefers_positive_reporter_hit(self):
+        catalog = [
+            {
+                "name": "jf9Tg",
+                "synonyms": "elavl3:CaMPARI, Tg[elavl3:CaMPARI]",
+                "stack": "https://api.mapzebrain.org/media/Lines/elavl3CaMPARI/average_data/T_AVG_jf9Tg.zip",
+            },
+            {
+                "name": "jf4Tg",
+                "synonyms": "HuC:GCaMP6s, elavl3:GCaMP6s",
+                "stack": "https://api.mapzebrain.org/media/Lines/elavl3GCaMP6s/average_data/T_AVG_elavl3GCaMP6s.zip",
+            },
+        ]
+
+        result = data_manager._find_best_catalog_match(catalog, "elavl3", "gcamp6s")
+
+        assert result is not None
+        assert result["name"] == "jf4Tg"
+        assert result["display_name"] == "jf4Tg"
+
+    def test_fetch_mapzebrain_catalog_prefers_live_api_then_updates_cache(self, monkeypatch, tmp_path):
+        cache_path = tmp_path / "mapzebrain_catalog.json"
+        cache_path.write_text(json.dumps([{"name": "cached", "synonyms": "", "stack": "cached"}]))
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return BytesIO(
+                    json.dumps([{"name": "live", "synonyms": "", "stack": "live"}]).encode("utf-8")
+                ).read()
+
+        import urllib.request
+
+        monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=10: DummyResponse())
+        monkeypatch.setattr(data_manager, "config_dir", tmp_path)
+        monkeypatch.setattr(data_manager, "_mapzebrain_catalog", None)
+
+        result = data_manager.fetch_mapzebrain_catalog()
+
+        assert result == [{"name": "live", "synonyms": "", "stack": "live"}]
+        assert json.loads(cache_path.read_text()) == result
+
+    def test_fetch_mapzebrain_catalog_falls_back_to_cache(self, monkeypatch, tmp_path):
+        cached = [{"name": "cached", "synonyms": "", "stack": "cached"}]
+        (tmp_path / "mapzebrain_catalog.json").write_text(json.dumps(cached))
+
+        import urllib.request
+
+        def fail_urlopen(req, timeout=10):
+            raise OSError("network down")
+
+        monkeypatch.setattr(urllib.request, "urlopen", fail_urlopen)
+        monkeypatch.setattr(data_manager, "config_dir", tmp_path)
+        monkeypatch.setattr(data_manager, "_mapzebrain_catalog", None)
+
+        result = data_manager.fetch_mapzebrain_catalog()
+
+        assert result == cached

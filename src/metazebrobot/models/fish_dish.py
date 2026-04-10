@@ -132,6 +132,8 @@ class FishDish(BaseModel):
         description="Identifier for the specific source group/tank provided by aquatics (e.g., '15178-G1')"
     )
     dish_number: Optional[int] = None # Now clearly the sub-dish number
+    cross_setup_date: Optional[str] = Field(default=None, description="PyRAT cross setup date (YYYYMMDD)")
+    dof_source: Optional[str] = Field(default=None, description="How the DOF value was derived or set")
     dof: str  # Date of fertilization (YYYYMMDD)
     genotype: str
     sex: Literal["unknown", "M", "F"] = "unknown"
@@ -152,7 +154,7 @@ class FishDish(BaseModel):
     termination_date: Optional[str] = None
     termination_reason: Optional[str] = None
 
-    @field_validator('date_created', 'dof', 'termination_date', mode='before')
+    @field_validator('date_created', 'dof', 'cross_setup_date', 'termination_date', mode='before')
     @classmethod
     def validate_yyyymmdd_format(cls, v: Optional[str]) -> Optional[str]:
         """Validate date format (YYYYMMDD) for multiple fields."""
@@ -177,6 +179,8 @@ class FishDish(BaseModel):
         dof: str, # Required DOF
         dish_id: Optional[str] = None, # Allow overriding dish_id for derived dishes
         source_group_id: Optional[str] = None,
+        cross_setup_date: Optional[str] = None,
+        dof_source: Optional[str] = None,
         sex: str = "unknown",
         species: str = "Danio rerio",
         parents: Optional[List[str]] = None,
@@ -216,6 +220,8 @@ class FishDish(BaseModel):
             cross_id=cross_id,
             source_group_id=source_group_id,
             dish_number=dish_number if dish_population_type == "primary" else None, # Only store for primary?
+            cross_setup_date=cross_setup_date,
+            dof_source=dof_source,
             dof=dof,
             genotype=genotype,
             sex=sex,

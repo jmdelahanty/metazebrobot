@@ -13,6 +13,8 @@ import requests
 
 from PySide6.QtCore import QThread, Signal
 
+from .pyrat_frontend_client import enrich_crossings_with_frontend_details
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,6 +54,7 @@ class PyRATCrossingsWorker(QThread):
         base_url: str,
         client_token: str,
         user_token: str,
+        frontend_credentials: Optional[Dict[str, str]] = None,
         filters: Optional[Dict[str, Any]] = None,
         parent=None,
     ):
@@ -62,6 +65,7 @@ class PyRATCrossingsWorker(QThread):
             base_url: PyRAT API base URL.
             client_token: API client token.
             user_token: API user token.
+            frontend_credentials: Optional frontend login credentials for backend/v1.
             filters: Optional dictionary of API filter parameters.
             parent: Parent QObject.
         """
@@ -69,6 +73,7 @@ class PyRATCrossingsWorker(QThread):
         self.base_url = base_url
         self.client_token = client_token
         self.user_token = user_token
+        self.frontend_credentials = frontend_credentials
         self.filters = filters or {}
         self._is_cancelled = False
 
@@ -134,6 +139,14 @@ class PyRATCrossingsWorker(QThread):
 
             if self._is_cancelled:
                 return
+
+            if self.frontend_credentials:
+                self.progress.emit("Loading authoritative PyRAT crossing counts...")
+                crossings = enrich_crossings_with_frontend_details(
+                    crossings,
+                    self.frontend_credentials,
+                    progress_callback=self.progress.emit,
+                )
 
             self.progress.emit("Done!")
             self.finished.emit(crossings)

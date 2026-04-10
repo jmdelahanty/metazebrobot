@@ -5,8 +5,8 @@
 <hgroup>
     <h2>Fish — {{ dish_id }}</h2>
     <p>{{ genotype or "Unknown genotype" }} &mdash; {{ fish | length }} registered</p>
-    {% include "_transgenes.html" %}
 </hgroup>
+{% include "_transgenes.html" %}
 
 {# Dish-level reference images — always available #}
 <h3>Dish Reference Images</h3>

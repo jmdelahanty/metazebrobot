@@ -13,6 +13,7 @@ from metazebrobot.models.fish_dish import (
     QualityCheckData,
     ScreeningStep,
 )
+from metazebrobot.models.pyrat_crossing import PyRATCrossing
 
 
 class TestQualityCheckData:
@@ -177,3 +178,43 @@ class TestFishDish:
                 breeding={"parents": []},
                 enclosure={},
             )
+
+
+class TestPyRATCrossingPerformance:
+    """Validate PyRAT crossing performance precedence rules."""
+
+    def test_prefers_backend_v1_counts_over_children_and_description(self):
+        crossing = PyRATCrossing.from_api_dict(
+            {
+                "crossing_id": 14783,
+                "description": "2 Groups for Robot Avoidance Assay",
+                "crossing_tanks": 2,
+                "raised_tanks": 1,
+                "really_raised_tanks": 1,
+                "tanks": {"children": []},
+            }
+        )
+
+        assert crossing.raised_count == 1
+        assert crossing.performance_target_count == 2
+        assert crossing.performance == 0.5
+        assert crossing.performance_display == "50%"
+        assert crossing.performance_ratio_display == "1 / 2"
+
+    def test_falls_back_to_children_and_description_when_detail_counts_missing(self):
+        crossing = PyRATCrossing.from_api_dict(
+            {
+                "crossing_id": 20001,
+                "description": "2 groups for screening",
+                "tanks": {
+                    "children": [
+                        {"tank_id": 1},
+                    ]
+                },
+            }
+        )
+
+        assert crossing.raised_count == 1
+        assert crossing.performance_target_count == 2
+        assert crossing.performance == 0.5
+        assert crossing.performance_ratio_display == "1 / 2"

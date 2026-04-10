@@ -1,5 +1,5 @@
 [Unit]
-Description=MetaZebrobot Read-Only API
+Description=MetaZebrobot Web/API Server
 After=network.target
 
 [Service]

@@ -10,15 +10,14 @@ import logging
 import os
 from typing import Dict, List, Optional, Any, Callable, Tuple
 
-import keyring
-
 from ..models.pyrat_tank import PyRATTank, AgeStatus
 from ..models.pyrat_crossing import PyRATCrossing
+from ..utils.pyrat_credentials import (
+    get_pyrat_api_credentials,
+    get_pyrat_frontend_credentials,
+)
 
 logger = logging.getLogger(__name__)
-
-# Keyring service name (must match pyrat_query_tool.py)
-KEYRING_SERVICE = "pyrat-api"
 
 # Default user mapping file path
 USER_MAPPING_FILE = os.path.expanduser("~/.pyrat_user_mapping.json")
@@ -98,27 +97,13 @@ class PyRATTanksController:
 
     def get_credentials(self) -> Optional[Dict[str, str]]:
         """
-        Retrieve PyRAT API credentials from the system keyring.
+        Retrieve PyRAT API credentials from CLI/env/keyring helpers.
 
         Returns:
             Dictionary with base_url, client_token, user_token if found,
             None otherwise.
         """
-        try:
-            base_url = keyring.get_password(KEYRING_SERVICE, "base_url")
-            client_token = keyring.get_password(KEYRING_SERVICE, "client_token")
-            user_token = keyring.get_password(KEYRING_SERVICE, "user_token")
-
-            if base_url and client_token and user_token:
-                return {
-                    "base_url": base_url,
-                    "client_token": client_token,
-                    "user_token": user_token,
-                }
-            return None
-        except Exception as e:
-            logger.error(f"Error retrieving credentials from keyring: {e}")
-            return None
+        return get_pyrat_api_credentials()
 
     def has_credentials(self) -> bool:
         """
@@ -128,6 +113,16 @@ class PyRATTanksController:
             True if all required credentials exist, False otherwise.
         """
         return self.get_credentials() is not None
+
+    def get_frontend_credentials(self) -> Optional[Dict[str, str]]:
+        """Retrieve optional PyRAT frontend credentials for backend/v1 access."""
+        api_credentials = self.get_credentials()
+        default_base_url = api_credentials["base_url"] if api_credentials else None
+        return get_pyrat_frontend_credentials(default_base_url=default_base_url)
+
+    def has_frontend_credentials(self) -> bool:
+        """Check if PyRAT frontend credentials are configured."""
+        return self.get_frontend_credentials() is not None
 
     def parse_tanks(self, raw_tanks: List[Dict[str, Any]]) -> List[PyRATTank]:
         """
@@ -499,7 +494,7 @@ class PyRATTanksController:
             if hasattr(crossing, key):
                 value = getattr(crossing, key)
                 if value is None:
-                    if key in ("crossing_id", "raised_count", "requested_groups"):
+                    if key in ("crossing_id", "raised_count", "requested_groups", "performance_target_count"):
                         return -1 if ascending else float("inf")
                     return ""
                 return value
@@ -573,7 +568,7 @@ class PyRATTanksController:
         performances = [c.performance for c in crossings if c.performance is not None]
         avg_performance = sum(performances) / len(performances) if performances else None
 
-        total_requested = sum(c.requested_groups or 0 for c in crossings)
+        total_requested = sum(c.performance_target_count or 0 for c in crossings)
         total_raised = sum(c.raised_count for c in crossings)
 
         return {

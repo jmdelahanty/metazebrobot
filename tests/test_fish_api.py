@@ -8,6 +8,8 @@ no live server required.
 """
 
 import re
+import json
+import sqlite3
 import uuid
 
 import pytest
@@ -542,6 +544,46 @@ class TestDishCreation:
         resp = client.get("/dishes/new")
         assert resp.status_code == 200
         assert "Create New Dish" in resp.text
+        assert resp.text.count('id="dof-input"') == 1
+
+    def test_new_dish_form_prefills_selected_cross(self, client, monkeypatch):
+        import metazebrobot.api_server as api_server
+
+        def fake_fetch_pyrat(endpoint, params=None):
+            assert endpoint == "tanks/crossings"
+            assert params["crossing_id"] == "17907"
+            return [{
+                "crossing_id": "17907",
+                "strain_name": "Tg(elavl3:GRAB-5HT)",
+                "responsible_fullname": "Delahanty Jeremy",
+                "date_of_set_up": "2026-04-06",
+                "tanks": {
+                    "parents": [
+                        {
+                            "tank_id": 123,
+                            "location_rack_name": "M11",
+                            "tank_position": "E1",
+                        },
+                    ],
+                },
+            }]
+
+        monkeypatch.setattr(api_server, "_fetch_pyrat", fake_fetch_pyrat)
+
+        resp = client.get("/dishes/new?cross_id=17907")
+
+        assert resp.status_code == 200
+        assert 'name="cross_id"' in resp.text
+        assert 'value="17907"' in resp.text
+        assert 'value="Tg(elavl3:GRAB-5HT)"' in resp.text
+        assert 'value="Delahanty Jeremy"' in resp.text
+        assert 'value="#123_M11&gt;E1"' in resp.text
+        assert 'name="cross_setup_date"' in resp.text
+        assert 'value="2026-04-06"' in resp.text
+        assert resp.text.count('id="dof-input"') == 1
+        assert 'value="2026-04-07"' in resp.text
+        assert 'name="dof_source"' in resp.text
+        assert 'value="pyrat_setup_plus_1"' in resp.text
 
     def test_create_dish_success(self, client):
         resp = client.post(
@@ -565,6 +607,32 @@ class TestDishCreation:
         )
         assert resp.status_code == 303
         assert "/screening/TEST_CROSS_1" in resp.headers["location"]
+
+    def test_create_dish_persists_cross_setup_date_and_dof_source(self, client, tmp_db_path):
+        resp = client.post(
+            "/dishes/new",
+            data={
+                "cross_id": "TEST_CROSS_META",
+                "dish_number": 1,
+                "genotype": "Tg(elavl3:GCaMP6s)",
+                "responsible": "test-user",
+                "cross_setup_date": "2026-04-06",
+                "dof": "2026-04-07",
+                "dof_source": "pyrat_setup_plus_1",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            "SELECT dof, cross_setup_date, dof_source FROM dishes WHERE dish_id = ?",
+            ("TEST_CROSS_META_1",),
+        ).fetchone()
+        conn.close()
+
+        assert row == ("20260407", "20260406", "pyrat_setup_plus_1")
 
     def test_create_dish_duplicate(self, client):
         # Create first
@@ -598,6 +666,83 @@ class TestDishCreation:
         assert resp.status_code == 200
         # Should render the partial with empty fields (no PyRAT configured in tests)
         assert "Genotype" in resp.text
+
+    def test_cross_info_partial_prefills_from_pyrat(self, client, monkeypatch):
+        import metazebrobot.api_server as api_server
+
+        def fake_fetch_pyrat(endpoint, params=None):
+            assert endpoint == "tanks/crossings"
+            assert params["crossing_id"] == "17907"
+            return [{
+                "crossing_id": "17907",
+                "strain_name": "Tg(elavl3:GRAB-5HT)",
+                "responsible_fullname": "Delahanty Jeremy",
+                "date_of_set_up": "2026-04-06",
+                "tanks": {
+                    "parents": [
+                        {
+                            "tank_id": 123,
+                            "location_rack_name": "M11",
+                            "tank_position": "E1",
+                        },
+                        {
+                            "tank_id": 456,
+                            "location_rack_name": "M11",
+                            "tank_position": "E2",
+                        },
+                    ],
+                },
+            }]
+
+        monkeypatch.setattr(api_server, "_fetch_pyrat", fake_fetch_pyrat)
+
+        resp = client.get("/dishes/new/cross-info?cross_id=17907")
+
+        assert resp.status_code == 200
+        assert 'value="Tg(elavl3:GRAB-5HT)"' in resp.text
+        assert 'value="Delahanty Jeremy"' in resp.text
+        assert 'value="#123_M11&gt;E1, #456_M11&gt;E2"' in resp.text
+        assert 'name="cross_setup_date"' in resp.text
+        assert 'value="2026-04-06"' in resp.text
+        assert 'value="2026-04-07"' in resp.text
+        assert 'value="pyrat_setup_plus_1"' in resp.text
+
+    def test_cross_info_partial_prefills_from_existing_dish(self, client, tmp_db_path):
+        cross_id = f"CROSS_{uuid.uuid4().hex[:6]}"
+        parents = ["#123_M11>E1", "#456_M11>E2"]
+        conn = sqlite3.connect(str(tmp_db_path))
+        conn.execute(
+            """
+            INSERT INTO dishes (
+                dish_id, data, genotype, species, cross_id, dof, cross_setup_date, dof_source, responsible, breeding_parents
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"{cross_id}_1",
+                json.dumps({"dish_id": f"{cross_id}_1", "cross_id": cross_id}),
+                "Tg(elavl3:GCaMP6s)",
+                "Danio rerio",
+                cross_id,
+                "20260403",
+                "20260402",
+                "manual_override",
+                "Test User",
+                json.dumps(parents),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.get(f"/dishes/new/cross-info?cross_id={cross_id}")
+
+        assert resp.status_code == 200
+        assert 'value="Tg(elavl3:GCaMP6s)"' in resp.text
+        assert 'value="Test User"' in resp.text
+        assert 'value="#123_M11&gt;E1, #456_M11&gt;E2"' in resp.text
+        assert 'value="2026-04-02"' in resp.text
+        assert 'id="dof-input"' in resp.text
+        assert 'value="2026-04-03"' in resp.text
+        assert 'value="manual_override"' in resp.text
 
 
 class TestDishLabel:
@@ -741,3 +886,56 @@ class TestDishImages:
         resp = client.get(f"/dishes/{seed_dish}/images")
         assert "first" in resp.text
         assert "second" in resp.text
+
+
+# -------------------------------------------------------------------
+# PyRAT crossings page
+# -------------------------------------------------------------------
+
+
+class TestPyRATCrossingsPage:
+    """Crossings page should prefer backend/v1 detail counts when available."""
+
+    def test_crossings_page_prefers_frontend_detail_counts(self, client, monkeypatch):
+        import metazebrobot.api_server as api_server
+
+        def fake_fetch_pyrat(endpoint, params=None):
+            assert endpoint == "tanks/crossings"
+            return [
+                {
+                    "crossing_id": 14783,
+                    "status": "set-up",
+                    "date_of_record": "2025-01-20T00:00:00",
+                    "date_of_set_up": "2025-01-20T08:21:19",
+                    "date_of_raise": None,
+                    "strain_name": "Robot Avoidance",
+                    "description": "2 Groups for Robot Avoidance Assay",
+                    "tanks": {"children": []},
+                }
+            ]
+
+        def fake_get_frontend_credentials():
+            return {"base_url": "https://example.invalid/aquatic/", "username": "tester", "password": "secret"}
+
+        def fake_enrich(crossings, frontend_credentials, **kwargs):
+            assert frontend_credentials["username"] == "tester"
+            enriched = list(crossings)
+            enriched[0] = {
+                **enriched[0],
+                "crossing_tanks": 2,
+                "raised_tanks": 1,
+                "really_raised_tanks": 1,
+            }
+            return enriched
+
+        monkeypatch.setattr(api_server, "_fetch_pyrat", fake_fetch_pyrat)
+        monkeypatch.setattr(api_server, "get_pyrat_frontend_credentials", fake_get_frontend_credentials)
+        monkeypatch.setattr(api_server, "enrich_crossings_with_frontend_details", fake_enrich)
+
+        resp = client.get("/pyrat/crossings/")
+        assert resp.status_code == 200
+        assert "Crossing Tanks" in resp.text
+        assert "50%" in resp.text
+        assert 'title="1 / 2"' in resp.text
+        assert 'href="/dishes/new?cross_id=14783"' in resp.text
+        assert "New dish" in resp.text

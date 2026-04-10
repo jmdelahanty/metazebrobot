@@ -1,12 +1,40 @@
-{# Reusable partial: display parsed transgenes as compact tags #}
+{# Reusable partial: display parsed constructs as a compact normalized table #}
 {% if transgenes %}
-<span class="transgene-tags">
-    {% for tg in transgenes %}
-    <span class="transgene-tag" title="{{ tg.construct }}"
-          {% if tg.spectra %}style="border-left: 3px solid {{ tg.spectra.color }}"{% endif %}>
-        <strong>{{ tg.promoter }}</strong>{% if tg.reporter %} : {{ tg.reporter }}{% endif %}
-        {% if tg.spectra %}<small class="transgene-spectra">{{ tg.spectra.ex }}/{{ tg.spectra.em }}nm</small>{% endif %}
-    </span>
-    {% endfor %}
-</span>
+<section class="transgene-block">
+    <small><strong>Parsed Constructs</strong></small>
+    <figure>
+        <table role="grid" class="screening-steps-table transgene-table">
+            <thead>
+                <tr>
+                    <th>Promoter</th>
+                    <th>Reporter</th>
+                    <th>Role</th>
+                    <th>Family</th>
+                    <th>Target</th>
+                    <th>Fluorophore</th>
+                    <th>Spectra</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tg in transgenes %}
+                <tr title="{{ tg.construct }}">
+                    <td><strong>{{ tg.promoter or "—" }}</strong></td>
+                    <td>{{ tg.reporter or "—" }}</td>
+                    <td>{{ tg.construct_role or "—" }}</td>
+                    <td>{{ tg.family or tg.sensor_family or tg.effector_family or "—" }}</td>
+                    <td>{{ tg.target or tg.sensor_target or "—" }}</td>
+                    <td>{{ tg.fluorophore or "—" }}</td>
+                    <td>
+                        {% if tg.spectra %}
+                            Ex {{ tg.spectra.ex }} / Em {{ tg.spectra.em }} nm
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </figure>
+</section>
 {% endif %}

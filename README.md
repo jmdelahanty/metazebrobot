@@ -32,6 +32,7 @@ metazebrobot/
 ├── bin/                            # Utility scripts
 ├── tests/                          # Test directory
 ├── config.example.json             # Example user config
+├── pyrat_credentials_tool.py       # PyRAT credential setup / clear tool
 ├── pyrat_query_tool.py             # PyRAT API tank query tool
 ├── get_all_user_ids.py             # PyRAT user mapping tool
 └── migrate_to_nosql.py             # JSON -> SQLite migration
@@ -65,22 +66,35 @@ pytest
 
 MetaZebrobot integrates with [PyRAT](https://www.scionics.com/pyrat.html), which Janelia relies on for animal management. The integration includes several features:
 
+#### Credential Setup
+
+Store PyRAT API tokens and optional frontend username/password in the system keyring:
+
+```bash
+python pyrat_credentials_tool.py --setup-credentials
+```
+
+The query tool still supports `--setup-credentials`, but the dedicated credentials tool is now the primary setup path.
+
 #### Tank Query Tool
 
 The `pyrat_query_tool.py` script provides a flexible way to query the PyRAT API for tank information:
 
 ```bash
+# Use stored credentials from the system keyring
+python pyrat_query_tool.py --responsible "delahantyj"
+
 # Get all tanks for a specific user
-python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic/ "client-token" "user-token" --responsible "delahantyj"
+python pyrat_query_tool.py --base-url "https://pyrataquatics.janelia.org/aquatic/" --client-token "client-token" --user-token "user-token" --responsible "delahantyj"
 
 # Get tanks in a specific rack
-python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic/ "client-token" "user-token" --rack "M08"
+python pyrat_query_tool.py --base-url "https://pyrataquatics.janelia.org/aquatic/" --client-token "client-token" --user-token "user-token" --rack "M08"
 
 # Filter by age
-python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic/ "client-token" "user-token" --min-age-days 90 --max-age-days 180
+python pyrat_query_tool.py --base-url "https://pyrataquatics.janelia.org/aquatic/" --client-token "client-token" --user-token "user-token" --min-age-days 90 --max-age-days 180
 
 # Save results to a JSON file
-python pyrat_query_tool.py https://pyrataquatics.janelia.org/aquatic/ "client-token" "user-token" --output tanks.json
+python pyrat_query_tool.py --output tanks.json
 ```
 
 Features:
@@ -114,26 +128,37 @@ The analysis notebook is pretty bad, but its a start I guess. Density matters fo
 Create a local `config.json` (see `config.example.json`) to point the app at your
 SQLite database. This file is user-specific and should not be committed.
 
-## Read-Only API (FastAPI)
+## Web/API Server (FastAPI)
 
-For remote reads (e.g., a rig machine), you can run a small read-only API that
-exposes dish data over HTTP while the SQLite file stays local to the host.
+The FastAPI server powers both the browser-based dish workflows and the JSON
+HTTP endpoints while the SQLite file stays local to the host.
 
-Install API dependencies:
-
-```
-pip install .[api]
-```
-
-Run the service:
+For local testing from this repo, use Pixi:
 
 ```
+pixi run python -m metazebrobot.api_server --db-path ./zebrobot.db --port 8000
+```
+
+Then open:
+
+- `http://127.0.0.1:8000/`
+- `http://127.0.0.1:8000/dishes/new`
+
+If you prefer a plain Python environment instead of Pixi:
+
+```
+python3 -m pip install -e . fastapi uvicorn
 METAZEBROBOT_DB_PATH=/path/to/zebrobot.db \
-python -m metazebrobot.api_server --host 0.0.0.0 --port 8000
+python3 -m metazebrobot.api_server --port 8000
 ```
 
-Example endpoints:
+Add `--lab-network` only if you explicitly want other machines on the LAN to
+connect.
 
+Example routes:
+
+- `GET /`
+- `GET /dishes/new`
 - `GET /health`
 - `GET /dishes?status=active&limit=200&offset=0`
 - `GET /dishes/{dish_id}?include_checks=true`
@@ -141,14 +166,17 @@ Example endpoints:
 ### systemd service (Ubuntu)
 
 An example unit file is provided at `deploy/metazebrobot-api.service`. Copy it to
-`/etc/systemd/system/`, edit the `User`, `WorkingDirectory`, and
-`METAZEBROBOT_DB_PATH`, then enable it:
+`/etc/systemd/system/`, edit the `User`, `WorkingDirectory`,
+`METAZEBROBOT_DB_PATH`, and `ExecStart` flags as needed, then enable it:
 
 ```
 sudo cp deploy/metazebrobot-api.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now metazebrobot-api.service
 ```
+
+The checked-in unit binds to `127.0.0.1`. If you intentionally want LAN access,
+update `ExecStart` to add `--lab-network`.
 
 ## Data Structure
 

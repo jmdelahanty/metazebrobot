@@ -50,7 +50,7 @@ class PyRATCrossingsTab(QWidget):
 
     Features:
     - Browse crossings with filters (status, strain, search)
-    - Performance tracking (requested vs raised)
+    - Performance tracking (crossing tanks vs raised)
     - Color-coded rows based on status
     - Detail view panel for selected crossing
     - Filter persistence between sessions
@@ -159,7 +159,7 @@ class PyRATCrossingsTab(QWidget):
                 "Date",
                 "Status",
                 "Strain",
-                "Requested",
+                "Crossing Tanks",
                 "Raised",
                 "Performance",
                 "Description",
@@ -184,7 +184,7 @@ class PyRATCrossingsTab(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Date
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Status
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Strain
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Requested
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Crossing Tanks
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Raised
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Performance
         header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)  # Description
@@ -221,7 +221,7 @@ class PyRATCrossingsTab(QWidget):
                 "Credentials Required",
                 "PyRAT API credentials are not configured.\n\n"
                 "Please run the following command in a terminal to set up credentials:\n\n"
-                "  python pyrat_query_tool.py --setup-credentials\n\n"
+                "  python pyrat_credentials_tool.py --setup-credentials\n\n"
                 "This will securely store your API credentials in the system keyring.",
             )
             return
@@ -251,11 +251,14 @@ class PyRATCrossingsTab(QWidget):
             api_filters["responsible_id"] = responsible_id
             logger.info(f"Filtering crossings by responsible_id: {responsible_id}")
 
+        frontend_credentials = pyrat_tanks_controller.get_frontend_credentials()
+
         # Create and start worker
         self.worker = PyRATCrossingsWorker(
             base_url=credentials["base_url"],
             client_token=credentials["client_token"],
             user_token=credentials["user_token"],
+            frontend_credentials=frontend_credentials,
             filters=api_filters,
             parent=self,
         )
@@ -353,7 +356,7 @@ class PyRATCrossingsTab(QWidget):
             1: "date_of_record",
             2: "status",
             3: "strain_name",
-            4: "requested_groups",
+            4: "performance_target_count",
             5: "raised_count",
             6: "performance",
             7: "description",
@@ -402,9 +405,13 @@ class PyRATCrossingsTab(QWidget):
             self.crossings_table.setItem(i, 2, QTableWidgetItem(crossing.status or ""))
             self.crossings_table.setItem(i, 3, QTableWidgetItem(crossing.strain_name or ""))
 
-            # Requested groups
-            req_str = str(crossing.requested_groups) if crossing.requested_groups else "?"
-            self.crossings_table.setItem(i, 4, QTableWidgetItem(req_str))
+            # Crossing tanks / target count
+            target_str = (
+                str(crossing.performance_target_count)
+                if crossing.performance_target_count is not None
+                else "?"
+            )
+            self.crossings_table.setItem(i, 4, QTableWidgetItem(target_str))
 
             # Raised count
             self.crossings_table.setItem(i, 5, QTableWidgetItem(str(crossing.raised_count)))
@@ -474,6 +481,7 @@ class PyRATCrossingsTab(QWidget):
 
         # Build child tanks HTML
         children_html = ""
+        visible_child_count = len(crossing.child_tanks)
         if crossing.child_tanks:
             for tank in crossing.child_tanks:
                 children_html += f"""
@@ -482,7 +490,7 @@ class PyRATCrossingsTab(QWidget):
                     — Status: {tank.status or 'N/A'}</li>
                 """
         else:
-            children_html = "<li>None (not yet raised)</li>"
+            children_html = "<li>None exposed via api/v3 tank children</li>"
 
         details_html = f"""
         <h3>Crossing Details: {crossing.crossing_id}</h3>
@@ -500,9 +508,10 @@ class PyRATCrossingsTab(QWidget):
 
         <h4>Performance</h4>
         <p>
-            <b>Requested Groups:</b> {crossing.requested_groups or '? (could not parse)'}<br>
+            <b>Crossing Tanks:</b> {crossing.performance_target_count or '?'}<br>
             <b>Raised Tanks:</b> {crossing.raised_count}<br>
             <b>Performance:</b> <span style="{perf_style}">{crossing.performance_display}</span>
+            ({crossing.performance_ratio_display})
         </p>
 
         <h4>Description</h4>
@@ -511,7 +520,7 @@ class PyRATCrossingsTab(QWidget):
         <h4>Parent Tanks ({len(crossing.parent_tanks)})</h4>
         <ul>{parents_html}</ul>
 
-        <h4>Child Tanks ({crossing.raised_count})</h4>
+        <h4>Child Tanks ({visible_child_count})</h4>
         <ul>{children_html}</ul>
 
         <h4>Responsible</h4>

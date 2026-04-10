@@ -5,8 +5,8 @@
 <hgroup>
     <h2>{{ dish.dish_id }}</h2>
     <p>{{ dish.genotype }} &mdash; {{ dish.fish_count }} fish &mdash; DPF {{ dpf if dpf is not none else "?" }}</p>
-    {% include "_transgenes.html" %}
 </hgroup>
+{% include "_transgenes.html" %}
 
 {# Protocol guidance #}
 {% if protocol %}
@@ -112,9 +112,33 @@
         <div class="grid">
             <label>
                 Indicators (comma-separated)
-                <input type="text" name="indicators_screened"
-                       value="{{ current_step.indicators | join(', ') if current_step and current_step.indicators else '' }}"
+                <input type="text" id="indicators_screened_input" name="indicators_screened"
+                       list="indicator-suggestions"
+                       value="{{ default_indicator_value }}"
                        placeholder="e.g. GFP, jRGECO (leave empty for pigment-only)">
+                {% if indicator_suggestions %}
+                <datalist id="indicator-suggestions">
+                    {% for suggestion in indicator_suggestions %}
+                    <option value="{{ suggestion.value }}">{{ suggestion.meta }}</option>
+                    {% endfor %}
+                </datalist>
+                <small>
+                    Known dish constructs:
+                    {% for suggestion in indicator_suggestions %}
+                    <button type="button" class="outline secondary" style="margin:0.15rem 0.25rem 0.15rem 0; padding:0.1rem 0.45rem; font-size:0.8rem"
+                            onclick='appendIndicator({{ suggestion.value|tojson }})'>
+                        {{ suggestion.value }}
+                    </button>
+                    {% if suggestion.meta %}
+                    <span style="margin-right:0.5rem; opacity:0.8">{{ suggestion.meta }}</span>
+                    {% endif %}
+                    {% endfor %}
+                    <button type="button" class="secondary" style="margin-left:0.35rem; padding:0.1rem 0.45rem; font-size:0.8rem"
+                            onclick="clearIndicators()">
+                        Clear
+                    </button>
+                </small>
+                {% endif %}
             </label>
             <label>
                 Criteria
@@ -209,6 +233,27 @@ function formatDT(val) {
     const d = date.replace(/-/g, "");
     const t = time.length === 5 ? time + ":00" : time;
     return d + "T" + t;
+}
+
+function appendIndicator(value) {
+    const input = document.getElementById("indicators_screened_input");
+    if (!input || !value) return;
+    const existing = input.value
+        .split(",")
+        .map(part => part.trim())
+        .filter(Boolean);
+    const hasValue = existing.some(part => part.toLowerCase() === String(value).toLowerCase());
+    if (!hasValue) {
+        existing.push(String(value));
+    }
+    input.value = existing.join(", ");
+}
+
+function clearIndicators() {
+    const input = document.getElementById("indicators_screened_input");
+    if (input) {
+        input.value = "";
+    }
 }
 </script>
 {% endblock %}

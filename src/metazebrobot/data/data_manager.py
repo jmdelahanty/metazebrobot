@@ -29,6 +29,19 @@ class DataManager:
     SQLite for better performance and data integrity.
     """
 
+    _CONSTRUCT_PATTERN = re.compile(
+        r'(?:(\w+)\s*)?'
+        r'\('
+        r'([^)]+)'
+        r'\)'
+    )
+
+    _PREFIX_TO_TYPE = {
+        "tg": "tg",
+        "tgbac": "tg",
+        "et": "other",
+    }
+
     def __init__(self):
         """Initialize the data manager with default values."""
         # Database path - will be set properly in initialize()
@@ -80,6 +93,19 @@ class DataManager:
 
         # Set config directory for protocols and images
         self.config_dir = Path(__file__).parent.parent / 'config'
+
+        return self.ensure_schema()
+
+    def ensure_schema(self) -> bool:
+        """Verify required tables exist and apply all known schema migrations."""
+        if not self.database_path:
+            logger.error("Database path not configured.")
+            return False
+
+        if not self.database_path.exists():
+            logger.error(f"Database file not found: {self.database_path}")
+            logger.error("Please run the migration script first!")
+            return False
 
         # Test database connection and apply schema updates
         try:
@@ -174,6 +200,44 @@ class DataManager:
                 if 'screening_date_finalized' not in existing_columns:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN screening_date_finalized TEXT")
 
+                # Canonical construct/reporter registry
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS construct_catalog (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        canonical_name TEXT NOT NULL,
+                        normalized_name TEXT NOT NULL UNIQUE,
+                        construct_role TEXT,
+                        family TEXT,
+                        target TEXT,
+                        fluorophore TEXT,
+                        excitation_nm INTEGER,
+                        emission_nm INTEGER,
+                        screen_color TEXT,
+                        notes TEXT,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_construct_catalog_canonical_name
+                    ON construct_catalog(canonical_name)
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS construct_aliases (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        catalog_id INTEGER NOT NULL,
+                        alias_name TEXT NOT NULL,
+                        normalized_alias TEXT NOT NULL UNIQUE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (catalog_id) REFERENCES construct_catalog(id) ON DELETE CASCADE
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_construct_aliases_catalog_id
+                    ON construct_aliases(catalog_id)
+                """)
+
                 # Crossing-level transgenic indicators (keyed by PyRAT crossing_id)
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS crossing_transgenic_indicators (
@@ -181,15 +245,121 @@ class DataManager:
                         crossing_id TEXT NOT NULL,
                         modification_type TEXT DEFAULT 'tg',
                         promoter_driver TEXT,
+                        promoter_norm TEXT,
                         reporter_effector TEXT NOT NULL,
+                        reporter_norm TEXT,
+                        fluorophore TEXT,
+                        construct_role TEXT,
+                        sensor_family TEXT,
+                        sensor_target TEXT,
+                        effector_family TEXT,
+                        catalog_id INTEGER,
+                        match_method TEXT,
                         color TEXT,
                         expected_expression TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (catalog_id) REFERENCES construct_catalog(id)
                     )
                 """)
                 cursor.execute("""
                     CREATE INDEX IF NOT EXISTS idx_crossing_tg_indicators_crossing_id
                     ON crossing_transgenic_indicators(crossing_id)
+                """)
+                cursor.execute("PRAGMA table_info(crossing_transgenic_indicators)")
+                crossing_indicator_cols = {row[1] for row in cursor.fetchall()}
+                if 'promoter_norm' not in crossing_indicator_cols:
+                    cursor.execute("ALTER TABLE crossing_transgenic_indicators ADD COLUMN promoter_norm TEXT")
+                if 'reporter_norm' not in crossing_indicator_cols:
+                    cursor.execute("ALTER TABLE crossing_transgenic_indicators ADD COLUMN reporter_norm TEXT")
+                if 'fluorophore' not in crossing_indicator_cols:
+                    cursor.execute("ALTER TABLE crossing_transgenic_indicators ADD COLUMN fluorophore TEXT")
+                if 'construct_role' not in crossing_indicator_cols:
+                    cursor.execute("ALTER TABLE crossing_transgenic_indicators ADD COLUMN construct_role TEXT")
+                if 'sensor_family' not in crossing_indicator_cols:
+                    cursor.execute("ALTER TABLE crossing_transgenic_indicators ADD COLUMN sensor_family TEXT")
+                if 'sensor_target' not in crossing_indicator_cols:
+                    cursor.execute("ALTER TABLE crossing_transgenic_indicators ADD COLUMN sensor_target TEXT")
+                if 'effector_family' not in crossing_indicator_cols:
+                    cursor.execute("ALTER TABLE crossing_transgenic_indicators ADD COLUMN effector_family TEXT")
+                if 'catalog_id' not in crossing_indicator_cols:
+                    cursor.execute("ALTER TABLE crossing_transgenic_indicators ADD COLUMN catalog_id INTEGER")
+                if 'match_method' not in crossing_indicator_cols:
+                    cursor.execute("ALTER TABLE crossing_transgenic_indicators ADD COLUMN match_method TEXT")
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_crossing_tg_indicators_catalog_id
+                    ON crossing_transgenic_indicators(catalog_id)
+                """)
+
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS dish_transgenes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        dish_id TEXT NOT NULL,
+                        construct TEXT NOT NULL,
+                        modification_type TEXT,
+                        promoter TEXT NOT NULL,
+                        reporter TEXT,
+                        fluorophore TEXT,
+                        construct_role TEXT,
+                        sensor_family TEXT,
+                        sensor_target TEXT,
+                        effector_family TEXT,
+                        catalog_id INTEGER,
+                        source_type TEXT,
+                        source_id TEXT,
+                        match_method TEXT,
+                        excitation_nm INTEGER,
+                        emission_nm INTEGER,
+                        fluorophore_color TEXT,
+                        FOREIGN KEY (dish_id) REFERENCES dishes(dish_id),
+                        FOREIGN KEY (catalog_id) REFERENCES construct_catalog(id),
+                        UNIQUE(dish_id, construct)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_transgenes_dish_id
+                    ON dish_transgenes(dish_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_transgenes_promoter
+                    ON dish_transgenes(promoter)
+                """)
+                cursor.execute("PRAGMA table_info(dish_transgenes)")
+                dish_transgene_cols = {row[1] for row in cursor.fetchall()}
+                if 'modification_type' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN modification_type TEXT")
+                if 'construct_role' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN construct_role TEXT")
+                if 'sensor_family' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN sensor_family TEXT")
+                if 'sensor_target' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN sensor_target TEXT")
+                if 'effector_family' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN effector_family TEXT")
+                if 'catalog_id' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN catalog_id INTEGER")
+                if 'source_type' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN source_type TEXT")
+                if 'source_id' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN source_id TEXT")
+                if 'match_method' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN match_method TEXT")
+                if 'excitation_nm' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN excitation_nm INTEGER")
+                if 'emission_nm' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN emission_nm INTEGER")
+                if 'fluorophore_color' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN fluorophore_color TEXT")
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_transgenes_construct_role
+                    ON dish_transgenes(construct_role)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_transgenes_sensor_family
+                    ON dish_transgenes(sensor_family)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_transgenes_catalog_id
+                    ON dish_transgenes(catalog_id)
                 """)
 
                 # Add remaining columns to dishes table for full flattening
@@ -205,6 +375,10 @@ class DataManager:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN parent_dish_id TEXT")
                 if 'dish_population_type' not in existing_columns:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN dish_population_type TEXT")
+                if 'cross_setup_date' not in existing_columns:
+                    cursor.execute("ALTER TABLE dishes ADD COLUMN cross_setup_date TEXT")
+                if 'dof_source' not in existing_columns:
+                    cursor.execute("ALTER TABLE dishes ADD COLUMN dof_source TEXT")
                 if 'notes' not in existing_columns:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN notes TEXT")
                 if 'room' not in existing_columns:
@@ -399,7 +573,10 @@ class DataManager:
 
         # Mark as initialized
         self._is_initialized = True
-        logger.info("DataManager initialized successfully with SQLite backend.")
+        self.seed_construct_catalog()
+        self.backfill_dish_transgenes()
+        self.backfill_crossing_indicator_metadata()
+        logger.info("DataManager schema is up to date.")
         return True
 
     @property
@@ -592,17 +769,19 @@ class DataManager:
             # Insert or update dish with all flattened columns
             cursor.execute("""
             INSERT OR REPLACE INTO dishes
-            (dish_id, cross_id, date_created, dof, genotype, responsible,
+            (dish_id, cross_id, date_created, dof, cross_setup_date, dof_source, genotype, responsible,
              status, fish_count, species, sex, parent_dish_id, dish_population_type,
              notes, room, enclosure_temperature, container_type,
              enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
              breeding_parents, termination_date, termination_reason, data, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, (
                 dish_id,
                 dish_data.get('cross_id'),
                 dish_data.get('date_created'),
                 dish_data.get('dof'),
+                dish_data.get('cross_setup_date'),
+                dish_data.get('dof_source'),
                 dish_data.get('genotype'),
                 dish_data.get('responsible'),
                 dish_data.get('status', 'active'),
@@ -631,7 +810,7 @@ class DataManager:
             self._save_screening_steps(cursor, dish_id, dish_data.get('screening_results'))
 
             # Update normalized transgenes (within same transaction)
-            self._save_dish_transgenes(cursor, dish_id, dish_data.get('genotype', ''))
+            self._save_dish_transgenes(cursor, dish_data)
 
             # Commit transaction - all or nothing
             conn.commit()
@@ -721,64 +900,147 @@ class DataManager:
             dish_id
         ))
 
-    def _save_dish_transgenes(self, cursor, dish_id: str, genotype: str):
+    @staticmethod
+    def _dish_transgene_source(dish_data: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+        """Determine provenance for dish transgene rows."""
+        if dish_data.get("parent_dish_id"):
+            return "parent_dish", dish_data.get("parent_dish_id")
+        if dish_data.get("cross_id"):
+            return "crossing", dish_data.get("cross_id")
+        return "manual_genotype", None
+
+    def _save_dish_transgenes(self, cursor, dish_data: Dict[str, Any]):
         """Parse genotype and save normalized transgene rows with spectral data."""
+        dish_id = dish_data.get("dish_id")
+        genotype = dish_data.get("genotype", "")
+        source_type, source_id = self._dish_transgene_source(dish_data)
         cursor.execute("DELETE FROM dish_transgenes WHERE dish_id = ?", (dish_id,))
         transgenes = self.parse_genotype(genotype)
         for tg in transgenes:
             spectra = self.get_fluorophore_spectra(tg.get("fluorophore"))
+            catalog_id, match_method = self.resolve_construct_catalog_match(
+                tg.get("reporter_raw") or tg.get("reporter")
+            )
             cursor.execute("""
                 INSERT OR IGNORE INTO dish_transgenes
-                (dish_id, construct, promoter, reporter, fluorophore,
+                (dish_id, construct, modification_type, promoter, reporter, fluorophore,
+                 construct_role, sensor_family, sensor_target, effector_family,
+                 catalog_id, source_type, source_id, match_method,
                  excitation_nm, emission_nm, fluorophore_color)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 dish_id,
                 tg["construct"],
+                tg.get("modification_type"),
                 tg["promoter"],
                 tg["reporter"],
                 tg["fluorophore"],
+                tg.get("construct_role"),
+                tg.get("sensor_family"),
+                tg.get("sensor_target"),
+                tg.get("effector_family"),
+                catalog_id,
+                source_type,
+                source_id,
+                match_method,
                 spectra["ex"] if spectra else None,
                 spectra["em"] if spectra else None,
                 spectra["color"] if spectra else None,
             ))
 
     def backfill_dish_transgenes(self):
-        """One-time backfill: parse genotypes for all existing dishes."""
+        """Populate missing or outdated normalized dish transgene rows."""
         if not self.is_initialized:
             return
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                # Skip if already populated
-                count = cursor.execute("SELECT COUNT(*) FROM dish_transgenes").fetchone()[0]
-                if count > 0:
-                    return
-                rows = cursor.execute("SELECT dish_id, genotype FROM dishes WHERE genotype IS NOT NULL").fetchall()
+                rows = cursor.execute("""
+                    SELECT dish_id, genotype, cross_id, parent_dish_id
+                    FROM dishes
+                    WHERE genotype IS NOT NULL
+                """).fetchall()
                 filled = 0
                 for row in rows:
-                    tgs = self.parse_genotype(row["genotype"])
-                    for tg in tgs:
-                        spectra = self.get_fluorophore_spectra(tg.get("fluorophore"))
-                        cursor.execute("""
-                            INSERT OR IGNORE INTO dish_transgenes
-                            (dish_id, construct, promoter, reporter, fluorophore,
-                             excitation_nm, emission_nm, fluorophore_color)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            row["dish_id"], tg["construct"], tg["promoter"],
-                            tg["reporter"], tg["fluorophore"],
-                            spectra["ex"] if spectra else None,
-                            spectra["em"] if spectra else None,
-                            spectra["color"] if spectra else None,
-                        ))
-                    if tgs:
+                    counts = cursor.execute(
+                        """
+                        SELECT
+                            COUNT(*) AS total_count,
+                            SUM(
+                                CASE
+                                    WHEN modification_type IS NOT NULL
+                                         AND construct_role IS NOT NULL
+                                         AND source_type IS NOT NULL
+                                         AND match_method IS NOT NULL
+                                    THEN 1 ELSE 0
+                                END
+                            ) AS normalized_count
+                        FROM dish_transgenes
+                        WHERE dish_id = ?
+                        """,
+                        (row["dish_id"],),
+                    ).fetchone()
+                    if counts["total_count"] and counts["total_count"] == (counts["normalized_count"] or 0):
+                        continue
+                    self._save_dish_transgenes(cursor, dict(row))
+                    if row["genotype"]:
                         filled += 1
                 conn.commit()
                 if filled:
                     logger.info(f"Backfilled dish_transgenes for {filled} dishes")
         except Exception as e:
             logger.warning(f"dish_transgenes backfill failed (table may not exist yet): {e}")
+
+    def backfill_crossing_indicator_metadata(self):
+        """Populate normalized metadata columns for existing crossing indicators."""
+        if not self.is_initialized:
+            return
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                rows = cursor.execute("""
+                    SELECT id, modification_type, promoter_driver, reporter_effector
+                    FROM crossing_transgenic_indicators
+                """).fetchall()
+                updated = 0
+                for row in rows:
+                    modification_type = row["modification_type"] or "tg"
+                    promoter_norm = (row["promoter_driver"] or "").strip().lower() or None
+                    reporter_norm = (row["reporter_effector"] or "").strip().lower() or None
+                    classified = self.classify_construct(modification_type, promoter_norm, reporter_norm)
+                    catalog_id, match_method = self.resolve_construct_catalog_match(
+                        row["reporter_effector"] or reporter_norm
+                    )
+                    cursor.execute("""
+                        UPDATE crossing_transgenic_indicators
+                        SET promoter_norm = ?,
+                            reporter_norm = ?,
+                            fluorophore = ?,
+                            construct_role = ?,
+                            sensor_family = ?,
+                            sensor_target = ?,
+                            effector_family = ?,
+                            catalog_id = ?,
+                            match_method = ?
+                        WHERE id = ?
+                    """, (
+                        promoter_norm,
+                        reporter_norm,
+                        classified.get("fluorophore"),
+                        classified.get("construct_role"),
+                        classified.get("sensor_family"),
+                        classified.get("sensor_target"),
+                        classified.get("effector_family"),
+                        catalog_id,
+                        match_method,
+                        row["id"],
+                    ))
+                    updated += 1
+                conn.commit()
+                if updated:
+                    logger.info(f"Backfilled normalized metadata for {updated} crossing indicators")
+        except Exception as e:
+            logger.warning(f"crossing indicator metadata backfill failed: {e}")
 
     def get_dish_transgenes(self, dish_id: str) -> List[Dict[str, Any]]:
         """Get parsed transgenes for a dish with spectral data from the database."""
@@ -787,20 +1049,70 @@ class DataManager:
         try:
             with self.get_connection() as conn:
                 rows = conn.execute(
-                    """SELECT construct, promoter, reporter, fluorophore,
-                              excitation_nm, emission_nm, fluorophore_color
-                       FROM dish_transgenes WHERE dish_id = ?""",
+                    """
+                    SELECT dt.construct,
+                           dt.modification_type,
+                           dt.promoter,
+                           dt.reporter,
+                           dt.fluorophore,
+                           dt.construct_role,
+                           dt.sensor_family,
+                           dt.sensor_target,
+                           dt.effector_family,
+                           dt.catalog_id,
+                           dt.source_type,
+                           dt.source_id,
+                           dt.match_method,
+                           dt.excitation_nm,
+                           dt.emission_nm,
+                           dt.fluorophore_color,
+                           cc.canonical_name AS catalog_name,
+                           cc.construct_role AS catalog_construct_role,
+                           cc.family AS catalog_family,
+                           cc.target AS catalog_target,
+                           cc.fluorophore AS catalog_fluorophore,
+                           cc.excitation_nm AS catalog_excitation_nm,
+                           cc.emission_nm AS catalog_emission_nm,
+                           cc.screen_color AS catalog_screen_color,
+                           cc.notes AS catalog_notes
+                    FROM dish_transgenes dt
+                    LEFT JOIN construct_catalog cc ON cc.id = dt.catalog_id
+                    WHERE dt.dish_id = ?
+                    ORDER BY dt.id ASC
+                    """,
                     (dish_id,),
                 ).fetchall()
                 results = []
                 for row in rows:
                     tg = {k: row[k] for k in row.keys()}
+                    construct_role = tg.get("catalog_construct_role") or tg.get("construct_role")
+                    catalog_family = tg.get("catalog_family")
+                    if construct_role == "sensor" and catalog_family and not tg.get("sensor_family"):
+                        tg["sensor_family"] = catalog_family
+                    if construct_role == "effector" and catalog_family and not tg.get("effector_family"):
+                        tg["effector_family"] = catalog_family
+                    if construct_role and not tg.get("construct_role"):
+                        tg["construct_role"] = construct_role
+                    if tg.get("catalog_target") and not tg.get("sensor_target"):
+                        tg["sensor_target"] = tg["catalog_target"]
+                    if tg.get("catalog_fluorophore") and not tg.get("fluorophore"):
+                        tg["fluorophore"] = tg["catalog_fluorophore"]
+
+                    excitation_nm = tg.get("catalog_excitation_nm") or tg.get("excitation_nm")
+                    emission_nm = tg.get("catalog_emission_nm") or tg.get("emission_nm")
+                    screen_color = tg.get("catalog_screen_color") or tg.get("fluorophore_color")
+
+                    tg["family"] = tg.get("sensor_family") or tg.get("effector_family") or catalog_family
+                    tg["target"] = tg.get("sensor_target") or tg.get("catalog_target")
+                    tg["screen_color"] = screen_color
+                    tg["catalog_notes"] = tg.get("catalog_notes")
+
                     # Build spectra dict from DB columns (or None if not available)
-                    if tg.get("excitation_nm") and tg.get("emission_nm"):
+                    if excitation_nm and emission_nm:
                         tg["spectra"] = {
-                            "ex": tg["excitation_nm"],
-                            "em": tg["emission_nm"],
-                            "color": tg.get("fluorophore_color"),
+                            "ex": excitation_nm,
+                            "em": emission_nm,
+                            "color": screen_color,
                         }
                     else:
                         tg["spectra"] = None
@@ -878,16 +1190,34 @@ class DataManager:
                 cursor.execute("DELETE FROM crossing_transgenic_indicators WHERE crossing_id = ?", (crossing_id,))
 
                 for ind in indicators:
+                    modification_type = ind.get('modification_type') or 'tg'
+                    promoter_norm = ind.get('promoter_norm') or (ind.get('promoter_driver') or '').strip().lower() or None
+                    reporter_norm = ind.get('reporter_norm') or (ind.get('reporter_effector') or '').strip().lower() or None
+                    classified = self.classify_construct(modification_type, promoter_norm, reporter_norm)
+                    catalog_id, match_method = self.resolve_construct_catalog_match(
+                        ind.get('reporter_effector') or reporter_norm
+                    )
                     cursor.execute("""
                         INSERT INTO crossing_transgenic_indicators
-                        (crossing_id, modification_type, promoter_driver, reporter_effector,
-                         color, expected_expression)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        (crossing_id, modification_type, promoter_driver, promoter_norm,
+                         reporter_effector, reporter_norm, fluorophore, construct_role,
+                         sensor_family, sensor_target, effector_family, catalog_id,
+                         match_method, color, expected_expression)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         crossing_id,
-                        ind.get('modification_type', 'tg'),
+                        modification_type,
                         ind.get('promoter_driver'),
+                        promoter_norm,
                         ind.get('reporter_effector'),
+                        reporter_norm,
+                        ind.get('fluorophore') or classified.get('fluorophore'),
+                        ind.get('construct_role') or classified.get('construct_role'),
+                        ind.get('sensor_family') or classified.get('sensor_family'),
+                        ind.get('sensor_target') or classified.get('sensor_target'),
+                        ind.get('effector_family') or classified.get('effector_family'),
+                        catalog_id,
+                        match_method,
                         ind.get('color'),
                         ind.get('expected_expression')
                     ))
@@ -916,19 +1246,64 @@ class DataManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT modification_type, promoter_driver, reporter_effector,
-                           color, expected_expression
-                    FROM crossing_transgenic_indicators
+                    SELECT cti.modification_type,
+                           cti.promoter_driver,
+                           cti.promoter_norm,
+                           cti.reporter_effector,
+                           cti.reporter_norm,
+                           cti.fluorophore,
+                           cti.construct_role,
+                           cti.sensor_family,
+                           cti.sensor_target,
+                           cti.effector_family,
+                           cti.catalog_id,
+                           cti.match_method,
+                           cti.color,
+                           cti.expected_expression,
+                           cc.canonical_name AS catalog_name,
+                           cc.construct_role AS catalog_construct_role,
+                           cc.family AS catalog_family,
+                           cc.target AS catalog_target,
+                           cc.fluorophore AS catalog_fluorophore,
+                           cc.excitation_nm AS catalog_excitation_nm,
+                           cc.emission_nm AS catalog_emission_nm,
+                           cc.screen_color AS catalog_screen_color,
+                           cc.notes AS catalog_notes
+                    FROM crossing_transgenic_indicators cti
+                    LEFT JOIN construct_catalog cc ON cc.id = cti.catalog_id
                     WHERE crossing_id = ?
-                    ORDER BY id ASC
+                    ORDER BY cti.id ASC
                 """, (crossing_id,))
 
                 indicators = []
                 for row in cursor.fetchall():
+                    construct_role = row['catalog_construct_role'] or row['construct_role']
+                    sensor_family = row['sensor_family']
+                    effector_family = row['effector_family']
+                    if construct_role == 'sensor' and row['catalog_family'] and not sensor_family:
+                        sensor_family = row['catalog_family']
+                    if construct_role == 'effector' and row['catalog_family'] and not effector_family:
+                        effector_family = row['catalog_family']
                     indicators.append({
                         'modification_type': row['modification_type'],
                         'promoter_driver': row['promoter_driver'],
+                        'promoter_norm': row['promoter_norm'],
                         'reporter_effector': row['reporter_effector'],
+                        'reporter_norm': row['reporter_norm'],
+                        'fluorophore': row['catalog_fluorophore'] or row['fluorophore'],
+                        'construct_role': construct_role,
+                        'sensor_family': sensor_family,
+                        'sensor_target': row['sensor_target'] or row['catalog_target'],
+                        'effector_family': effector_family,
+                        'catalog_id': row['catalog_id'],
+                        'catalog_name': row['catalog_name'],
+                        'catalog_notes': row['catalog_notes'],
+                        'match_method': row['match_method'],
+                        'spectra': {
+                            'ex': row['catalog_excitation_nm'],
+                            'em': row['catalog_emission_nm'],
+                            'color': row['catalog_screen_color'],
+                        } if row['catalog_excitation_nm'] and row['catalog_emission_nm'] else None,
                         'color': row['color'],
                         'expected_expression': row['expected_expression']
                     })
@@ -953,7 +1328,7 @@ class DataManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT dish_id, cross_id, date_created, dof, genotype, responsible,
+                    SELECT dish_id, cross_id, date_created, dof, cross_setup_date, dof_source, genotype, responsible,
                            status, fish_count, species, sex, parent_dish_id, dish_population_type,
                            notes, room, enclosure_temperature, container_type,
                            enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
@@ -972,6 +1347,8 @@ class DataManager:
                     dish_data['cross_id'] = row['cross_id']
                     dish_data['date_created'] = row['date_created']
                     dish_data['dof'] = row['dof']
+                    dish_data['cross_setup_date'] = row['cross_setup_date']
+                    dish_data['dof_source'] = row['dof_source']
                     dish_data['genotype'] = row['genotype']
                     dish_data['responsible'] = row['responsible']
                     dish_data['status'] = row['status']
@@ -1123,7 +1500,7 @@ class DataManager:
                 cursor = conn.cursor()
                 # Single bulk query for all dishes
                 cursor.execute("""
-                    SELECT dish_id, cross_id, date_created, dof, genotype, responsible,
+                    SELECT dish_id, cross_id, date_created, dof, cross_setup_date, dof_source, genotype, responsible,
                            status, fish_count, species, sex, parent_dish_id, dish_population_type,
                            notes, room, enclosure_temperature, container_type,
                            enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
@@ -1142,6 +1519,8 @@ class DataManager:
                         'cross_id': row['cross_id'],
                         'date_created': row['date_created'],
                         'dof': row['dof'],
+                        'cross_setup_date': row['cross_setup_date'],
+                        'dof_source': row['dof_source'],
                         'genotype': row['genotype'],
                         'responsible': row['responsible'],
                         'status': row['status'],
@@ -1258,27 +1637,27 @@ class DataManager:
     def fetch_mapzebrain_catalog(self) -> List[Dict[str, Any]]:
         """Fetch and cache the mapzebrain markers catalog.
 
-        Downloads from the mapzebrain API on first call, caches to disk
-        at ``config/mapzebrain_catalog.json``.  Returns an empty list on
-        network failure — the external dependency must never block screening.
+        On first call per process, prefers a live API refresh and falls back
+        to the cached ``config/mapzebrain_catalog.json`` copy on failure.
+        Returns an empty list if neither source is available — the external
+        dependency must never block screening.
         """
         if self._mapzebrain_catalog is not None:
             return self._mapzebrain_catalog
 
         cache_path = self.config_dir / "mapzebrain_catalog.json" if self.config_dir else None
+        cached_data: Optional[List[Dict[str, Any]]] = None
 
-        # Try disk cache first
+        # Load disk cache as a fallback candidate.
         if cache_path and cache_path.exists():
             try:
                 data = json.loads(cache_path.read_text())
                 if isinstance(data, list):
-                    DataManager._mapzebrain_catalog = data
-                    logger.info(f"Loaded mapzebrain catalog from cache ({len(data)} markers)")
-                    return data
+                    cached_data = data
             except Exception as e:
                 logger.warning(f"Failed to read mapzebrain cache: {e}")
 
-        # Fetch from API
+        # Prefer a live fetch so the catalog stays fresh across restarts.
         try:
             import urllib.request
             req = urllib.request.Request(
@@ -1299,6 +1678,11 @@ class DataManager:
                 return data
         except Exception as e:
             logger.warning(f"Failed to fetch mapzebrain catalog: {e}")
+
+        if cached_data is not None:
+            DataManager._mapzebrain_catalog = cached_data
+            logger.info(f"Loaded mapzebrain catalog from cache ({len(cached_data)} markers)")
+            return cached_data
 
         DataManager._mapzebrain_catalog = []
         return []
@@ -1381,6 +1765,145 @@ class DataManager:
         "campari":   {"ex": 488, "em": 513, "color": "green"},  # green form; photoconverts to red
     }
 
+    _EFFECTOR_PATTERNS = [
+        ("trpv1", "TRPV1"),
+        ("cochr", "CoChR"),
+        ("chrimson", "Chrimson"),
+        ("reachr", "ReaChR"),
+        ("arch", "Arch"),
+        ("ntr", "NTR"),
+        ("cre", "Cre"),
+        ("cas9", "Cas9"),
+    ]
+
+    _GRAB_TARGET_PATTERNS = [
+        ("5-ht", "serotonin"),
+        ("5ht", "serotonin"),
+        ("serotonin", "serotonin"),
+        ("dopamine", "dopamine"),
+        ("da", "dopamine"),
+        ("acetylcholine", "acetylcholine"),
+        ("ach", "acetylcholine"),
+        ("norepinephrine", "norepinephrine"),
+        ("ne", "norepinephrine"),
+        ("atp", "ATP"),
+    ]
+
+    @staticmethod
+    def _normalize_construct_name(value: Optional[str]) -> Optional[str]:
+        """Normalize construct/reporter names for catalog matching."""
+        if not value:
+            return None
+        normalized = re.sub(r'[^a-z0-9]+', '', value.lower())
+        return normalized or None
+
+    def _load_construct_catalog_seed(self) -> List[Dict[str, Any]]:
+        """Load bundled construct catalog seed data from config."""
+        if not self.config_dir:
+            return []
+        seed_path = self.config_dir / "construct_catalog.json"
+        payload = load_json_file(seed_path)
+        if not payload:
+            return []
+        constructs = payload.get("constructs") if isinstance(payload, dict) else payload
+        return constructs if isinstance(constructs, list) else []
+
+    def seed_construct_catalog(self):
+        """Upsert bundled starter construct catalog rows and aliases."""
+        if not self.is_initialized:
+            return
+
+        constructs = self._load_construct_catalog_seed()
+        if not constructs:
+            return
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                for entry in constructs:
+                    canonical_name = entry.get("canonical_name")
+                    normalized_name = self._normalize_construct_name(
+                        entry.get("normalized_name") or canonical_name
+                    )
+                    if not canonical_name or not normalized_name:
+                        continue
+
+                    cursor.execute("""
+                        INSERT INTO construct_catalog
+                            (canonical_name, normalized_name, construct_role, family, target,
+                             fluorophore, excitation_nm, emission_nm, screen_color, notes, is_active)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(normalized_name) DO UPDATE SET
+                            canonical_name = excluded.canonical_name,
+                            construct_role = excluded.construct_role,
+                            family = excluded.family,
+                            target = excluded.target,
+                            fluorophore = excluded.fluorophore,
+                            excitation_nm = excluded.excitation_nm,
+                            emission_nm = excluded.emission_nm,
+                            screen_color = excluded.screen_color,
+                            notes = excluded.notes,
+                            is_active = excluded.is_active,
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (
+                        canonical_name,
+                        normalized_name,
+                        entry.get("construct_role"),
+                        entry.get("family"),
+                        entry.get("target"),
+                        entry.get("fluorophore"),
+                        entry.get("excitation_nm"),
+                        entry.get("emission_nm"),
+                        entry.get("screen_color"),
+                        entry.get("notes"),
+                        entry.get("is_active", True),
+                    ))
+
+                    catalog_row = cursor.execute(
+                        "SELECT id FROM construct_catalog WHERE normalized_name = ?",
+                        (normalized_name,),
+                    ).fetchone()
+                    if not catalog_row:
+                        continue
+                    catalog_id = catalog_row["id"]
+
+                    aliases = set(entry.get("aliases") or [])
+                    aliases.add(canonical_name)
+                    for alias in aliases:
+                        normalized_alias = self._normalize_construct_name(alias)
+                        if not alias or not normalized_alias:
+                            continue
+                        cursor.execute("""
+                            INSERT INTO construct_aliases (catalog_id, alias_name, normalized_alias)
+                            VALUES (?, ?, ?)
+                            ON CONFLICT(normalized_alias) DO UPDATE SET
+                                catalog_id = excluded.catalog_id,
+                                alias_name = excluded.alias_name
+                        """, (catalog_id, alias, normalized_alias))
+
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"construct catalog seed failed: {e}")
+
+    def resolve_construct_catalog_match(self, reporter: Optional[str]) -> Tuple[Optional[int], str]:
+        """Resolve a reporter/effector string to a construct catalog row."""
+        normalized = self._normalize_construct_name(reporter)
+        if not normalized:
+            return None, "unmatched"
+
+        try:
+            with self.get_connection() as conn:
+                row = conn.execute("""
+                    SELECT catalog_id
+                    FROM construct_aliases
+                    WHERE normalized_alias = ?
+                """, (normalized,)).fetchone()
+                if row:
+                    return row["catalog_id"], "alias_exact"
+        except Exception as e:
+            logger.warning(f"construct catalog lookup failed for {reporter}: {e}")
+        return None, "unmatched"
+
     @classmethod
     def get_fluorophore_spectra(cls, fluorophore: Optional[str]) -> Optional[Dict[str, Any]]:
         """Return excitation/emission/color for a canonical fluorophore name."""
@@ -1404,34 +1927,133 @@ class DataManager:
         return None
 
     @staticmethod
+    def _infer_sensor_target(reporter: str, sensor_family: Optional[str]) -> Optional[str]:
+        """Infer the sensed biological target for known sensor families."""
+        if not reporter or not sensor_family:
+            return None
+
+        reporter_lower = reporter.lower()
+        if sensor_family in {"GCaMP", "jRGECO", "RGECO"}:
+            return "calcium"
+        if sensor_family == "CaMPARI":
+            return "neural_activity"
+        if sensor_family == "GRAB":
+            for pattern, target in DataManager._GRAB_TARGET_PATTERNS:
+                if pattern in reporter_lower:
+                    return target
+            return "unknown"
+        return None
+
+    @staticmethod
+    def _infer_effector_family(reporter: str) -> Optional[str]:
+        """Infer a known effector family from reporter text."""
+        if not reporter:
+            return None
+
+        reporter_lower = reporter.lower()
+        for pattern, family in DataManager._EFFECTOR_PATTERNS:
+            if pattern in reporter_lower:
+                return family
+        return None
+
+    @staticmethod
+    def classify_construct(
+        modification_type: Optional[str],
+        promoter: Optional[str],
+        reporter: Optional[str],
+    ) -> Dict[str, Optional[str]]:
+        """Classify a construct into normalized metadata fields."""
+        normalized_reporter = (reporter or "").strip().lower()
+        fluorophore = DataManager._extract_fluorophore(normalized_reporter)
+        sensor_family: Optional[str] = None
+        construct_role: Optional[str] = None
+
+        if not normalized_reporter:
+            construct_role = "driver"
+        elif "grab" in normalized_reporter:
+            construct_role = "sensor"
+            sensor_family = "GRAB"
+        elif "gcamp" in normalized_reporter:
+            construct_role = "sensor"
+            sensor_family = "GCaMP"
+        elif "jrgeco" in normalized_reporter:
+            construct_role = "sensor"
+            sensor_family = "jRGECO"
+        elif "rgeco" in normalized_reporter:
+            construct_role = "sensor"
+            sensor_family = "RGECO"
+        elif "campari" in normalized_reporter:
+            construct_role = "sensor"
+            sensor_family = "CaMPARI"
+
+        sensor_target = DataManager._infer_sensor_target(normalized_reporter, sensor_family)
+        effector_family = None
+
+        if not construct_role:
+            effector_family = DataManager._infer_effector_family(normalized_reporter)
+            if effector_family:
+                construct_role = "effector"
+            elif fluorophore:
+                construct_role = "fluorescent_reporter"
+            elif modification_type == "other" and promoter:
+                construct_role = "other"
+            else:
+                construct_role = "unknown"
+
+        return {
+            "fluorophore": fluorophore,
+            "construct_role": construct_role,
+            "sensor_family": sensor_family,
+            "sensor_target": sensor_target,
+            "effector_family": effector_family,
+        }
+
+    @staticmethod
     def parse_genotype(genotype: str) -> List[Dict[str, Optional[str]]]:
         """Parse a genotype string into structured transgene dicts.
 
-        Extracts ``Tg(promoter:reporter)`` blocks and returns a list of::
+        Extracts parenthesized construct blocks (for example ``Tg(...)`` or
+        ``Et(...)``) and returns normalized rows like::
 
             {"construct": "Tg(elavl3:jRGECO1b)",
+             "modification_type": "tg",
              "promoter": "elavl3",
              "reporter": "jrgeco1b",
-             "fluorophore": "jrgeco"}
+             "fluorophore": "jrgeco",
+             "construct_role": "sensor",
+             "sensor_family": "jRGECO",
+             "sensor_target": "calcium"}
 
-        Non-Tg genotypes (e.g. ``"wt"``) return an empty list.
+        Non-transgenic genotypes (e.g. ``"wt"``) return an empty list.
         Parsing is best-effort and never raises.
         """
         results = []
-        tg_blocks = re.findall(r'(Tg\(([^)]+)\))', genotype)
-        for full_match, inner in tg_blocks:
+        if not genotype:
+            return results
+
+        for match in DataManager._CONSTRUCT_PATTERN.finditer(genotype):
+            prefix = match.group(1)
+            inner = match.group(2)
+            full_match = match.group(0)
             parts = inner.split(":", 1)
-            promoter = parts[0].strip().lower()
+            promoter_raw = parts[0].strip() if parts else ""
             reporter_raw = parts[1].strip() if len(parts) > 1 else ""
+            promoter = promoter_raw.lower() if promoter_raw else None
             reporter = reporter_raw.lower() if reporter_raw else None
+
             if not promoter:
                 continue
-            fluorophore = DataManager._extract_fluorophore(reporter or "")
+
+            modification_type = DataManager._PREFIX_TO_TYPE.get((prefix or "tg").lower(), "other")
+            classified = DataManager.classify_construct(modification_type, promoter, reporter)
             results.append({
                 "construct": full_match,
+                "modification_type": modification_type,
                 "promoter": promoter,
+                "promoter_raw": promoter_raw or None,
                 "reporter": reporter,
-                "fluorophore": fluorophore,
+                "reporter_raw": reporter_raw or None,
+                **classified,
             })
         return results
 
@@ -1468,7 +2090,7 @@ class DataManager:
                 continue
             folder = stack_url.split("/Lines/")[1].split("/")[0]
 
-            # Score: prefer entries whose folder also contains the reporter
+            # Require a reporter hit for reporter-bearing genotypes.
             score = 0
             if reporter:
                 # Check if reporter terms appear in folder or synonyms
@@ -1478,10 +2100,14 @@ class DataManager:
                         score += 2
                     elif len(part) >= 3 and part in search_text:
                         score += 1
+                if score <= 0:
+                    continue
+            else:
+                continue
 
             candidates.append({
                 "name": entry.get("name", ""),
-                "display_name": f"{promoter}:{folder}",
+                "display_name": entry.get("name", "") or f"{promoter}:{folder}",
                 "folder": folder,
                 "url": f"{self._MAPZEBRAIN_IMAGE_BASE}/{folder}/average_data/orthogonal_views/dorsal/180.jpg",
                 "_score": score,

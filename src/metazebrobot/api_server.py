@@ -1,5 +1,5 @@
 """
-FastAPI service for MetaZebrobot — read-only JSON API + web screening UI.
+FastAPI service for MetaZebrobot web UI + HTTP API.
 """
 
 import argparse
@@ -10,7 +10,7 @@ import sqlite3
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -20,6 +20,11 @@ from fastapi.templating import Jinja2Templates
 from .controllers.fish_dish_controller import FishDishController
 from .data.data_manager import data_manager
 from .utils.label_generator import generate_dish_label
+from .utils.pyrat_credentials import get_pyrat_api_credentials
+from .utils.pyrat_frontend_client import (
+    enrich_crossings_with_frontend_details,
+    get_pyrat_frontend_credentials,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +66,7 @@ def _pyrat_user_id(username: str) -> Optional[int]:
 
 
 def _fetch_pyrat(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
-    """Fetch data from the PyRAT API using keyring credentials.
+    """Fetch data from the PyRAT API using configured credentials.
 
     Args:
         endpoint: API path after ``/api/v3/`` (e.g. ``"tanks"``).
@@ -73,24 +78,19 @@ def _fetch_pyrat(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
     Raises:
         HTTPException: If credentials are missing or the API call fails.
     """
-    import keyring
     import requests as http_requests
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    base_url = keyring.get_password("pyrat-api", "base_url")
-    client_token = keyring.get_password("pyrat-api", "client_token")
-    user_token = keyring.get_password("pyrat-api", "user_token")
-    if not all([base_url, client_token, user_token]):
+    credentials = get_pyrat_api_credentials()
+    if not credentials:
         raise HTTPException(status_code=503, detail="PyRAT API credentials not configured")
 
-    if not base_url.endswith("/"):
-        base_url += "/"
-    url = f"{base_url}api/v3/{endpoint}"
+    url = f"{credentials['base_url']}api/v3/{endpoint}"
 
     resp = http_requests.get(
         url,
-        auth=(client_token, user_token),
+        auth=(credentials["client_token"], credentials["user_token"]),
         headers={"Accept": "application/json"},
         params=params or {},
         verify=False,
@@ -118,6 +118,257 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
+def _screening_indicator_suggestions(
+    transgenes: List[Dict[str, Any]],
+    current_step: Optional[Any] = None,
+) -> Tuple[List[Dict[str, str]], str]:
+    """Build screening-indicator suggestions from parsed dish constructs."""
+    suggestions: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    current_indicators = list(getattr(current_step, "indicators", []) or [])
+
+    def add_suggestion(value: Optional[str], meta_parts: Optional[List[str]] = None):
+        raw = (value or "").strip()
+        if not raw:
+            return
+        key = raw.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        suggestions.append({
+            "value": raw,
+            "meta": " · ".join(part for part in (meta_parts or []) if part),
+        })
+
+    for indicator in current_indicators:
+        add_suggestion(indicator)
+
+    for tg in transgenes:
+        value = (tg.get("catalog_name") or tg.get("reporter") or "").strip()
+        if not value:
+            continue
+        family = tg.get("family") or tg.get("sensor_family") or tg.get("effector_family")
+        target = tg.get("target") or tg.get("sensor_target")
+        screen_color = tg.get("screen_color") or ((tg.get("spectra") or {}).get("color"))
+        meta_parts = [
+            tg.get("construct_role"),
+            family if family and family.lower() != value.lower() else None,
+            target,
+            screen_color,
+        ]
+        add_suggestion(value, meta_parts)
+
+    default_value = ", ".join(current_indicators) if current_indicators else ""
+    if not default_value and len(suggestions) == 1:
+        default_value = suggestions[0]["value"]
+
+    return suggestions, default_value
+
+
+def _normalize_html_date(date_value: Optional[str]) -> Optional[str]:
+    """Convert supported date strings to ``YYYY-MM-DD`` for HTML date inputs."""
+    if not date_value:
+        return None
+
+    raw = str(date_value).strip()
+    if not raw:
+        return None
+
+    try:
+        if len(raw) == 8 and raw.isdigit():
+            return datetime.strptime(raw, "%Y%m%d").strftime("%Y-%m-%d")
+        if "T" in raw:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+        return datetime.strptime(raw[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return None
+
+
+def _html_date_plus_days(date_value: Optional[str], days: int) -> Optional[str]:
+    """Return a normalized HTML date shifted by the given number of days."""
+    normalized = _normalize_html_date(date_value)
+    if not normalized:
+        return None
+
+    return (datetime.strptime(normalized, "%Y-%m-%d") + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def _format_parent_locations(parent_tanks: Optional[List[Dict[str, Any]]]) -> str:
+    """Build a readable comma-separated parent tank list from PyRAT-like data."""
+    if not parent_tanks:
+        return ""
+
+    labels: List[str] = []
+    for tank in parent_tanks:
+        location = tank.get("location_display")
+        if not location:
+            tank_id = tank.get("tank_id")
+            rack = tank.get("location_rack_name")
+            pos = tank.get("tank_position")
+            if tank_id and rack and pos:
+                location = f"#{tank_id}_{rack}>{pos}"
+            elif tank_id:
+                location = f"#{tank_id}"
+            else:
+                location = tank.get("tank_label", "")
+        if location:
+            labels.append(location)
+    return ", ".join(labels)
+
+
+def _cross_prefill_from_payload(cross: Dict[str, Any]) -> Dict[str, str]:
+    """Extract dish-form defaults from a PyRAT or locally cached cross payload."""
+    parent_tanks = cross.get("parent_tanks")
+    if not parent_tanks:
+        parent_tanks = (cross.get("tanks") or {}).get("parents", [])
+
+    setup_date = _normalize_html_date(cross.get("date_of_set_up"))
+    if setup_date:
+        dof = _html_date_plus_days(setup_date, 1) or ""
+        dof_source = "pyrat_setup_plus_1"
+    else:
+        dof = _normalize_html_date(cross.get("date_of_record")) or ""
+        dof_source = "pyrat_record_date" if dof else ""
+
+    return {
+        "genotype": cross.get("strain_name") or cross.get("strain_name_with_id") or "",
+        "responsible": cross.get("responsible_fullname") or "",
+        "parents": _format_parent_locations(parent_tanks),
+        "cross_setup_date": setup_date or "",
+        "dof": dof,
+        "dof_source": dof_source,
+    }
+
+
+def _load_local_cross_prefill(conn: sqlite3.Connection, cross_id: str) -> Dict[str, str]:
+    """Load cross defaults from locally cached crosses and prior dishes."""
+    prefill = {
+        "genotype": "",
+        "responsible": "",
+        "parents": "",
+        "cross_setup_date": "",
+        "dof": "",
+        "dof_source": "",
+    }
+
+    try:
+        cross_row = conn.execute(
+            "SELECT line_strain, data FROM crosses WHERE cross_id = ? LIMIT 1",
+            (cross_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        cross_row = None
+
+    if cross_row:
+        try:
+            cross_data = json.loads(cross_row["data"]) if cross_row["data"] else {}
+        except (TypeError, ValueError):
+            cross_data = {}
+        cached = _cross_prefill_from_payload(cross_data)
+        if not cached["genotype"]:
+            cached["genotype"] = cross_row["line_strain"] or ""
+        prefill.update({k: v for k, v in cached.items() if v})
+
+    dish_row = conn.execute(
+        """
+        SELECT genotype, responsible, breeding_parents, dof, cross_setup_date, dof_source
+        FROM dishes
+        WHERE cross_id = ?
+        ORDER BY COALESCE(dof, '') DESC, date_created DESC
+        LIMIT 1
+        """,
+        (cross_id,),
+    ).fetchone()
+
+    if dish_row:
+        if not prefill["genotype"]:
+            prefill["genotype"] = dish_row["genotype"] or ""
+        if not prefill["responsible"]:
+            prefill["responsible"] = dish_row["responsible"] or ""
+        if not prefill["dof"]:
+            prefill["dof"] = _normalize_html_date(dish_row["dof"]) or ""
+        if not prefill["cross_setup_date"]:
+            prefill["cross_setup_date"] = _normalize_html_date(dish_row["cross_setup_date"]) or ""
+        if not prefill["dof_source"]:
+            prefill["dof_source"] = dish_row["dof_source"] or ""
+        if not prefill["parents"] and dish_row["breeding_parents"]:
+            try:
+                parents = json.loads(dish_row["breeding_parents"])
+            except (TypeError, ValueError):
+                parents = []
+            prefill["parents"] = ", ".join(parent for parent in parents if parent)
+
+    return prefill
+
+
+def _load_new_dish_crosses(conn: sqlite3.Connection) -> List[str]:
+    """Load recently active or still-unused crosses for the new-dish datalist."""
+    rows = conn.execute(
+        """SELECT c.cross_id,
+       COUNT(d.dish_id) AS total_dishes,
+       COUNT(CASE WHEN d.status = 'active' THEN 1 END) AS active_dishes
+FROM crosses c
+LEFT JOIN dishes d ON d.cross_id = c.cross_id
+GROUP BY c.cross_id
+HAVING active_dishes > 0           -- has active dishes (active)
+    OR total_dishes = 0             -- new cross, no dishes yet
+ORDER BY active_dishes DESC, c.cross_id DESC
+LIMIT 100"""
+    ).fetchall()
+    return [r["cross_id"] for r in rows]
+
+
+def _load_cross_prefill(cross_id: str) -> Dict[str, str]:
+    """Load dish-form defaults for a cross from PyRAT first, then local cache."""
+    prefill = {
+        "genotype": "",
+        "responsible": "",
+        "parents": "",
+        "cross_setup_date": "",
+        "dof": "",
+        "dof_source": "",
+        "error": None,
+    }
+
+    try:
+        try:
+            items = _fetch_pyrat(
+                "tanks/crossings",
+                params={
+                    "crossing_id": cross_id,
+                    "l": 1,
+                    "k": [
+                        "crossing_id", "status", "date_of_record", "date_of_set_up",
+                        "responsible_fullname", "strain_name", "strain_name_with_id", "tanks",
+                    ],
+                    "tk": [
+                        "tank_id", "tank_label", "status", "strain_name",
+                        "number_of_male", "number_of_female", "number_of_unknown",
+                        "alive_count", "date_of_birth",
+                        "location_rack_name", "location_room_name", "tank_position",
+                    ],
+                },
+            )
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                prefill["error"] = str(exc.detail)
+        else:
+            if items:
+                cross = items[0] if isinstance(items, list) else items
+                prefill.update(_cross_prefill_from_payload(cross))
+
+        if not all([prefill["genotype"], prefill["responsible"], prefill["parents"], prefill["dof"]]):
+            db_path = _require_db_path()
+            with _open_readonly_connection(db_path, DEFAULT_BUSY_TIMEOUT_MS) as conn:
+                local_prefill = _load_local_cross_prefill(conn, cross_id)
+            for key in ("genotype", "responsible", "parents", "cross_setup_date", "dof", "dof_source"):
+                prefill[key] = prefill[key] or local_prefill[key]
+    except Exception as exc:
+        prefill["error"] = f"Could not fetch cross info: {exc}"
+
+    return prefill
+
+
 @contextmanager
 def _open_readonly_connection(db_path: Path, busy_timeout_ms: int):
     uri = f"file:{db_path}?mode=ro"
@@ -140,14 +391,12 @@ async def lifespan(app: FastAPI):
     db_path = app.state.db_path
     if db_path:
         # Point data_manager at the database.
-        # We can't call data_manager.initialize() directly because it
-        # reads database_path from the desktop app's config which isn't
-        # available in the API server context.
         data_manager.database_path = db_path
-        data_manager._is_initialized = True
         data_manager.config_dir = _PACKAGE_DIR / "config"
+        if not data_manager.ensure_schema():
+            raise RuntimeError(f"Failed to initialize database schema for {db_path}")
 
-        # Ensure schema is up to date (screening_step_images table etc.)
+        # Apply remaining API-server-specific schema updates.
         with data_manager.get_connection() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS screening_step_images (
@@ -301,9 +550,18 @@ async def lifespan(app: FastAPI):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     dish_id TEXT NOT NULL,
                     construct TEXT NOT NULL,
+                    modification_type TEXT,
                     promoter TEXT NOT NULL,
                     reporter TEXT,
                     fluorophore TEXT,
+                    construct_role TEXT,
+                    sensor_family TEXT,
+                    sensor_target TEXT,
+                    effector_family TEXT,
+                    catalog_id INTEGER,
+                    source_type TEXT,
+                    source_id TEXT,
+                    match_method TEXT,
                     excitation_nm INTEGER,
                     emission_nm INTEGER,
                     fluorophore_color TEXT,
@@ -319,12 +577,44 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_dish_transgenes_promoter
                 ON dish_transgenes(promoter)
             """)
-            # Migrate dish_transgenes: add spectral columns if missing
+            # Migrate dish_transgenes: add normalized metadata columns if missing
             tg_cols = [r[1] for r in conn.execute("PRAGMA table_info(dish_transgenes)").fetchall()]
+            if 'modification_type' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN modification_type TEXT")
+            if 'construct_role' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN construct_role TEXT")
+            if 'sensor_family' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN sensor_family TEXT")
+            if 'sensor_target' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN sensor_target TEXT")
+            if 'effector_family' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN effector_family TEXT")
+            if 'catalog_id' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN catalog_id INTEGER")
+            if 'source_type' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN source_type TEXT")
+            if 'source_id' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN source_id TEXT")
+            if 'match_method' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN match_method TEXT")
             if 'excitation_nm' not in tg_cols:
                 conn.execute("ALTER TABLE dish_transgenes ADD COLUMN excitation_nm INTEGER")
+            if 'emission_nm' not in tg_cols:
                 conn.execute("ALTER TABLE dish_transgenes ADD COLUMN emission_nm INTEGER")
+            if 'fluorophore_color' not in tg_cols:
                 conn.execute("ALTER TABLE dish_transgenes ADD COLUMN fluorophore_color TEXT")
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_transgenes_construct_role
+                ON dish_transgenes(construct_role)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_transgenes_sensor_family
+                ON dish_transgenes(sensor_family)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_transgenes_catalog_id
+                ON dish_transgenes(catalog_id)
+            """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS dish_images (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -344,9 +634,6 @@ async def lifespan(app: FastAPI):
 
         data_manager.load_all_data()
         logger.info(f"data_manager initialised with {db_path}")
-
-        # Backfill dish_transgenes for existing dishes (one-time migration)
-        data_manager.backfill_dish_transgenes()
 
         # Ensure screening images directory exists
         images_dir = db_path.parent / "screening_images"
@@ -532,92 +819,60 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     # ------------------------------------------------------------------
 
     @app.get("/dishes/new", response_class=HTMLResponse)
-    def new_dish_form(request: Request):
+    def new_dish_form(request: Request, cross_id: Optional[str] = Query(default=None)):
         """Dish creation form with optional PyRAT cross auto-fill."""
         # Try to load cross IDs for the datalist
         crosses = []
         try:
             db_path = _require_db_path()
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
-                rows = conn.execute(
-                    """SELECT c.cross_id,
-       COUNT(d.dish_id) AS total_dishes,
-       COUNT(CASE WHEN d.status = 'active' THEN 1 END) AS active_dishes
-FROM crosses c
-LEFT JOIN dishes d ON d.cross_id = c.cross_id
-GROUP BY c.cross_id
-HAVING active_dishes > 0           -- has active dishes (active)
-    OR total_dishes = 0             -- new cross, no dishes yet
-ORDER BY active_dishes DESC, c.cross_id DESC
-LIMIT 100"""
-                ).fetchall()
-                crosses = [r["cross_id"] for r in rows]
+                crosses = _load_new_dish_crosses(conn)
         except Exception:
             pass
 
         today = datetime.now().strftime("%Y-%m-%d")
-        return templates.TemplateResponse(request, "dishes/new_dish.html", {
-            "crosses": crosses,
-            "today": today,
-            "form": {},
+        prefill = _load_cross_prefill(cross_id) if cross_id else {
             "genotype": "",
             "responsible": "",
             "parents": "",
+            "cross_setup_date": "",
+            "dof": "",
+            "dof_source": "",
+            "error": None,
+        }
+        return templates.TemplateResponse(request, "dishes/new_dish.html", {
+            "crosses": crosses,
+            "today": today,
+            "form": {
+                "cross_id": cross_id or "",
+                "cross_setup_date": prefill["cross_setup_date"] or "",
+                "dof": prefill["dof"] or "",
+                "dof_source": prefill["dof_source"] or "",
+            },
+            "genotype": prefill["genotype"],
+            "responsible": prefill["responsible"],
+            "parents": prefill["parents"],
+            "cross_setup_date": prefill["cross_setup_date"],
+            "dof": prefill["dof"],
+            "dof_source": prefill["dof_source"],
+            "error": prefill["error"],
+            "include_dof_oob": False,
         })
 
     @app.get("/dishes/new/cross-info", response_class=HTMLResponse)
     def cross_info_partial(request: Request, cross_id: str = Query(...)):
         """HTMX partial: auto-fill genotype/responsible/parents from PyRAT cross."""
-        genotype = ""
-        responsible = ""
-        parents = ""
-        error_msg = None
-
-        try:
-            # Reuse the existing GET /crosses/{cross_id} logic
-            import requests as http_requests
-            pyrat_base = os.environ.get("PYRAT_API_URL", "")
-            pyrat_token = os.environ.get("PYRAT_API_TOKEN", "")
-
-            if pyrat_base and pyrat_token:
-                resp = http_requests.get(
-                    f"{pyrat_base}/api/v3/tanks/crossings",
-                    params={"crossing_id": cross_id},
-                    headers={"Authorization": f"token {pyrat_token}"},
-                    timeout=5,
-                )
-                if resp.status_code == 200:
-                    items = resp.json()
-                    if items:
-                        cross = items[0] if isinstance(items, list) else items
-                        genotype = cross.get("strain_name") or cross.get("strain_name_with_id", "")
-                        responsible = cross.get("responsible_fullname", "")
-                        parent_tanks = cross.get("parent_tanks", [])
-                        if parent_tanks:
-                            parents = ", ".join(
-                                t.get("location_display", t.get("tank_label", ""))
-                                for t in parent_tanks
-                            )
-                else:
-                    error_msg = f"PyRAT returned {resp.status_code}"
-            else:
-                # No PyRAT configured — try local DB for cross data
-                db_path = _require_db_path()
-                with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
-                    row = conn.execute(
-                        "SELECT genotype FROM dishes WHERE cross_id = ? LIMIT 1",
-                        (cross_id,),
-                    ).fetchone()
-                    if row:
-                        genotype = row["genotype"] or ""
-        except Exception as e:
-            error_msg = f"Could not fetch cross info: {e}"
+        prefill = _load_cross_prefill(cross_id)
 
         return templates.TemplateResponse(request, "dishes/_cross_info.html", {
-            "genotype": genotype,
-            "responsible": responsible,
-            "parents": parents,
-            "error": error_msg,
+            "genotype": prefill["genotype"],
+            "responsible": prefill["responsible"],
+            "parents": prefill["parents"],
+            "cross_setup_date": prefill["cross_setup_date"],
+            "dof": prefill["dof"],
+            "dof_source": prefill["dof_source"],
+            "error": prefill["error"],
+            "include_dof_oob": True,
         })
 
     @app.post("/dishes/new/refresh-crosses", response_class=HTMLResponse)
@@ -626,23 +881,16 @@ LIMIT 100"""
         all_crosses: bool = Form(default=False),
     ):
         """Fetch recent crosses from PyRAT and update local crosses table."""
-        import keyring
         import requests as http_requests
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        base_url = keyring.get_password("pyrat-api", "base_url")
-        client_token = keyring.get_password("pyrat-api", "client_token")
-        user_token = keyring.get_password("pyrat-api", "user_token")
-
-        if not all([base_url, client_token, user_token]):
+        credentials = get_pyrat_api_credentials()
+        if not credentials:
             return templates.TemplateResponse(request, "screening/_flash_message.html", {
-                "message": "PyRAT credentials not configured. Set them via the desktop app.",
+                "message": "PyRAT credentials not configured. Set them via pyrat_credentials_tool.py or the desktop app.",
                 "level": "error",
             })
-
-        if not base_url.endswith("/"):
-            base_url += "/"
 
         params = {
             "l": 50 if not all_crosses else 200,
@@ -664,8 +912,8 @@ LIMIT 100"""
 
         try:
             resp = http_requests.get(
-                f"{base_url}api/v3/tanks/crossings",
-                auth=(client_token, user_token),
+                f"{credentials['base_url']}api/v3/tanks/crossings",
+                auth=(credentials["client_token"], credentials["user_token"]),
                 headers={"Accept": "application/json"},
                 params=params,
                 verify=False,
@@ -713,7 +961,9 @@ LIMIT 100"""
         dish_number: int = Form(...),
         genotype: str = Form(...),
         responsible: str = Form(...),
+        cross_setup_date: Optional[str] = Form(default=None),
         dof: str = Form(...),
+        dof_source: Optional[str] = Form(default=None),
         fish_count: int = Form(default=0),
         species: str = Form(default="Danio rerio"),
         sex: str = Form(default="unknown"),
@@ -740,6 +990,8 @@ LIMIT 100"""
             dish_number=dish_number,
             genotype=genotype,
             responsible=responsible,
+            cross_setup_date=cross_setup_date.replace("-", "") if cross_setup_date else None,
+            dof_source=dof_source or None,
             dof=dof_formatted,
             fish_count=fish_count,
             species=species,
@@ -765,19 +1017,7 @@ LIMIT 100"""
         try:
             db_path = _require_db_path()
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
-                rows = conn.execute(
-                    """SELECT c.cross_id,
-       COUNT(d.dish_id) AS total_dishes,
-       COUNT(CASE WHEN d.status = 'active' THEN 1 END) AS active_dishes
-FROM crosses c
-LEFT JOIN dishes d ON d.cross_id = c.cross_id
-GROUP BY c.cross_id
-HAVING active_dishes > 0           -- has active dishes (active)
-    OR total_dishes = 0             -- new cross, no dishes yet
-ORDER BY active_dishes DESC, c.cross_id DESC
-LIMIT 100"""
-                ).fetchall()
-                crosses = [r["cross_id"] for r in rows]
+                crosses = _load_new_dish_crosses(conn)
         except Exception:
             pass
 
@@ -787,7 +1027,9 @@ LIMIT 100"""
             "form": {
                 "cross_id": cross_id,
                 "dish_number": dish_number,
+                "cross_setup_date": cross_setup_date,
                 "dof": dof,
+                "dof_source": dof_source,
                 "fish_count": fish_count,
                 "species": species,
                 "sex": sex,
@@ -900,26 +1142,20 @@ LIMIT 100"""
         Returns a response compatible with the palette zebrobot_snapshot contract:
         cross_id, line_strain, parents, and optionally dishes from the local DB.
         """
-        import keyring
         import requests
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        # Get PyRAT credentials
-        base_url = keyring.get_password("pyrat-api", "base_url")
-        client_token = keyring.get_password("pyrat-api", "client_token")
-        user_token = keyring.get_password("pyrat-api", "user_token")
-        if not all([base_url, client_token, user_token]):
+        credentials = get_pyrat_api_credentials()
+        if not credentials:
             raise HTTPException(status_code=503, detail="PyRAT API credentials not configured")
 
         # Fetch crossing from PyRAT (list endpoint with crossing_id filter)
-        if not base_url.endswith("/"):
-            base_url += "/"
-        url = f"{base_url}api/v3/tanks/crossings"
+        url = f"{credentials['base_url']}api/v3/tanks/crossings"
         try:
             resp = requests.get(
                 url,
-                auth=(client_token, user_token),
+                auth=(credentials["client_token"], credentials["user_token"]),
                 headers={"Accept": "application/json"},
                 params={
                     "crossing_id": cross_id,
@@ -1062,6 +1298,9 @@ LIMIT 100"""
         )
 
         transgenes = data_manager.get_dish_transgenes(dish_id)
+        indicator_suggestions, default_indicator_value = _screening_indicator_suggestions(
+            transgenes, current_step
+        )
 
         return templates.TemplateResponse(request, "screening/screening_form.html", {
             "dish": dish,
@@ -1076,6 +1315,8 @@ LIMIT 100"""
             "atlas_lines": atlas_lines,
             "atlas_catalog_available": atlas_catalog_available,
             "transgenes": transgenes,
+            "indicator_suggestions": indicator_suggestions,
+            "default_indicator_value": default_indicator_value,
         })
 
     @app.get("/screening/{dish_id}/steps-table", response_class=HTMLResponse)
@@ -2121,6 +2362,10 @@ LIMIT 100"""
                 params["responsible_id"] = responsible_id
 
             raw = _fetch_pyrat("tanks/crossings", params)
+            raw = enrich_crossings_with_frontend_details(
+                raw,
+                get_pyrat_frontend_credentials(),
+            )
 
             # Get local dish counts per cross
             db_path = _require_db_path()
@@ -2139,22 +2384,30 @@ LIMIT 100"""
                     date_display = date_display[:10]
                 c["date_display"] = date_display
 
-                # Raised count from child tanks
+                # Best available raised count, preferring backend/v1 detail fields.
                 tanks_data = c.get("tanks", {})
                 children = tanks_data.get("children", []) if isinstance(tanks_data, dict) else []
-                c["raised_count"] = len(children)
+                if c.get("raised_tanks") is not None:
+                    c["raised_count"] = c["raised_tanks"]
+                elif c.get("really_raised_tanks") is not None:
+                    c["raised_count"] = c["really_raised_tanks"]
+                else:
+                    c["raised_count"] = len(children)
 
                 # Parse requested groups from description
                 desc = c.get("description", "") or ""
                 match = _re.search(r'(\d+)\s*(?:group|grp)', desc, _re.IGNORECASE)
                 c["requested_groups"] = int(match.group(1)) if match else None
+                c["performance_target_count"] = c.get("crossing_tanks") or c["requested_groups"]
 
                 # Performance
-                if c["requested_groups"] and c["requested_groups"] > 0:
-                    perf = c["raised_count"] / c["requested_groups"]
+                if c["performance_target_count"] and c["performance_target_count"] > 0:
+                    perf = c["raised_count"] / c["performance_target_count"]
                     c["performance_display"] = f"{perf:.0%}"
+                    c["performance_ratio_display"] = f"{c['raised_count']} / {c['performance_target_count']}"
                 else:
                     c["performance_display"] = None
+                    c["performance_ratio_display"] = None
 
                 c["local_dish_count"] = dish_counts.get(cid, 0)
                 c["crossing_id"] = cid
@@ -2289,7 +2542,8 @@ def main() -> int:
     except ImportError as exc:
         raise SystemExit(
             "uvicorn is required to run the API. Install with "
-            "`pip install .[api]` or `pip install uvicorn fastapi`."
+            "`pixi run python -m metazebrobot.api_server ...`, "
+            "`pip install -e . fastapi uvicorn`, or `pip install uvicorn fastapi`."
         ) from exc
 
     uvicorn.run(app, host=resolved_host, port=args.port)

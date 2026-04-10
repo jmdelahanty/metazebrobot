@@ -6,12 +6,13 @@ Retrieves tanks from the PyRAT API with flexible filtering options.
 Can filter tanks by responsible user (looking up the ID automatically),
 location, status, and other parameters.
 
-Credentials can be stored securely in your system keyring. Run with
---setup-credentials to store them once, then use without specifying tokens.
+Credentials can be stored securely in your system keyring via
+``pyrat_credentials_tool.py``. This script still supports
+``--setup-credentials`` as a compatibility alias.
 
 Usage examples:
   # First time: store credentials in system keyring
-  python pyrat_query_tool.py --setup-credentials
+  python pyrat_credentials_tool.py --setup-credentials
 
   # Then query without specifying credentials
   python pyrat_query_tool.py --responsible "ahrensm"
@@ -29,76 +30,29 @@ import os
 import sys
 import json
 import argparse
-import requests
-import keyring
-import getpass
-from urllib.parse import urljoin
-from datetime import datetime
 from pathlib import Path
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Union, Tuple
+from urllib.parse import urljoin
+
+import requests
 from rich.console import Console
 from rich import print as rprint
 
-# Keyring service name for storing PyRAT credentials
-KEYRING_SERVICE = "pyrat-api"
+_SRC_DIR = Path(__file__).resolve().parent / "src"
+if _SRC_DIR.exists():
+    sys.path.insert(0, str(_SRC_DIR))
+
+from metazebrobot.utils.pyrat_credentials import get_pyrat_api_credentials
+from metazebrobot.utils.pyrat_credentials_cli import (
+    clear_credentials as clear_stored_credentials,
+    setup_credentials as setup_stored_credentials,
+)
 
 
 def setup_credentials(console: Console) -> bool:
-    """
-    Interactively set up PyRAT API credentials in the system keyring.
-
-    Args:
-        console: Rich console for output
-
-    Returns:
-        True if credentials were saved successfully
-    """
-    console.print("\n[bold blue]PyRAT API Credential Setup[/bold blue]")
-    console.print("Credentials will be stored securely in your system keyring.\n")
-
-    # Check for existing credentials
-    existing_url = keyring.get_password(KEYRING_SERVICE, "base_url")
-    if existing_url:
-        console.print(f"[yellow]Existing credentials found for: {existing_url}[/yellow]")
-        overwrite = input("Overwrite existing credentials? [y/N]: ").strip().lower()
-        if overwrite != 'y':
-            console.print("[dim]Setup cancelled.[/dim]")
-            return False
-
-    # Get credentials from user
-    console.print("[dim]Enter your PyRAT API credentials:[/dim]\n")
-
-    base_url = input("Base URL [https://pyrataquatics.janelia.org/aquatic/]: ").strip()
-    if not base_url:
-        base_url = "https://pyrataquatics.janelia.org/aquatic/"
-
-    console.print("[dim]Client token format: ClientId-ClientKey (e.g., myapp123-secretkey456)[/dim]")
-    client_token = getpass.getpass("Client Token: ")
-    if not client_token:
-        console.print("[bold red]Error: Client token is required[/bold red]")
-        return False
-
-    console.print("[dim]User token: Your personal API token from PyRAT[/dim]")
-    user_token = getpass.getpass("User Token: ")
-    if not user_token:
-        console.print("[bold red]Error: User token is required[/bold red]")
-        return False
-
-    # Store in keyring
-    try:
-        keyring.set_password(KEYRING_SERVICE, "base_url", base_url)
-        keyring.set_password(KEYRING_SERVICE, "client_token", client_token)
-        keyring.set_password(KEYRING_SERVICE, "user_token", user_token)
-
-        console.print("\n[bold green]✓ Credentials saved to system keyring![/bold green]")
-        console.print(f"[dim]Service: {KEYRING_SERVICE}[/dim]")
-        console.print(f"[dim]Base URL: {base_url}[/dim]")
-        console.print("\n[cyan]You can now run queries without specifying credentials:[/cyan]")
-        console.print("[dim]  python pyrat_query_tool.py --responsible \"username\"[/dim]\n")
-        return True
-    except Exception as e:
-        console.print(f"[bold red]Error saving credentials: {e}[/bold red]")
-        return False
+    """Compatibility wrapper around the dedicated credentials tool."""
+    return setup_stored_credentials(console)
 
 
 def get_credentials(console: Console,
@@ -122,74 +76,31 @@ def get_credentials(console: Console,
     Returns:
         Dict with base_url, client_token, user_token or None if not found
     """
-    # 1. Check CLI arguments
+    credentials = get_pyrat_api_credentials(
+        cli_base_url=cli_base_url,
+        cli_client_token=cli_client_token,
+        cli_user_token=cli_user_token,
+    )
+    if not credentials:
+        return None
+
     if cli_base_url and cli_client_token and cli_user_token:
         console.print("[dim]Using credentials from command line arguments[/dim]\n")
-        return {
-            "base_url": cli_base_url,
-            "client_token": cli_client_token,
-            "user_token": cli_user_token
-        }
-
-    # 2. Check environment variables
-    env_base_url = os.environ.get("PYRAT_BASE_URL")
-    env_client_token = os.environ.get("PYRAT_CLIENT_TOKEN")
-    env_user_token = os.environ.get("PYRAT_USER_TOKEN")
-
-    if env_base_url and env_client_token and env_user_token:
+    elif (
+        os.environ.get("PYRAT_BASE_URL")
+        and os.environ.get("PYRAT_CLIENT_TOKEN")
+        and os.environ.get("PYRAT_USER_TOKEN")
+    ):
         console.print("[dim]Using credentials from environment variables[/dim]\n")
-        return {
-            "base_url": env_base_url,
-            "client_token": env_client_token,
-            "user_token": env_user_token
-        }
+    else:
+        console.print("[dim]Using credentials from system keyring[/dim]\n")
 
-    # 3. Check system keyring
-    try:
-        kr_base_url = keyring.get_password(KEYRING_SERVICE, "base_url")
-        kr_client_token = keyring.get_password(KEYRING_SERVICE, "client_token")
-        kr_user_token = keyring.get_password(KEYRING_SERVICE, "user_token")
-
-        if kr_base_url and kr_client_token and kr_user_token:
-            console.print("[dim]Using credentials from system keyring[/dim]\n")
-            return {
-                "base_url": kr_base_url,
-                "client_token": kr_client_token,
-                "user_token": kr_user_token
-            }
-    except Exception as e:
-        console.print(f"[yellow]Warning: Could not access keyring: {e}[/yellow]")
-
-    return None
+    return credentials
 
 
 def clear_credentials(console: Console) -> bool:
-    """
-    Remove PyRAT API credentials from the system keyring.
-
-    Args:
-        console: Rich console for output
-
-    Returns:
-        True if credentials were cleared successfully
-    """
-    try:
-        # Check if credentials exist
-        existing = keyring.get_password(KEYRING_SERVICE, "base_url")
-        if not existing:
-            console.print("[yellow]No credentials found in keyring[/yellow]")
-            return True
-
-        # Delete each credential
-        keyring.delete_password(KEYRING_SERVICE, "base_url")
-        keyring.delete_password(KEYRING_SERVICE, "client_token")
-        keyring.delete_password(KEYRING_SERVICE, "user_token")
-
-        console.print("[bold green]✓ Credentials removed from system keyring[/bold green]")
-        return True
-    except Exception as e:
-        console.print(f"[bold red]Error clearing credentials: {e}[/bold red]")
-        return False
+    """Compatibility wrapper around the dedicated credentials tool."""
+    return clear_stored_credentials(console)
 
 
 def get_user_id(base_url: str, client_token: str, user_token: str, 
@@ -715,11 +626,11 @@ def main() -> None:
 Credential sources (checked in order):
   1. Command line arguments (--base-url, --client-token, --user-token)
   2. Environment variables (PYRAT_BASE_URL, PYRAT_CLIENT_TOKEN, PYRAT_USER_TOKEN)
-  3. System keyring (run --setup-credentials to store)
+  3. System keyring (run pyrat_credentials_tool.py --setup-credentials to store)
 
 Examples:
   # Set up credentials (one time)
-  %(prog)s --setup-credentials
+  python pyrat_credentials_tool.py --setup-credentials
 
   # Query tanks
   %(prog)s --responsible "ahrensm"
@@ -731,9 +642,9 @@ Examples:
     # Credential management
     cred_group = parser.add_argument_group('credential management')
     cred_group.add_argument('--setup-credentials', action='store_true',
-                           help='Interactively set up and store API credentials in system keyring')
+                           help='Compatibility alias for pyrat_credentials_tool.py --setup-credentials')
     cred_group.add_argument('--clear-credentials', action='store_true',
-                           help='Remove stored credentials from system keyring')
+                           help='Compatibility alias for pyrat_credentials_tool.py --clear-credentials')
 
     # Optional credential overrides (no longer positional)
     cred_group.add_argument('--base-url', help='Base URL of the PyRAT instance')
@@ -790,7 +701,7 @@ Examples:
     if not credentials:
         console.print("[bold red]Error: No credentials found![/bold red]")
         console.print("\nPlease provide credentials via one of these methods:")
-        console.print("  1. Run [cyan]--setup-credentials[/cyan] to store in system keyring")
+        console.print("  1. Run [cyan]python pyrat_credentials_tool.py --setup-credentials[/cyan]")
         console.print("  2. Set environment variables: PYRAT_BASE_URL, PYRAT_CLIENT_TOKEN, PYRAT_USER_TOKEN")
         console.print("  3. Pass [cyan]--base-url[/cyan], [cyan]--client-token[/cyan], [cyan]--user-token[/cyan] arguments")
         sys.exit(1)
