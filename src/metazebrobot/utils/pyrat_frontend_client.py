@@ -5,6 +5,7 @@ Helpers for PyRAT frontend session authentication and backend/v1 requests.
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -49,6 +50,7 @@ def login_pyrat_frontend(
 
     session = requests.Session()
     session.headers.update({"Accept": "text/html,application/xhtml+xml"})
+    started = perf_counter()
 
     initial = session.get(root_url, verify=verify_ssl, timeout=15)
     initial.raise_for_status()
@@ -154,6 +156,8 @@ def login_pyrat_frontend(
         debug_info["has_expected_session_cookie_final"] = (
             expected_session_cookie_name in debug_info["final_frontend_cookie_names"]
         )
+        debug_info["login_elapsed_seconds"] = round(perf_counter() - started, 3)
+    logger.info("PyRAT frontend login completed in %.2fs", perf_counter() - started)
     return session, session_id
 
 
@@ -196,6 +200,7 @@ def enrich_crossings_with_frontend_details(
     if not crossings or not frontend_credentials:
         return list(crossings)
 
+    started = perf_counter()
     try:
         session, session_id = login_pyrat_frontend(
             frontend_credentials["base_url"],
@@ -209,6 +214,7 @@ def enrich_crossings_with_frontend_details(
 
     enriched: List[Dict[str, Any]] = []
     total = len(crossings)
+    successful_details = 0
 
     for index, crossing in enumerate(crossings, start=1):
         merged = dict(crossing)
@@ -246,6 +252,7 @@ def enrich_crossings_with_frontend_details(
                 ):
                     if detail.get(key) is not None:
                         merged[key] = detail.get(key)
+                successful_details += 1
             except Exception as exc:
                 logger.warning(
                     "Unable to enrich crossing %s from PyRAT backend/v1: %s",
@@ -258,4 +265,10 @@ def enrich_crossings_with_frontend_details(
         if progress_callback and (index == 1 or index % 10 == 0 or index == total):
             progress_callback(f"Loading PyRAT detail counts ({index}/{total})...")
 
+    logger.info(
+        "PyRAT frontend detail enrichment fetched %s/%s crossing details in %.2fs",
+        successful_details,
+        total,
+        perf_counter() - started,
+    )
     return enriched

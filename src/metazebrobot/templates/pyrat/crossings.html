@@ -7,57 +7,7 @@
     <p>Crossings for {{ current_user }} &mdash; {{ crossings | length }} total</p>
 </hgroup>
 
-{% if error %}
-<div class="flash flash-error" role="alert">{{ error }}</div>
-{% endif %}
-
-{% if crossings %}
-<figure>
-<table role="grid" class="screening-steps-table">
-    <thead>
-        <tr>
-            <th class="sortable sort-desc">ID</th>
-            <th class="sortable">Date</th>
-            <th class="sortable">Status</th>
-            <th class="sortable">Strain</th>
-            <th class="sortable">Crossing Tanks</th>
-            <th class="sortable">Raised</th>
-            <th class="sortable">Performance</th>
-            <th class="sortable">Dishes</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for c in crossings %}
-        <tr class="crossing-{{ c.status | lower | replace('-', '') }}">
-            <td>
-                <a href="/dishes/new?cross_id={{ c.crossing_id }}"
-                   title="Create a new dish from crossing {{ c.crossing_id }}">
-                    {{ c.crossing_id }}
-                </a>
-            </td>
-            <td>{{ c.date_display or "-" }}</td>
-            <td>{{ c.status or "-" }}</td>
-            <td>{{ c.strain_name or "-" }}</td>
-            <td>{{ c.performance_target_count if c.performance_target_count is not none else "?" }}</td>
-            <td>{{ c.raised_count }}</td>
-            <td title="{{ c.performance_ratio_display or '' }}">{{ c.performance_display or "-" }}</td>
-            <td>
-                {% if c.local_dish_count > 0 %}
-                <a href="/screening/?cross_id={{ c.crossing_id }}">{{ c.local_dish_count }} dish{{ "es" if c.local_dish_count != 1 }}</a>
-                |
-                <a href="/dishes/new?cross_id={{ c.crossing_id }}">New dish</a>
-                {% else %}
-                <a href="/dishes/new?cross_id={{ c.crossing_id }}">New dish</a>
-                {% endif %}
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-</figure>
-{% else %}
-<p><em>No crossings found. {% if not error %}Check that PyRAT credentials are configured.{% endif %}</em></p>
-{% endif %}
+{% include "pyrat/_crossings_table.html" %}
 
 <p><a href="/pyrat/tanks/">Tanks</a> | <a href="/">Home</a></p>
 {% endblock %}

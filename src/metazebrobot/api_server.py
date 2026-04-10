@@ -6,10 +6,12 @@ import argparse
 import json
 import logging
 import os
+import re
 import sqlite3
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
@@ -88,6 +90,7 @@ def _fetch_pyrat(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
 
     url = f"{credentials['base_url']}api/v3/{endpoint}"
 
+    started = perf_counter()
     resp = http_requests.get(
         url,
         auth=(credentials["client_token"], credentials["user_token"]),
@@ -96,9 +99,14 @@ def _fetch_pyrat(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
         verify=False,
         timeout=15,
     )
+    elapsed = perf_counter() - started
     if resp.status_code != 200:
+        logger.warning("PyRAT api/v3 %s failed in %.2fs with status %s", endpoint, elapsed, resp.status_code)
         raise HTTPException(status_code=502, detail=f"PyRAT API error: {resp.status_code}")
-    return resp.json()
+    payload = resp.json()
+    count = len(payload) if isinstance(payload, list) else 1
+    logger.info("PyRAT api/v3 %s returned %s item(s) in %.2fs", endpoint, count, elapsed)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +248,16 @@ def _cross_prefill_from_payload(cross: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
+def _cross_prefill_complete(prefill: Dict[str, str]) -> bool:
+    """Return True when local cross data is sufficient to render the new-dish form."""
+    return all([
+        prefill.get("genotype"),
+        prefill.get("responsible"),
+        prefill.get("parents"),
+        prefill.get("dof"),
+    ])
+
+
 def _load_local_cross_prefill(conn: sqlite3.Connection, cross_id: str) -> Dict[str, str]:
     """Load cross defaults from locally cached crosses and prior dishes."""
     prefill = {
@@ -318,8 +336,149 @@ LIMIT 100"""
     return [r["cross_id"] for r in rows]
 
 
+def _load_cross_dish_counts(conn: sqlite3.Connection) -> Dict[str, int]:
+    """Load active local dish counts keyed by cross id."""
+    rows = conn.execute(
+        "SELECT cross_id, COUNT(*) AS cnt FROM dishes WHERE status = 'active' GROUP BY cross_id"
+    ).fetchall()
+    return {r["cross_id"]: r["cnt"] for r in rows}
+
+
+def _load_cached_cross_payloads(
+    conn: sqlite3.Connection,
+    cross_ids: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    """Load cached cross JSON payloads keyed by cross id."""
+    if not cross_ids:
+        return {}
+
+    placeholders = ",".join("?" for _ in cross_ids)
+    rows = conn.execute(
+        f"SELECT cross_id, data FROM crosses WHERE cross_id IN ({placeholders})",
+        tuple(cross_ids),
+    ).fetchall()
+    payloads: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        try:
+            payloads[row["cross_id"]] = json.loads(row["data"]) if row["data"] else {}
+        except (TypeError, ValueError):
+            continue
+    return payloads
+
+
+def _merge_cross_payload(base: Optional[Dict[str, Any]], overlay: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Merge a cached and fresh crossing payload while preserving detail-only fields."""
+    merged = dict(base or {})
+    overlay_data = dict(overlay or {})
+
+    base_tanks = merged.get("tanks")
+    overlay_tanks = overlay_data.get("tanks")
+    if isinstance(base_tanks, dict) and isinstance(overlay_tanks, dict):
+        merged_tanks = dict(base_tanks)
+        merged_tanks.update(overlay_tanks)
+        overlay_data["tanks"] = merged_tanks
+
+    merged.update(overlay_data)
+    return merged
+
+
+def _prepare_crossings_for_display(
+    raw_crossings: List[Dict[str, Any]],
+    dish_counts: Dict[str, int],
+    cached_payloads: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Normalize crossing rows for template rendering, preferring cached detail fields."""
+    crossings: List[Dict[str, Any]] = []
+    cached_payloads = cached_payloads or {}
+
+    for cross in raw_crossings:
+        cid = str(cross.get("crossing_id", ""))
+        merged = _merge_cross_payload(cached_payloads.get(cid), cross)
+
+        date_display = (
+            merged.get("date_of_raise")
+            or merged.get("date_of_set_up")
+            or merged.get("date_of_record")
+            or ""
+        )
+        if date_display:
+            date_display = str(date_display)[:10]
+        merged["date_display"] = date_display
+
+        tanks_data = merged.get("tanks", {})
+        children = tanks_data.get("children", []) if isinstance(tanks_data, dict) else []
+        if merged.get("raised_tanks") is not None:
+            merged["raised_count"] = merged["raised_tanks"]
+        elif merged.get("really_raised_tanks") is not None:
+            merged["raised_count"] = merged["really_raised_tanks"]
+        else:
+            merged["raised_count"] = len(children)
+
+        desc = merged.get("description", "") or ""
+        match = re.search(r"(\d+)\s*(?:group|grp)", desc, re.IGNORECASE)
+        merged["requested_groups"] = int(match.group(1)) if match else None
+        merged["performance_target_count"] = merged.get("crossing_tanks") or merged["requested_groups"]
+
+        if merged["performance_target_count"] and merged["performance_target_count"] > 0:
+            perf = merged["raised_count"] / merged["performance_target_count"]
+            merged["performance_display"] = f"{perf:.0%}"
+            merged["performance_ratio_display"] = (
+                f"{merged['raised_count']} / {merged['performance_target_count']}"
+            )
+        else:
+            merged["performance_display"] = None
+            merged["performance_ratio_display"] = None
+
+        merged["local_dish_count"] = dish_counts.get(cid, 0)
+        merged["crossing_id"] = cid
+        crossings.append(merged)
+
+    return crossings
+
+
+def _cache_cross_rows(crossings: List[Dict[str, Any]]) -> None:
+    """Persist PyRAT crossing payloads into the local crosses cache."""
+    if not crossings:
+        return
+
+    try:
+        with data_manager.get_connection() as conn:
+            for cross in crossings:
+                cross_id = cross.get("crossing_id")
+                if not cross_id:
+                    continue
+                existing_row = conn.execute(
+                    "SELECT data FROM crosses WHERE cross_id = ? LIMIT 1",
+                    (str(cross_id),),
+                ).fetchone()
+                existing_payload = {}
+                if existing_row and existing_row["data"]:
+                    try:
+                        existing_payload = json.loads(existing_row["data"])
+                    except (TypeError, ValueError):
+                        existing_payload = {}
+                merged = _merge_cross_payload(existing_payload, cross)
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO crosses
+                    (cross_id, cross_status, line_strain, data, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (
+                        str(cross_id),
+                        merged.get("status"),
+                        merged.get("strain_name") or merged.get("strain_name_with_id"),
+                        json.dumps(merged),
+                    ),
+                )
+            conn.commit()
+    except Exception as exc:
+        logger.warning("Unable to cache %s crossing row(s): %s", len(crossings), exc)
+
+
 def _load_cross_prefill(cross_id: str) -> Dict[str, str]:
     """Load dish-form defaults for a cross from PyRAT first, then local cache."""
+    started = perf_counter()
     prefill = {
         "genotype": "",
         "responsible": "",
@@ -331,6 +490,16 @@ def _load_cross_prefill(cross_id: str) -> Dict[str, str]:
     }
 
     try:
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, DEFAULT_BUSY_TIMEOUT_MS) as conn:
+            local_prefill = _load_local_cross_prefill(conn, cross_id)
+        for key in ("genotype", "responsible", "parents", "cross_setup_date", "dof", "dof_source"):
+            prefill[key] = prefill[key] or local_prefill[key]
+
+        if _cross_prefill_complete(prefill):
+            logger.info("Cross prefill %s served from local cache in %.2fs", cross_id, perf_counter() - started)
+            return prefill
+
         try:
             items = _fetch_pyrat(
                 "tanks/crossings",
@@ -355,17 +524,20 @@ def _load_cross_prefill(cross_id: str) -> Dict[str, str]:
         else:
             if items:
                 cross = items[0] if isinstance(items, list) else items
-                prefill.update(_cross_prefill_from_payload(cross))
-
-        if not all([prefill["genotype"], prefill["responsible"], prefill["parents"], prefill["dof"]]):
-            db_path = _require_db_path()
-            with _open_readonly_connection(db_path, DEFAULT_BUSY_TIMEOUT_MS) as conn:
-                local_prefill = _load_local_cross_prefill(conn, cross_id)
-            for key in ("genotype", "responsible", "parents", "cross_setup_date", "dof", "dof_source"):
-                prefill[key] = prefill[key] or local_prefill[key]
+                _cache_cross_rows([cross])
+                live_prefill = _cross_prefill_from_payload(cross)
+                for key in ("genotype", "responsible", "parents", "cross_setup_date", "dof", "dof_source"):
+                    prefill[key] = prefill[key] or live_prefill[key]
     except Exception as exc:
         prefill["error"] = f"Could not fetch cross info: {exc}"
 
+    logger.info(
+        "Cross prefill %s resolved in %.2fs (complete=%s, error=%s)",
+        cross_id,
+        perf_counter() - started,
+        _cross_prefill_complete(prefill),
+        bool(prefill["error"]),
+    )
     return prefill
 
 
@@ -926,23 +1098,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 })
 
             crossings = resp.json()
-            # Upsert into local crosses table
-            with data_manager.get_connection() as conn:
-                for c in crossings:
-                    cid = c.get("crossing_id")
-                    if not cid:
-                        continue
-                    conn.execute("""
-                        INSERT OR REPLACE INTO crosses
-                        (cross_id, cross_status, line_strain, data, updated_at)
-                        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (
-                        str(cid),
-                        c.get("status"),
-                        c.get("strain_name") or c.get("strain_name_with_id"),
-                        json.dumps(c),
-                    ))
-                conn.commit()
+            _cache_cross_rows(crossings)
 
             return templates.TemplateResponse(request, "screening/_flash_message.html", {
                 "message": f"Synced {len(crossings)} crosses from PyRAT.",
@@ -2342,8 +2498,55 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     @app.get("/pyrat/crossings/", response_class=HTMLResponse)
     def pyrat_crossings_page(request: Request):
         """Crossing list with performance tracking."""
-        import re as _re
         crossings = []
+        error_msg = None
+        details_refresh_enabled = bool(get_pyrat_frontend_credentials())
+        try:
+            responsible_id = _pyrat_user_id(_current_user(request))
+            params = {
+                "l": 200,
+                "s": ["date_of_record:desc"],
+                "k": [
+                    "crossing_id", "status", "date_of_record", "date_of_set_up", "date_of_raise",
+                    "strain_name", "description", "tanks",
+                ],
+                "tk": [
+                    "tank_id", "tank_label", "status",
+                ],
+            }
+            if responsible_id:
+                params["responsible_id"] = responsible_id
+
+            page_started = perf_counter()
+            raw = _fetch_pyrat("tanks/crossings", params)
+            _cache_cross_rows(raw)
+
+            # Get local dish counts per cross
+            db_path = _require_db_path()
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                dish_counts = _load_cross_dish_counts(conn)
+                cached_payloads = _load_cached_cross_payloads(
+                    conn,
+                    [str(item.get("crossing_id", "")) for item in raw if item.get("crossing_id")],
+                )
+
+            crossings = _prepare_crossings_for_display(raw, dish_counts, cached_payloads)
+            logger.info("PyRAT crossings page built %s row(s) in %.2fs", len(crossings), perf_counter() - page_started)
+        except HTTPException as e:
+            error_msg = e.detail
+        except Exception as e:
+            error_msg = str(e)
+
+        return templates.TemplateResponse(request, "pyrat/crossings.html", {
+            "crossings": crossings,
+            "error": error_msg,
+            "details_refresh_enabled": details_refresh_enabled,
+        })
+
+    @app.get("/pyrat/crossings/table", response_class=HTMLResponse)
+    def pyrat_crossings_table(request: Request):
+        """HTMX partial: crossing table with fresh backend/v1 detail enrichment."""
+        crossings: List[Dict[str, Any]] = []
         error_msg = None
         try:
             responsible_id = _pyrat_user_id(_current_user(request))
@@ -2361,65 +2564,40 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             if responsible_id:
                 params["responsible_id"] = responsible_id
 
+            table_started = perf_counter()
             raw = _fetch_pyrat("tanks/crossings", params)
+            _cache_cross_rows(raw)
+
+            enrich_started = perf_counter()
             raw = enrich_crossings_with_frontend_details(
                 raw,
                 get_pyrat_frontend_credentials(),
             )
+            logger.info(
+                "PyRAT crossings table refresh enriched %s crossing(s) in %.2fs",
+                len(raw),
+                perf_counter() - enrich_started,
+            )
+            _cache_cross_rows(raw)
 
-            # Get local dish counts per cross
             db_path = _require_db_path()
-            dish_counts = {}
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
-                rows = conn.execute(
-                    "SELECT cross_id, COUNT(*) AS cnt FROM dishes WHERE status = 'active' GROUP BY cross_id"
-                ).fetchall()
-                dish_counts = {r["cross_id"]: r["cnt"] for r in rows}
-
-            for c in raw:
-                cid = str(c.get("crossing_id", ""))
-                # Best date
-                date_display = c.get("date_of_raise") or c.get("date_of_set_up") or c.get("date_of_record") or ""
-                if date_display:
-                    date_display = date_display[:10]
-                c["date_display"] = date_display
-
-                # Best available raised count, preferring backend/v1 detail fields.
-                tanks_data = c.get("tanks", {})
-                children = tanks_data.get("children", []) if isinstance(tanks_data, dict) else []
-                if c.get("raised_tanks") is not None:
-                    c["raised_count"] = c["raised_tanks"]
-                elif c.get("really_raised_tanks") is not None:
-                    c["raised_count"] = c["really_raised_tanks"]
-                else:
-                    c["raised_count"] = len(children)
-
-                # Parse requested groups from description
-                desc = c.get("description", "") or ""
-                match = _re.search(r'(\d+)\s*(?:group|grp)', desc, _re.IGNORECASE)
-                c["requested_groups"] = int(match.group(1)) if match else None
-                c["performance_target_count"] = c.get("crossing_tanks") or c["requested_groups"]
-
-                # Performance
-                if c["performance_target_count"] and c["performance_target_count"] > 0:
-                    perf = c["raised_count"] / c["performance_target_count"]
-                    c["performance_display"] = f"{perf:.0%}"
-                    c["performance_ratio_display"] = f"{c['raised_count']} / {c['performance_target_count']}"
-                else:
-                    c["performance_display"] = None
-                    c["performance_ratio_display"] = None
-
-                c["local_dish_count"] = dish_counts.get(cid, 0)
-                c["crossing_id"] = cid
-                crossings.append(c)
+                dish_counts = _load_cross_dish_counts(conn)
+            crossings = _prepare_crossings_for_display(raw, dish_counts)
+            logger.info(
+                "PyRAT crossings table refresh rendered %s row(s) in %.2fs",
+                len(crossings),
+                perf_counter() - table_started,
+            )
         except HTTPException as e:
             error_msg = e.detail
         except Exception as e:
             error_msg = str(e)
 
-        return templates.TemplateResponse(request, "pyrat/crossings.html", {
+        return templates.TemplateResponse(request, "pyrat/_crossings_table.html", {
             "crossings": crossings,
             "error": error_msg,
+            "details_refresh_enabled": False,
         })
 
     # ------------------------------------------------------------------
