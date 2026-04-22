@@ -122,6 +122,25 @@ class TestCrossPrefillHelpers:
         assert prefill["dof_source"] == "pyrat_setup_plus_1"
         assert prefill["parents"] == "#6489_M12>D9, #6402_M24>C8"
 
+    def test_cross_prefill_prefers_tank_label_over_bare_tank_id(self):
+        payload = {
+            "strain_name": "Tg(elavl3:GRAB-5HT)",
+            "responsible_fullname": "Delahanty Jeremy",
+            "date_of_set_up": "2026-04-06T08:40:12",
+            "tanks": {
+                "parents": [
+                    {
+                        "tank_id": 6489,
+                        "tank_label": "#6489_M12>D9",
+                    },
+                ]
+            },
+        }
+
+        prefill = _cross_prefill_from_payload(payload)
+
+        assert prefill["parents"] == "#6489_M12>D9"
+
 
 class TestCrossingDisplayHelpers:
     def test_merge_cross_payload_preserves_cached_children_and_enriched_counts(self):
@@ -148,6 +167,42 @@ class TestCrossingDisplayHelpers:
         assert merged["crossing_tanks"] == 2
         assert merged["tanks"]["children"] == [{"tank_id": 9001}]
         assert merged["status"] == "set-up"
+
+    def test_merge_cross_payload_preserves_cached_parent_locations_from_sparse_fetch(self):
+        cached = {
+            "crossing_id": 17990,
+            "tanks": {
+                "parents": [
+                    {
+                        "tank_id": 6319,
+                        "location_rack_name": "M10",
+                        "tank_position": "E7",
+                        "status": "open",
+                    },
+                    {
+                        "tank_id": 5060,
+                        "location_rack_name": "M21",
+                        "tank_position": "F5",
+                        "status": "open",
+                    },
+                ],
+            },
+        }
+        sparse = {
+            "crossing_id": 17990,
+            "tanks": {
+                "parents": [
+                    {"tank_id": 6319, "status": "closed"},
+                    {"tank_id": 5060, "status": "closed"},
+                ],
+            },
+        }
+
+        merged = _merge_cross_payload(cached, sparse)
+        prefill = _cross_prefill_from_payload(merged)
+
+        assert merged["tanks"]["parents"][0]["status"] == "closed"
+        assert prefill["parents"] == "#6319_M10>E7, #5060_M21>F5"
 
     def test_prepare_crossings_for_display_uses_cached_detail_fields(self):
         raw = [{

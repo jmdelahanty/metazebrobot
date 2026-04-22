@@ -215,10 +215,12 @@ def _format_parent_locations(parent_tanks: Optional[List[Dict[str, Any]]]) -> st
             pos = tank.get("tank_position")
             if tank_id and rack and pos:
                 location = f"#{tank_id}_{rack}>{pos}"
+            elif tank.get("tank_label"):
+                location = str(tank.get("tank_label"))
             elif tank_id:
                 location = f"#{tank_id}"
             else:
-                location = tank.get("tank_label", "")
+                location = ""
         if location:
             labels.append(location)
     return ", ".join(labels)
@@ -374,11 +376,76 @@ def _merge_cross_payload(base: Optional[Dict[str, Any]], overlay: Optional[Dict[
     base_tanks = merged.get("tanks")
     overlay_tanks = overlay_data.get("tanks")
     if isinstance(base_tanks, dict) and isinstance(overlay_tanks, dict):
-        merged_tanks = dict(base_tanks)
-        merged_tanks.update(overlay_tanks)
+        merged_tanks = _merge_tanks_payload(base_tanks, overlay_tanks)
         overlay_data["tanks"] = merged_tanks
 
     merged.update(overlay_data)
+    return merged
+
+
+def _merge_tanks_payload(
+    base_tanks: Dict[str, Any],
+    overlay_tanks: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Merge PyRAT tank payloads without losing location fields from sparse fetches."""
+    merged_tanks = dict(base_tanks)
+    for key, value in overlay_tanks.items():
+        base_value = merged_tanks.get(key)
+        if key in {"parents", "children"} and isinstance(base_value, list) and isinstance(value, list):
+            merged_tanks[key] = _merge_tank_lists(base_value, value)
+        elif value not in (None, ""):
+            merged_tanks[key] = value
+        elif key not in merged_tanks:
+            merged_tanks[key] = value
+    return merged_tanks
+
+
+def _merge_tank_lists(
+    base_tanks: List[Dict[str, Any]],
+    overlay_tanks: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    if not overlay_tanks and base_tanks:
+        return base_tanks
+
+    base_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    base_order: List[Tuple[str, str]] = []
+    for index, tank in enumerate(base_tanks):
+        key = _tank_merge_key(tank, index)
+        base_by_key[key] = tank
+        base_order.append(key)
+
+    merged: List[Dict[str, Any]] = []
+    used_keys = set()
+    for index, tank in enumerate(overlay_tanks):
+        key = _tank_merge_key(tank, index)
+        base_tank = base_by_key.get(key)
+        merged.append(_merge_tank_row(base_tank, tank) if base_tank else tank)
+        used_keys.add(key)
+
+    for key in base_order:
+        if key not in used_keys:
+            merged.append(base_by_key[key])
+
+    return merged
+
+
+def _tank_merge_key(tank: Dict[str, Any], index: int) -> Tuple[str, str]:
+    tank_id = tank.get("tank_id")
+    if tank_id not in (None, ""):
+        return ("tank_id", str(tank_id))
+    return ("index", str(index))
+
+
+def _merge_tank_row(
+    base_tank: Optional[Dict[str, Any]],
+    overlay_tank: Dict[str, Any],
+) -> Dict[str, Any]:
+    merged = dict(base_tank or {})
+    for key, value in overlay_tank.items():
+        if value not in (None, ""):
+            merged[key] = value
+        elif key not in merged:
+            merged[key] = value
     return merged
 
 
@@ -476,8 +543,12 @@ def _cache_cross_rows(crossings: List[Dict[str, Any]]) -> None:
         logger.warning("Unable to cache %s crossing row(s): %s", len(crossings), exc)
 
 
-def _load_cross_prefill(cross_id: str) -> Dict[str, str]:
-    """Load dish-form defaults for a cross from PyRAT first, then local cache."""
+def _load_cross_prefill(
+    cross_id: str,
+    db_path: Optional[Path] = None,
+    busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
+) -> Dict[str, str]:
+    """Load dish-form defaults for a cross from local cache, then PyRAT."""
     started = perf_counter()
     prefill = {
         "genotype": "",
@@ -490,15 +561,15 @@ def _load_cross_prefill(cross_id: str) -> Dict[str, str]:
     }
 
     try:
-        db_path = _require_db_path()
-        with _open_readonly_connection(db_path, DEFAULT_BUSY_TIMEOUT_MS) as conn:
-            local_prefill = _load_local_cross_prefill(conn, cross_id)
-        for key in ("genotype", "responsible", "parents", "cross_setup_date", "dof", "dof_source"):
-            prefill[key] = prefill[key] or local_prefill[key]
+        if db_path:
+            with _open_readonly_connection(db_path, busy_timeout_ms) as conn:
+                local_prefill = _load_local_cross_prefill(conn, cross_id)
+            for key in ("genotype", "responsible", "parents", "cross_setup_date", "dof", "dof_source"):
+                prefill[key] = prefill[key] or local_prefill[key]
 
-        if _cross_prefill_complete(prefill):
-            logger.info("Cross prefill %s served from local cache in %.2fs", cross_id, perf_counter() - started)
-            return prefill
+            if _cross_prefill_complete(prefill):
+                logger.info("Cross prefill %s served from local cache in %.2fs", cross_id, perf_counter() - started)
+                return prefill
 
         try:
             items = _fetch_pyrat(
@@ -1003,7 +1074,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             pass
 
         today = datetime.now().strftime("%Y-%m-%d")
-        prefill = _load_cross_prefill(cross_id) if cross_id else {
+        prefill = _load_cross_prefill(cross_id, _require_db_path(), app.state.busy_timeout_ms) if cross_id else {
             "genotype": "",
             "responsible": "",
             "parents": "",
@@ -1034,7 +1105,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     @app.get("/dishes/new/cross-info", response_class=HTMLResponse)
     def cross_info_partial(request: Request, cross_id: str = Query(...)):
         """HTMX partial: auto-fill genotype/responsible/parents from PyRAT cross."""
-        prefill = _load_cross_prefill(cross_id)
+        prefill = _load_cross_prefill(cross_id, _require_db_path(), app.state.busy_timeout_ms)
 
         return templates.TemplateResponse(request, "dishes/_cross_info.html", {
             "genotype": prefill["genotype"],
