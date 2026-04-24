@@ -1,8 +1,15 @@
-{% if reference %}
-<figure class="atlas-thumb">
-    <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_genotype }}" loading="lazy">
-    <figcaption>{{ reference.caption or reference.display_genotype }}</figcaption>
-</figure>
+{% if references %}
+<div class="indicator-images">
+    {% for reference in references %}
+    <figure class="atlas-thumb">
+        <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_genotype }}" loading="lazy">
+        <figcaption>{{ reference.caption or reference.display_genotype }}</figcaption>
+        {% if reference.source_dish_id %}
+        <small>Source dish: <code>{{ reference.source_dish_id }}</code></small>
+        {% endif %}
+    </figure>
+    {% endfor %}
+</div>
 {% else %}
 <p><em>No curated genotype reference image for this exact genotype yet.</em></p>
 <p>

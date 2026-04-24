@@ -667,6 +667,28 @@ class DataManager:
                     ON dish_images(dish_id)
                 """)
 
+                # Curated full-genotype reference images
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS genotype_reference_images (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        genotype_key TEXT NOT NULL,
+                        display_genotype TEXT NOT NULL,
+                        image_filename TEXT NOT NULL,
+                        caption TEXT,
+                        source_image_id INTEGER,
+                        source_dish_id TEXT,
+                        source_fish_id TEXT,
+                        channels_json TEXT,
+                        notes TEXT,
+                        is_active INTEGER DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_genotype_reference_images_key
+                    ON genotype_reference_images(genotype_key, is_active)
+                """)
+
                 conn.commit()
                 logger.debug("Schema updates applied successfully")
 
@@ -3163,6 +3185,104 @@ class DataManager:
                 return [{k: row[k] for k in row.keys()} for row in rows]
         except Exception as e:
             logger.error(f"Error querying dish images: {e}")
+            return []
+
+    # --- Genotype Reference Images ---
+
+    @staticmethod
+    def genotype_reference_key(genotype: Optional[str]) -> str:
+        """Return the conservative exact-match key for a full genotype string."""
+        return " ".join((genotype or "").split())
+
+    def save_genotype_reference_image(
+        self,
+        genotype: str,
+        image_filename: str,
+        caption: Optional[str] = None,
+        display_genotype: Optional[str] = None,
+        source_image_id: Optional[int] = None,
+        source_dish_id: Optional[str] = None,
+        source_fish_id: Optional[str] = None,
+        channels_json: Optional[str] = None,
+        notes: Optional[str] = None,
+        is_active: bool = True,
+    ) -> Optional[int]:
+        """Insert a curated display image for an exact full-genotype match."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return None
+
+        genotype_key = self.genotype_reference_key(genotype)
+        if not genotype_key:
+            logger.error("Cannot save genotype reference image without genotype.")
+            return None
+        if not image_filename:
+            logger.error("Cannot save genotype reference image without image filename.")
+            return None
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO genotype_reference_images
+                        (genotype_key, display_genotype, image_filename, caption,
+                         source_image_id, source_dish_id, source_fish_id,
+                         channels_json, notes, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        genotype_key,
+                        display_genotype or genotype_key,
+                        image_filename,
+                        caption,
+                        source_image_id,
+                        source_dish_id,
+                        source_fish_id,
+                        channels_json,
+                        notes,
+                        1 if is_active else 0,
+                    ),
+                )
+                conn.commit()
+                return int(cursor.lastrowid)
+        except Exception as e:
+            logger.error(f"Error saving genotype reference image record: {e}")
+            return None
+
+    def get_genotype_reference_images(
+        self,
+        genotype: str,
+        active_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Query curated reference images for an exact full-genotype match."""
+        if not self.is_initialized:
+            return []
+
+        genotype_key = self.genotype_reference_key(genotype)
+        if not genotype_key:
+            return []
+
+        try:
+            with self.get_connection() as conn:
+                params: List[Any] = [genotype_key]
+                active_filter = ""
+                if active_only:
+                    active_filter = "AND is_active = 1"
+                rows = conn.execute(
+                    f"""
+                    SELECT id, genotype_key, display_genotype, image_filename,
+                           caption, source_image_id, source_dish_id, source_fish_id,
+                           channels_json, notes, is_active, created_at
+                    FROM genotype_reference_images
+                    WHERE genotype_key = ?
+                    {active_filter}
+                    ORDER BY created_at DESC, id DESC
+                    """,
+                    params,
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying genotype reference images: {e}")
             return []
 
     # --- Material Management (using database backend) ---

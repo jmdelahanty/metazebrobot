@@ -14,6 +14,8 @@ import uuid
 
 import pytest
 
+from metazebrobot.data.data_manager import data_manager
+
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -502,6 +504,23 @@ class TestScreeningReferencePanels:
         assert resp.status_code == 200
         assert "No curated genotype reference image for this exact genotype yet." in resp.text
         assert "Tg(elavl3:GCaMP6s)" in resp.text
+
+    def test_genotype_reference_partial_renders_matching_reference(self, client, seed_full_dish):
+        reference_id = data_manager.save_genotype_reference_image(
+            "Tg(elavl3:GCaMP6s)",
+            "elavl3_gcamp_ref.png",
+            caption="Known good elavl3 GCaMP pattern",
+            source_dish_id=seed_full_dish,
+        )
+        assert reference_id is not None
+
+        resp = client.get(f"/screening/{seed_full_dish}/genotype-reference")
+
+        assert resp.status_code == 200
+        assert "/genotype-reference-images/elavl3_gcamp_ref.png" in resp.text
+        assert "Known good elavl3 GCaMP pattern" in resp.text
+        assert f"<code>{seed_full_dish}</code>" in resp.text
+        assert "No curated genotype reference image" not in resp.text
 
 
 # -------------------------------------------------------------------

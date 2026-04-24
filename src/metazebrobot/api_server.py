@@ -1034,6 +1034,26 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_dish_images_dish_id
                 ON dish_images(dish_id)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS genotype_reference_images (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    genotype_key TEXT NOT NULL,
+                    display_genotype TEXT NOT NULL,
+                    image_filename TEXT NOT NULL,
+                    caption TEXT,
+                    source_image_id INTEGER,
+                    source_dish_id TEXT,
+                    source_fish_id TEXT,
+                    channels_json TEXT,
+                    notes TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_genotype_reference_images_key
+                ON genotype_reference_images(genotype_key, is_active)
+            """)
             conn.commit()
 
         data_manager.load_all_data()
@@ -1056,6 +1076,12 @@ async def lifespan(app: FastAPI):
         dish_images_dir.mkdir(parents=True, exist_ok=True)
         app.state.dish_images_dir = dish_images_dir
         logger.info(f"Dish images directory: {dish_images_dir}")
+
+        # Ensure curated genotype reference images directory exists
+        genotype_reference_images_dir = db_path.parent / "genotype_reference_images"
+        genotype_reference_images_dir.mkdir(parents=True, exist_ok=True)
+        app.state.genotype_reference_images_dir = genotype_reference_images_dir
+        logger.info(f"Genotype reference images directory: {genotype_reference_images_dir}")
 
     yield
 
@@ -1100,6 +1126,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "/dish-images",
             StaticFiles(directory=str(_dish_images_dir)),
             name="dish_images",
+        )
+        # Serve curated full-genotype reference images
+        _genotype_reference_images_dir = app.state.db_path.parent / "genotype_reference_images"
+        _genotype_reference_images_dir.mkdir(parents=True, exist_ok=True)
+        app.mount(
+            "/genotype-reference-images",
+            StaticFiles(directory=str(_genotype_reference_images_dir)),
+            name="genotype_reference_images",
         )
 
     # Controller instance for write endpoints
@@ -1940,9 +1974,13 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if not dish:
             raise HTTPException(status_code=404, detail="Dish not found")
 
+        references = data_manager.get_genotype_reference_images(dish.genotype)
+        for reference in references:
+            reference["image_url"] = f"/genotype-reference-images/{reference['image_filename']}"
+
         return templates.TemplateResponse(request, "screening/_genotype_reference.html", {
             "display_genotype": dish.genotype,
-            "reference": None,
+            "references": references,
         })
 
     @app.get("/screening/{dish_id}/steps-table", response_class=HTMLResponse)

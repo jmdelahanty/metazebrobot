@@ -187,6 +187,53 @@ class TestDishImageData:
         assert images[1]["caption"] == "second"
 
 
+class TestGenotypeReferenceImageData:
+    """data_manager curated full-genotype reference image methods."""
+
+    def test_save_and_get_genotype_reference_images(self, client, seed_dish):
+        genotype = f"Tg(elavl3:GCaMP6s);test-{uuid.uuid4().hex[:6]}"
+        ref_id = data_manager.save_genotype_reference_image(
+            genotype,
+            "elavl3_gcamp_ref.png",
+            caption="Known good expression",
+            source_dish_id=seed_dish,
+        )
+
+        assert ref_id is not None
+        refs = data_manager.get_genotype_reference_images(genotype)
+        assert len(refs) == 1
+        assert refs[0]["image_filename"] == "elavl3_gcamp_ref.png"
+        assert refs[0]["caption"] == "Known good expression"
+        assert refs[0]["source_dish_id"] == seed_dish
+
+    def test_genotype_reference_matching_is_exact_after_whitespace_normalization(self, client):
+        genotype = f"Tg(elavl3:GCaMP6s);test-{uuid.uuid4().hex[:6]}"
+        data_manager.save_genotype_reference_image(
+            genotype,
+            "elavl3_gcamp_ref.png",
+        )
+
+        assert data_manager.get_genotype_reference_images(genotype)
+        assert data_manager.get_genotype_reference_images(f" {genotype} ")
+        assert data_manager.get_genotype_reference_images(genotype.replace("GCaMP6s", "GCaMP6f")) == []
+
+    def test_inactive_genotype_reference_images_are_hidden_by_default(self, client):
+        genotype = f"Tg(elavl3:GCaMP6s);test-{uuid.uuid4().hex[:6]}"
+        data_manager.save_genotype_reference_image(
+            genotype,
+            "inactive_ref.png",
+            is_active=False,
+        )
+
+        assert data_manager.get_genotype_reference_images(genotype) == []
+        refs = data_manager.get_genotype_reference_images(
+            genotype,
+            active_only=False,
+        )
+        assert len(refs) == 1
+        assert refs[0]["image_filename"] == "inactive_ref.png"
+
+
 class TestGenotypeParser:
     """parse_genotype() — structured transgene extraction."""
 

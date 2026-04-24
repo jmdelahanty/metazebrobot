@@ -283,9 +283,9 @@ A future importer should:
 
 ## Suggested Implementation Phases
 
-1. Add `genotype_reference_images` table and managed PNG directory.
-2. Add `GET /screening/{dish_id}/genotype-reference` HTMX partial.
-3. Add the `Genotype Reference` panel below the existing `Atlas Reference` panel.
+1. [x] Add `genotype_reference_images` table and managed PNG directory.
+2. [x] Add `GET /screening/{dish_id}/genotype-reference` HTMX partial.
+3. [x] Add the `Genotype Reference` panel below the existing `Atlas Reference` panel.
 4. Add a simple manual upload/admin path for genotype reference PNGs.
 5. Add image catalog and staging importer for OME-TIFF/PNG files.
 6. Add `Mark as genotype reference` from existing screening image galleries.
