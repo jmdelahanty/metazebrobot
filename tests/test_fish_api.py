@@ -555,6 +555,7 @@ class TestReferenceLibrary:
         assert resp.status_code == 200
         assert "Reference Library" in resp.text
         assert "No curated genotype reference images yet." in resp.text
+        assert 'action="/references/genotype"' in resp.text
 
     def test_reference_library_page_lists_genotype_references(self, client, seed_full_dish):
         reference_id = data_manager.save_genotype_reference_image(
@@ -572,6 +573,44 @@ class TestReferenceLibrary:
         assert "Reference library example" in resp.text
         assert "/genotype-reference-images/library_ref.png" in resp.text
         assert f'href="/screening/{seed_full_dish}"' in resp.text
+
+    def test_upload_genotype_reference(self, client, seed_full_dish, tmp_db_path):
+        fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+        resp = client.post(
+            "/references/genotype",
+            files={"file": ("ref.png", fake_png, "image/png")},
+            data={
+                "genotype": "Tg(elavl3:GCaMP6s)",
+                "caption": "Uploaded reference",
+                "source_dish_id": seed_full_dish,
+                "notes": "curated from test",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert resp.headers["location"].startswith("/references/?uploaded=")
+
+        refs = data_manager.get_genotype_reference_images("Tg(elavl3:GCaMP6s)")
+        match = [ref for ref in refs if ref["caption"] == "Uploaded reference"]
+        assert len(match) == 1
+        assert match[0]["source_dish_id"] == seed_full_dish
+        assert match[0]["notes"] == "curated from test"
+        assert (tmp_db_path.parent / "genotype_reference_images" / match[0]["image_filename"]).exists()
+
+        page = client.get("/references/")
+        assert "Uploaded reference" in page.text
+
+    def test_upload_genotype_reference_rejects_invalid_file_type(self, client):
+        resp = client.post(
+            "/references/genotype",
+            files={"file": ("ref.gif", b"GIF89a", "image/gif")},
+            data={"genotype": "Tg(elavl3:GCaMP6s)"},
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 400
+        assert "Only JPEG and PNG are accepted" in resp.text
 
 
 # -------------------------------------------------------------------

@@ -7,6 +7,41 @@
     <p>Curated exact-genotype reference images for screening decisions.</p>
 </hgroup>
 
+{% if uploaded %}
+<div class="flash flash-success">Uploaded genotype reference {{ uploaded }}.</div>
+{% endif %}
+
+<details class="protocol-box">
+    <summary><strong>Upload Genotype Reference</strong></summary>
+    <form method="post" action="/references/genotype" enctype="multipart/form-data">
+        <label>
+            Exact genotype
+            <input type="text" name="genotype" placeholder="e.g. Tg(elavl3:GCaMP6s)" required>
+        </label>
+        <div class="grid">
+            <label>
+                Reference image
+                <input type="file" name="file" accept="image/png,image/jpeg" required>
+            </label>
+            <label>
+                Caption
+                <input type="text" name="caption" placeholder="Optional display caption">
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                Source dish ID
+                <input type="text" name="source_dish_id" placeholder="Optional source dish">
+            </label>
+            <label>
+                Notes
+                <input type="text" name="notes" placeholder="Optional curation note">
+            </label>
+        </div>
+        <button type="submit">Upload Reference</button>
+    </form>
+</details>
+
 <form method="get" action="/references/" style="margin-bottom:1rem">
     <label>
         Status
@@ -49,7 +84,7 @@
 {% else %}
 <article>
     <p><em>No curated genotype reference images yet.</em></p>
-    <p><small>Upload and curation workflows will be added separately; this page is currently read-only.</small></p>
+    <p><small>Use the upload form above to add a display-ready PNG/JPEG for an exact genotype.</small></p>
 </article>
 {% endif %}
 {% endblock %}

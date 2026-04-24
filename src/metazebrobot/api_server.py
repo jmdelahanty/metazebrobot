@@ -3,6 +3,7 @@ FastAPI service for MetaZebrobot web UI + HTTP API.
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -1254,6 +1255,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     def references_page(
         request: Request,
         status: str = Query(default="active", pattern="^(active|all)$"),
+        uploaded: Optional[str] = Query(default=None),
     ):
         """Read-only reference library page."""
         include_inactive = status == "all"
@@ -1266,7 +1268,60 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return templates.TemplateResponse(request, "references/index.html", {
             "references": references,
             "status_filter": status,
+            "uploaded": uploaded,
         })
+
+    @app.post("/references/genotype", response_class=HTMLResponse)
+    async def upload_genotype_reference(
+        genotype: str = Form(...),
+        file: UploadFile = ...,
+        caption: Optional[str] = Form(default=None),
+        source_dish_id: Optional[str] = Form(default=None),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Upload a curated exact-genotype reference PNG/JPEG."""
+        genotype_key = data_manager.genotype_reference_key(genotype)
+        if not genotype_key:
+            raise HTTPException(status_code=400, detail="Genotype is required.")
+
+        source_dish_id = (source_dish_id or "").strip() or None
+        if source_dish_id:
+            dish = fish_dish_ctrl.get_dish(source_dish_id)
+            if not dish:
+                raise HTTPException(status_code=400, detail=f"Source dish {source_dish_id} not found.")
+
+        allowed = {"image/jpeg", "image/png"}
+        if file.content_type not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type: {file.content_type}. Only JPEG and PNG are accepted.",
+            )
+
+        contents = await file.read()
+        if not contents:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+        ext = "jpg" if file.content_type == "image/jpeg" else "png"
+        digest = hashlib.sha256(contents).hexdigest()[:12]
+        safe_key = re.sub(r"[^A-Za-z0-9_.-]+", "_", genotype_key).strip("_")[:80] or "genotype"
+        filename = f"{safe_key}_{digest}.{ext}"
+
+        references_dir: Path = app.state.genotype_reference_images_dir
+        references_dir.mkdir(parents=True, exist_ok=True)
+        (references_dir / filename).write_bytes(contents)
+
+        reference_id = data_manager.save_genotype_reference_image(
+            genotype=genotype_key,
+            image_filename=filename,
+            caption=caption or None,
+            display_genotype=genotype_key,
+            source_dish_id=source_dish_id,
+            notes=notes or None,
+        )
+        if reference_id is None:
+            raise HTTPException(status_code=500, detail="Failed to save genotype reference metadata.")
+
+        return RedirectResponse(url=f"/references/?uploaded={reference_id}", status_code=303)
 
     # ------------------------------------------------------------------
     # Dish creation (web UI)
