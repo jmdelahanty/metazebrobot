@@ -34,6 +34,7 @@
 - [x] Dorsal-view expression pattern images on screening form
 - [x] Offline fallback message when catalog unavailable
 - [x] Larger atlas-thumb CSS class for brain images
+- [x] Full-genotype reference image design documented in `docs/genotype_reference_images_design.md`
 
 ### Daily care web form
 - [x] `/care/` dish list with red highlight for unchecked dishes
@@ -48,6 +49,7 @@
 - [x] Scan-to-navigate input on screening and care dish lists (`data-navigate` pattern)
 - [x] "Print Label" button on care and screening forms
 - [x] `qrcode` dependency added
+- [x] Scanner hardware guidance documented in `docs/fish_tracking_api.md`
 
 ### Dish creation via web
 - [x] `/dishes/new` form with all fields matching desktop app

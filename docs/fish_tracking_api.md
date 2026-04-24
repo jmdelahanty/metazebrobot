@@ -364,6 +364,48 @@ Returns a PNG image (62x29mm at 300 DPI) with dish ID, genotype, DOF,
 fish count, and a QR code encoding the dish_id. Designed for label
 printers (Brother QL series) or browser printing.
 
+#### Scanner hardware notes
+
+The labels intentionally encode only the `dish_id`, so a scanner can behave
+like a keyboard: scan the QR code into a focused scan box, emit Enter, and the
+web UI navigates to the relevant dish workflow.
+
+Recommended scanner requirements:
+
+- Use a **corded 2D imager**, not a 1D-only laser scanner. The current labels
+  are QR codes.
+- Confirm support for **USB HID / keyboard wedge / keyboard emulation** mode.
+- Configure the scanner to append **Enter/CR** after each scan.
+- Test by opening a text editor: scanning a label should type a value like
+  `17990_7_pos1` and then submit a newline.
+- Prefer corded USB for the lab workstation first; it avoids Bluetooth pairing,
+  battery, and reconnect issues.
+
+Manufacturer-validated examples:
+
+- [Zebra DS2208](https://www.zebra.com/us/en/products/scanners/general-purpose-handheld-scanners/ds2200-series/ds2208.html):
+  corded handheld scanner; Zebra lists 1D/2D scan support. The
+  [DS2200 Series spec sheet](https://www.zebra.com/us/en/products/spec-sheets/scanners/general-purpose-scanners/handheld/ds2200-series.html)
+  lists USB and Keyboard Wedge host interfaces.
+- [Honeywell Voyager XP 1470g](https://automation.honeywell.com/us/en/products/productivity-solutions/barcode-scanners/general-purpose-handheld/voyager-xp-1470g-general-duty-scanner):
+  corded 2D engine; Honeywell lists 1D/2D decode capability and USB/KBW host
+  interfaces.
+- [Datalogic QuickScan 2500 Series](https://www.datalogic.com/eng/retail-manufacturing-healthcare/handheld-scanners/quickscan-2500-series-pd-898.html):
+  entry-level corded 2D handheld imager; Datalogic describes the QD2500 as a
+  corded scanner that reads 1D and 2D barcodes.
+
+Approximate US street pricing checked 2026-04-24:
+
+- Datalogic QuickScan QD2500 / QD2590-BKK1 USB kit: about **$117-$123**.
+- Zebra DS2208 USB kit / DS2208-SR7U2100SGW: about **$193-$208**.
+- Honeywell Voyager XP 1470g USB kit: about **$180-$234** depending on kit.
+
+For first lab validation, the Datalogic QD2590-BKK1 is the lowest-cost
+reasonable test unit. The Zebra DS2208 USB kit is a conservative institutional
+choice if purchasing prefers Zebra hardware. When comparing prices, verify that
+the listing includes the scanner, USB cable, and preferably a stand; scanner-only
+listings often look cheaper but require extra accessories.
+
 ---
 
 ### Transgene data
