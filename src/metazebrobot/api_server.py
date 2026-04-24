@@ -1734,10 +1734,13 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             node["incoming_edge_count"] = incoming_counts.get(node["id"], 0)
             node["outgoing_edge_count"] = outgoing_counts.get(node["id"], 0)
 
+        graph = _build_lineage_svg_graph(nodes, edges)
+
         return {
             "cross_id": cross_id,
             "nodes": nodes,
             "edges": edges,
+            "graph": graph,
             "summary": {
                 "node_count": len(nodes),
                 "edge_count": len(edges),
@@ -1745,6 +1748,114 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "active_count": sum(1 for node in nodes if node.get("status") == "active"),
                 "inactive_count": sum(1 for node in nodes if node.get("status") == "inactive"),
             },
+        }
+
+    def _build_lineage_svg_graph(
+        nodes: List[Dict[str, Any]],
+        edges: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Lay out lineage nodes and edges for a compact SVG view."""
+        if not nodes:
+            return {"nodes": [], "edges": [], "width": 0, "height": 0}
+
+        node_by_id = {node["id"]: node for node in nodes}
+        incoming_by_target: Dict[str, List[Dict[str, Any]]] = {node["id"]: [] for node in nodes}
+        outgoing_by_source: Dict[str, List[Dict[str, Any]]] = {node["id"]: [] for node in nodes}
+        for edge in edges:
+            if edge["source"] in node_by_id and edge["target"] in node_by_id:
+                incoming_by_target.setdefault(edge["target"], []).append(edge)
+                outgoing_by_source.setdefault(edge["source"], []).append(edge)
+
+        roots = [node["id"] for node in nodes if not incoming_by_target.get(node["id"])]
+        if not roots:
+            roots = [nodes[0]["id"]]
+
+        levels: Dict[str, int] = {node["id"]: 0 for node in nodes}
+        for root_id in roots:
+            levels[root_id] = 0
+
+        # Propagate downstream levels. The cap prevents accidental cycles from looping forever.
+        for _ in range(max(len(nodes), 1)):
+            changed = False
+            for edge in edges:
+                source = edge.get("source")
+                target = edge.get("target")
+                if source not in levels or target not in levels:
+                    continue
+                next_level = levels[source] + 1
+                if next_level > levels[target]:
+                    levels[target] = next_level
+                    changed = True
+            if not changed:
+                break
+
+        columns: Dict[int, List[Dict[str, Any]]] = {}
+        for node in nodes:
+            columns.setdefault(levels.get(node["id"], 0), []).append(node)
+
+        for column_nodes in columns.values():
+            column_nodes.sort(key=lambda node: (
+                0 if node.get("population_type") == "primary" else 1,
+                node.get("date_created") or "",
+                node.get("dish_id") or "",
+            ))
+
+        margin = 32
+        column_width = 280
+        row_height = 150
+        node_width = 220
+        node_height = 96
+
+        graph_nodes: List[Dict[str, Any]] = []
+        position_by_id: Dict[str, Dict[str, Any]] = {}
+        for level in sorted(columns):
+            for row_index, node in enumerate(columns[level]):
+                x = margin + level * column_width
+                y = margin + row_index * row_height
+                positioned = {
+                    **node,
+                    "x": x,
+                    "y": y,
+                    "width": node_width,
+                    "height": node_height,
+                    "center_y": y + node_height / 2,
+                    "left_x": x,
+                    "right_x": x + node_width,
+                }
+                graph_nodes.append(positioned)
+                position_by_id[node["id"]] = positioned
+
+        graph_edges: List[Dict[str, Any]] = []
+        for edge in edges:
+            source = position_by_id.get(edge.get("source"))
+            target = position_by_id.get(edge.get("target"))
+            if not source or not target:
+                continue
+
+            x1 = source["right_x"]
+            y1 = source["center_y"]
+            x2 = target["left_x"]
+            y2 = target["center_y"]
+            mid_x = (x1 + x2) / 2
+            path = f"M {x1} {y1} C {mid_x} {y1}, {mid_x} {y2}, {x2} {y2}"
+            graph_edges.append({
+                **edge,
+                "path": path,
+                "label_x": mid_x,
+                "label_y": ((y1 + y2) / 2) - 8,
+                "class_name": "transfer-edge" if edge.get("type") == "transfer" else "screening-edge",
+            })
+
+        max_level = max(columns.keys(), default=0)
+        max_rows = max((len(column_nodes) for column_nodes in columns.values()), default=1)
+        width = margin * 2 + max_level * column_width + node_width
+        height = margin * 2 + (max_rows - 1) * row_height + node_height
+
+        return {
+            "nodes": graph_nodes,
+            "edges": graph_edges,
+            "width": width,
+            "height": height,
         }
 
     def _last_screening_date(dish) -> Optional[datetime]:

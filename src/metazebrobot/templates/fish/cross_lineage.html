@@ -16,6 +16,152 @@
     <a href="/dishes/" role="button" class="outline secondary">Dishes</a>
 </p>
 
+<style>
+.lineage-graph-shell {
+    overflow-x: auto;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+    background:
+        linear-gradient(135deg, rgba(42, 123, 155, 0.08), rgba(240, 188, 94, 0.08)),
+        var(--pico-card-background-color);
+}
+.lineage-graph {
+    min-width: 100%;
+}
+.lineage-node rect {
+    fill: var(--pico-card-background-color);
+    stroke: var(--pico-primary);
+    stroke-width: 2;
+    rx: 12;
+}
+.lineage-node.inactive rect {
+    stroke: var(--pico-muted-border-color);
+    stroke-dasharray: 5 4;
+}
+.lineage-node .dish-id {
+    font-weight: 700;
+    fill: var(--pico-color);
+}
+.lineage-node .node-meta,
+.lineage-node .node-count {
+    fill: var(--pico-muted-color);
+    font-size: 12px;
+}
+.lineage-edge {
+    fill: none;
+    stroke-width: 2.4;
+}
+.screening-edge {
+    stroke: #1f7a5a;
+}
+.transfer-edge {
+    stroke: #b65f24;
+    stroke-dasharray: 7 5;
+}
+.edge-label text {
+    fill: var(--pico-muted-color);
+    font-size: 11px;
+}
+.edge-label rect {
+    fill: var(--pico-card-background-color);
+    opacity: 0.9;
+}
+.lineage-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+.lineage-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.lineage-legend i {
+    display: inline-block;
+    width: 1.5rem;
+    border-top: 3px solid;
+}
+.lineage-legend .screening-swatch {
+    border-color: #1f7a5a;
+}
+.lineage-legend .transfer-swatch {
+    border-color: #b65f24;
+    border-top-style: dashed;
+}
+</style>
+
+<section>
+    <h3>Lineage Graph</h3>
+    {% if graph.nodes %}
+    <div class="lineage-graph-shell">
+        <svg class="lineage-graph"
+             viewBox="0 0 {{ graph.width }} {{ graph.height }}"
+             width="{{ graph.width }}"
+             height="{{ graph.height }}"
+             role="img"
+             aria-label="Dish lineage graph for cross {{ cross_id }}">
+            <defs>
+                <marker id="lineage-arrow-screening"
+                        markerWidth="10"
+                        markerHeight="10"
+                        refX="9"
+                        refY="3"
+                        orient="auto"
+                        markerUnits="strokeWidth">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#1f7a5a"></path>
+                </marker>
+                <marker id="lineage-arrow-transfer"
+                        markerWidth="10"
+                        markerHeight="10"
+                        refX="9"
+                        refY="3"
+                        orient="auto"
+                        markerUnits="strokeWidth">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#b65f24"></path>
+                </marker>
+            </defs>
+
+            {% for edge in graph.edges %}
+            <path class="lineage-edge {{ edge.class_name }}"
+                  d="{{ edge.path }}"
+                  marker-end="url(#lineage-arrow-{{ 'transfer' if edge.type == 'transfer' else 'screening' }})"></path>
+            <g class="edge-label">
+                <rect x="{{ edge.label_x - 54 }}" y="{{ edge.label_y - 14 }}" width="108" height="18" rx="9"></rect>
+                <text x="{{ edge.label_x }}" y="{{ edge.label_y }}" text-anchor="middle">
+                    {{ edge.count if edge.count is not none else "?" }} fish
+                </text>
+            </g>
+            {% endfor %}
+
+            {% for node in graph.nodes %}
+            <a href="/screening/{{ node.dish_id }}">
+                <g class="lineage-node {{ 'inactive' if node.status == 'inactive' else 'active' }}">
+                    <rect x="{{ node.x }}" y="{{ node.y }}" width="{{ node.width }}" height="{{ node.height }}"></rect>
+                    <text class="dish-id" x="{{ node.x + 14 }}" y="{{ node.y + 24 }}">{{ node.dish_id }}</text>
+                    <text class="node-meta" x="{{ node.x + 14 }}" y="{{ node.y + 45 }}">{{ node.population_label }}</text>
+                    <text class="node-count" x="{{ node.x + 14 }}" y="{{ node.y + 65 }}">
+                        {{ node.current_fish_count if node.current_fish_count is not none else "?" }} current fish
+                    </text>
+                    <text class="node-count" x="{{ node.x + 14 }}" y="{{ node.y + 83 }}">
+                        {{ node.status or "unknown" }} · {{ node.incoming_edge_count }} in / {{ node.outgoing_edge_count }} out
+                    </text>
+                </g>
+            </a>
+            {% endfor %}
+        </svg>
+    </div>
+    <p class="lineage-legend">
+        <span><i class="screening-swatch"></i> Screening allocation</span>
+        <span><i class="transfer-swatch"></i> Transfer</span>
+        <span><small>Click a dish node to open its screening page.</small></span>
+    </p>
+    {% else %}
+    <p><em>No local dishes found for this cross.</em></p>
+    {% endif %}
+</section>
+
 <section>
     <h3>Lineage Events</h3>
     {% if edges %}

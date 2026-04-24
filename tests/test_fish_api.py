@@ -1726,6 +1726,10 @@ class TestCrossLevelFish:
         data = resp.json()
         node_ids = {node["id"] for node in data["nodes"]}
         assert {seed_full_dish, child_id}.issubset(node_ids)
+        assert "graph" in data
+        graph_node_ids = {node["id"] for node in data["graph"]["nodes"]}
+        assert {seed_full_dish, child_id}.issubset(graph_node_ids)
+        assert data["graph"]["edges"]
 
         screening_edge = next(
             edge for edge in data["edges"]
@@ -1752,6 +1756,8 @@ class TestCrossLevelFish:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert f"Lineage - Cross {cross_id}" in resp.text
+        assert "Lineage Graph" in resp.text
+        assert '<svg class="lineage-graph"' in resp.text
         assert seed_full_dish in resp.text
 
     def test_screening_page_links_to_cross_lineage(self, client, seed_full_dish):
