@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 _PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_BUSY_TIMEOUT_MS = 250
 _USER_MAPPING_PATH = os.path.expanduser("~/.pyrat_user_mapping.json")
+DEFAULT_OME_STAGING_ROOT = Path("/groups/ahrens/ahrenslab/jeremy/screening_staging")
 _REFERENCE_DISPLAY_ROLES = {"composite", "channel", "brightfield", "other", "reference"}
 _REFERENCE_DISPLAY_ROLE_LABELS = {
     "composite": "Composite",
@@ -275,6 +277,64 @@ def _notes_with_source_ome(notes: Optional[str], ome_path: Path) -> str:
     """Preserve source OME path provenance in current reference metadata."""
     source_note = f"Source OME-TIFF: {ome_path}"
     return f"{notes}\n{source_note}" if notes else source_note
+
+
+def _is_ome_tiff_name(name: str) -> bool:
+    """Return True for TIFF filenames accepted by the OME reference workflow."""
+    return name.lower().endswith((".ome.tif", ".ome.tiff", ".tif", ".tiff"))
+
+
+def _ome_browser_href(
+    current_dir: Optional[Path] = None,
+    selected_path: Optional[Path] = None,
+) -> str:
+    """Build an OME browser link with safely encoded path query params."""
+    params: Dict[str, str] = {}
+    if current_dir is not None:
+        params["dir"] = str(current_dir)
+    if selected_path is not None:
+        params["selected_path"] = str(selected_path)
+    return "/references/ome-browser" + (f"?{urlencode(params)}" if params else "")
+
+
+def _resolve_ome_browser_path(root: Path, value: Optional[str], must_exist: bool = True) -> Path:
+    """Resolve and constrain an OME browser path to the configured staging root."""
+    root_resolved = root.expanduser().resolve(strict=must_exist)
+    candidate = Path(value).expanduser() if value else root_resolved
+    if not candidate.is_absolute():
+        candidate = root_resolved / candidate
+    candidate_resolved = candidate.resolve(strict=must_exist)
+    if candidate_resolved != root_resolved and root_resolved not in candidate_resolved.parents:
+        raise HTTPException(status_code=400, detail="OME browser path is outside the configured staging root.")
+    return candidate_resolved
+
+
+def _list_ome_browser_directory(root: Path, current_dir: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """List child directories and OME-TIFF files for the server-side browser."""
+    directories = []
+    files = []
+    for entry in current_dir.iterdir():
+        if entry.name.startswith("."):
+            continue
+        try:
+            if entry.is_dir():
+                directories.append({
+                    "name": entry.name,
+                    "path": str(entry),
+                    "href": _ome_browser_href(current_dir=entry),
+                })
+            elif entry.is_file() and _is_ome_tiff_name(entry.name):
+                files.append({
+                    "name": entry.name,
+                    "path": str(entry),
+                    "href": _ome_browser_href(current_dir=current_dir, selected_path=entry),
+                })
+        except OSError:
+            continue
+
+    directories.sort(key=lambda item: item["name"].casefold())
+    files.sort(key=lambda item: item["name"].casefold())
+    return directories, files
 
 
 def _load_user_list() -> List[str]:
@@ -1372,6 +1432,10 @@ async def lifespan(app: FastAPI):
         app.state.genotype_reference_ome_uploads_dir = ome_uploads_dir
         logger.info(f"Genotype reference OME upload directory: {ome_uploads_dir}")
 
+        ome_staging_root = Path(os.environ.get("METAZEBROBOT_OME_STAGING_ROOT", str(DEFAULT_OME_STAGING_ROOT)))
+        app.state.ome_staging_root = ome_staging_root
+        logger.info(f"OME staging browser root: {ome_staging_root}")
+
     yield
 
 
@@ -1538,6 +1602,55 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     def home_page(request: Request):
         """Landing page."""
         return templates.TemplateResponse(request, "home.html", {})
+
+    @app.get("/references/ome-browser", response_class=HTMLResponse)
+    def reference_ome_browser(
+        request: Request,
+        directory: Optional[str] = Query(default=None, alias="dir"),
+        selected_path: Optional[str] = Query(default=None),
+    ):
+        """Browse Linux-visible OME-TIFF staging files and select a server path."""
+        root = app.state.ome_staging_root
+        error = None
+        root_resolved = None
+        current_dir = None
+        selected_file = None
+        directories: List[Dict[str, Any]] = []
+        files: List[Dict[str, Any]] = []
+        parent_href = None
+
+        try:
+            root_resolved = root.expanduser().resolve(strict=True)
+            current_dir = _resolve_ome_browser_path(root_resolved, directory)
+            if not current_dir.is_dir():
+                raise HTTPException(status_code=400, detail="OME browser path must be a directory.")
+
+            if selected_path:
+                selected_file = _resolve_ome_browser_path(root_resolved, selected_path)
+                if not selected_file.is_file() or not _is_ome_tiff_name(selected_file.name):
+                    raise HTTPException(status_code=400, detail="Selected path must be an OME-TIFF file.")
+
+            directories, files = _list_ome_browser_directory(root_resolved, current_dir)
+            if current_dir != root_resolved:
+                parent_href = _ome_browser_href(current_dir=current_dir.parent, selected_path=selected_file)
+        except FileNotFoundError:
+            error = f"OME staging root is not available on this server: {root}"
+            root_resolved = root
+            current_dir = root
+        except PermissionError:
+            error = f"Permission denied while browsing OME staging root: {root}"
+            root_resolved = root
+            current_dir = root
+
+        return templates.TemplateResponse(request, "references/ome_browser.html", {
+            "root": root_resolved,
+            "current_dir": current_dir,
+            "selected_file": selected_file,
+            "directories": directories,
+            "files": files,
+            "parent_href": parent_href,
+            "error": error,
+        })
 
     @app.get("/references/", response_class=HTMLResponse)
     def references_page(

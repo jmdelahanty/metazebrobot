@@ -6,6 +6,7 @@
 *.sqlite
 *.sqlite3
 config.json
+genotype_reference_ome_uploads/
 
 # Ignore ipynb checkpoints
 .ipynb_checkpoints/

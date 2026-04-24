@@ -41,6 +41,7 @@
 - [x] Fiji OME-TIFF review workflow documented; Bio-Formats `Colorized` mode applies observed channel colors
 - [x] Genotype references support structured composite/channel/transgene metadata
 - [x] Reference Library can generate composite/channel PNG references from a reviewed OME-TIFF path
+- [x] Reference Library can browse Linux staging files to select an OME-TIFF server path
 
 ### Daily care web form
 - [x] `/care/` dish list with red highlight for unchecked dishes

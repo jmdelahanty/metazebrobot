@@ -104,6 +104,9 @@ MetaZebrobot can also generate these display-ready PNGs directly from the
 Reference Library page. Operators can either choose an OME-TIFF from the browser
 or paste a server-visible OME-TIFF path. Browser-selected files are staged in
 `genotype_reference_ome_uploads/` next to the database before preview/import.
+For server-visible files, the Reference Library also includes a Linux staging file
+browser rooted at `/groups/ahrens/ahrenslab/jeremy/screening_staging` by default.
+Set `METAZEBROBOT_OME_STAGING_ROOT` to override that root for another deployment.
 
 The narrow first implementation expects a simple OME-TIFF with one Z plane, one T
 point, and one plane per channel. It uses embedded OME channel metadata to:

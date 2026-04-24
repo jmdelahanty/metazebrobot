@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Browse OME-TIFF Files — MetaZebrobot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Browse OME-TIFF Files</h2>
+    <p>Select a Linux-visible OME-TIFF path for genotype reference generation.</p>
+</hgroup>
+
+<p><a href="/references/">&larr; Reference Library</a></p>
+
+{% if error %}
+<article>
+    <p><strong>Cannot browse staging root.</strong></p>
+    <p>{{ error }}</p>
+    <p><small>Configured root: <code>{{ root }}</code></small></p>
+</article>
+{% else %}
+<article>
+    <p><strong>Root:</strong> <code>{{ root }}</code></p>
+    <p><strong>Current directory:</strong> <code>{{ current_dir }}</code></p>
+    {% if selected_file %}
+    <p><strong>Selected OME-TIFF:</strong> <code>{{ selected_file }}</code></p>
+    {% else %}
+    <p><em>Select an OME-TIFF file below before previewing.</em></p>
+    {% endif %}
+</article>
+
+<form method="post" action="/references/genotype/ome-preview">
+    <input type="hidden" name="ome_path" value="{{ selected_file or '' }}">
+    <label>
+        Exact genotype
+        <input type="text" name="genotype" placeholder="e.g. Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry)" required>
+    </label>
+    <div class="grid">
+        <label>
+            Reference set label
+            <input type="text" name="reference_group_label" value="{% if selected_file %}{{ selected_file.stem }}{% endif %}" placeholder="Optional; defaults to OME file name">
+        </label>
+        <label>
+            Source dish ID
+            <input type="text" name="source_dish_id" placeholder="Optional source dish">
+        </label>
+    </div>
+    <label>
+        Notes
+        <input type="text" name="notes" placeholder="Optional curation note">
+    </label>
+    <button type="submit"{% if not selected_file %} disabled{% endif %}>Preview Selected OME-TIFF</button>
+</form>
+
+<article>
+    <header><strong>Files</strong></header>
+    {% if parent_href %}
+    <p><a href="{{ parent_href }}">../ Parent directory</a></p>
+    {% endif %}
+
+    {% if directories %}
+    <h4>Directories</h4>
+    <ul>
+        {% for entry in directories %}
+        <li><a href="{{ entry.href }}">{{ entry.name }}/</a></li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if files %}
+    <h4>OME-TIFF Files</h4>
+    <ul>
+        {% for entry in files %}
+        <li>
+            <a href="{{ entry.href }}">{{ entry.name }}</a>
+            <small><code>{{ entry.path }}</code></small>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p><em>No OME-TIFF files found in this directory.</em></p>
+    {% endif %}
+</article>
+{% endif %}
+{% endblock %}

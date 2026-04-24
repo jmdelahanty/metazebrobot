@@ -14,8 +14,10 @@ import uuid
 
 import numpy as np
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image, TiffImagePlugin
 
+from metazebrobot.api_server import create_app
 from metazebrobot.data.data_manager import data_manager
 
 UUID_RE = re.compile(
@@ -742,6 +744,32 @@ class TestReferenceLibrary:
         assert "CaGr1" in resp.text
         staged_files = list((tmp_db_path.parent / "genotype_reference_ome_uploads").glob("selected*.tiff"))
         assert len(staged_files) == 1
+
+    def test_ome_browser_selects_linux_visible_file(self, tmp_db_path, monkeypatch):
+        staging_root = tmp_db_path.parent / "screening_staging"
+        subdir = staging_root / "17907_4"
+        subdir.mkdir(parents=True)
+        ome_path = subdir / "Snap-192-OME TIFF-Export-18.ome.tiff"
+        _write_two_channel_ome_tiff(ome_path)
+        monkeypatch.setenv("METAZEBROBOT_OME_STAGING_ROOT", str(staging_root))
+
+        app = create_app(str(tmp_db_path))
+        with TestClient(app) as tc:
+            root_resp = tc.get("/references/ome-browser")
+            assert root_resp.status_code == 200
+            assert "17907_4/" in root_resp.text
+
+            dir_resp = tc.get("/references/ome-browser", params={"dir": str(subdir)})
+            assert dir_resp.status_code == 200
+            assert "Snap-192-OME TIFF-Export-18.ome.tiff" in dir_resp.text
+
+            selected_resp = tc.get(
+                "/references/ome-browser",
+                params={"dir": str(subdir), "selected_path": str(ome_path)},
+            )
+            assert selected_resp.status_code == 200
+            assert str(ome_path) in selected_resp.text
+            assert "Preview Selected OME-TIFF" in selected_resp.text
 
     def test_import_ome_genotype_reference_creates_composite_and_channels(self, client, seed_full_dish, tmp_db_path):
         ome_path = tmp_db_path.parent / "source_import.ome.tiff"
