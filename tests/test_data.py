@@ -205,6 +205,37 @@ class TestGenotypeReferenceImageData:
         assert refs[0]["image_filename"] == "elavl3_gcamp_ref.png"
         assert refs[0]["caption"] == "Known good expression"
         assert refs[0]["source_dish_id"] == seed_dish
+        assert refs[0]["reference_group_key"] == data_manager.genotype_reference_key(genotype)
+        assert refs[0]["display_role"] == "reference"
+
+    def test_save_structured_genotype_reference_image(self, client, seed_dish):
+        genotype = f"Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry);test-{uuid.uuid4().hex[:6]}"
+        ref_id = data_manager.save_genotype_reference_image(
+            genotype,
+            "her4_mcherry_channel.png",
+            caption="her4.1 channel",
+            reference_group_label="2026-04-23 source acquisition",
+            display_role="channel",
+            transgene="Tg(her4.1:PMCA2-mCherry)",
+            channel_index=1,
+            channel_name="mCher",
+            fluor="mCherry",
+            color_hex="#FF0900",
+            source_dish_id=seed_dish,
+        )
+
+        assert ref_id is not None
+        refs = data_manager.get_genotype_reference_images(genotype)
+        assert len(refs) == 1
+        assert refs[0]["reference_group_label"] == "2026-04-23 source acquisition"
+        assert refs[0]["reference_group_key"].endswith("::2026-04-23 source acquisition")
+        assert refs[0]["display_role"] == "channel"
+        assert refs[0]["transgene_key"] == "Tg(her4.1:PMCA2-mCherry)"
+        assert refs[0]["display_transgene"] == "Tg(her4.1:PMCA2-mCherry)"
+        assert refs[0]["channel_index"] == 1
+        assert refs[0]["channel_name"] == "mCher"
+        assert refs[0]["fluor"] == "mCherry"
+        assert refs[0]["color_hex"] == "#FF0900"
 
     def test_genotype_reference_matching_is_exact_after_whitespace_normalization(self, client):
         genotype = f"Tg(elavl3:GCaMP6s);test-{uuid.uuid4().hex[:6]}"

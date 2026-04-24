@@ -39,6 +39,90 @@ logger = logging.getLogger(__name__)
 _PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_BUSY_TIMEOUT_MS = 250
 _USER_MAPPING_PATH = os.path.expanduser("~/.pyrat_user_mapping.json")
+_REFERENCE_DISPLAY_ROLES = {"composite", "channel", "brightfield", "other", "reference"}
+_REFERENCE_DISPLAY_ROLE_LABELS = {
+    "composite": "Composite",
+    "channel": "Channel",
+    "brightfield": "Brightfield",
+    "other": "Other",
+    "reference": "Reference",
+}
+
+
+def _clean_optional(value: Optional[str]) -> Optional[str]:
+    """Normalize optional form strings to either trimmed text or None."""
+    value = (value or "").strip()
+    return value or None
+
+
+def _normalize_reference_role(value: Optional[str]) -> str:
+    """Validate reference image display role submitted by the upload form."""
+    role = (value or "reference").strip().lower()
+    if role not in _REFERENCE_DISPLAY_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid reference image role: {role}")
+    return role
+
+
+def _normalize_reference_color(value: Optional[str]) -> Optional[str]:
+    """Return normalized #RRGGBB color text for channel reference display."""
+    color = _clean_optional(value)
+    if color is None:
+        return None
+    if not color.startswith("#"):
+        color = f"#{color}"
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+        raise HTTPException(status_code=400, detail="Color must be a 6-digit hex value like #FF0900.")
+    return color.upper()
+
+
+def _parse_optional_int(value: Optional[str], field_name: str) -> Optional[int]:
+    """Parse optional positive integer form fields."""
+    value = _clean_optional(value)
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be an integer.")
+    if parsed < 0:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be zero or greater.")
+    return parsed
+
+
+def _prepare_genotype_reference_groups(references: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Decorate and group genotype reference rows for screening/reference templates."""
+    groups_by_key: Dict[str, Dict[str, Any]] = {}
+    for reference in references:
+        reference["image_url"] = f"/genotype-reference-images/{reference['image_filename']}"
+        role = (reference.get("display_role") or "reference").lower()
+        if role not in _REFERENCE_DISPLAY_ROLE_LABELS:
+            role = "other"
+        reference["display_role"] = role
+        reference["display_role_label"] = _REFERENCE_DISPLAY_ROLE_LABELS[role]
+
+        group_key = reference.get("reference_group_key") or reference["genotype_key"]
+        group = groups_by_key.setdefault(
+            group_key,
+            {
+                "reference_group_key": group_key,
+                "reference_group_label": reference.get("reference_group_label"),
+                "display_genotype": reference.get("display_genotype") or reference["genotype_key"],
+                "genotype_key": reference["genotype_key"],
+                "composite": [],
+                "channels": [],
+                "other": [],
+                "references": [],
+            },
+        )
+        group["references"].append(reference)
+        if role == "composite":
+            group["composite"].append(reference)
+        elif role == "channel":
+            group["channels"].append(reference)
+        else:
+            group["other"].append(reference)
+
+    return list(groups_by_key.values())
 
 
 def _load_user_list() -> List[str]:
@@ -1040,8 +1124,18 @@ async def lifespan(app: FastAPI):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     genotype_key TEXT NOT NULL,
                     display_genotype TEXT NOT NULL,
+                    reference_group_key TEXT,
+                    reference_group_label TEXT,
                     image_filename TEXT NOT NULL,
                     caption TEXT,
+                    display_role TEXT DEFAULT 'reference',
+                    display_order INTEGER DEFAULT 0,
+                    transgene_key TEXT,
+                    display_transgene TEXT,
+                    channel_index INTEGER,
+                    channel_name TEXT,
+                    fluor TEXT,
+                    color_hex TEXT,
                     source_image_id INTEGER,
                     source_dish_id TEXT,
                     source_fish_id TEXT,
@@ -1054,6 +1148,42 @@ async def lifespan(app: FastAPI):
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_genotype_reference_images_key
                 ON genotype_reference_images(genotype_key, is_active)
+            """)
+            genotype_ref_cols = {
+                r[1] for r in conn.execute("PRAGMA table_info(genotype_reference_images)").fetchall()
+            }
+            genotype_ref_new_cols = {
+                "reference_group_key": "TEXT",
+                "reference_group_label": "TEXT",
+                "display_role": "TEXT DEFAULT 'reference'",
+                "display_order": "INTEGER DEFAULT 0",
+                "transgene_key": "TEXT",
+                "display_transgene": "TEXT",
+                "channel_index": "INTEGER",
+                "channel_name": "TEXT",
+                "fluor": "TEXT",
+                "color_hex": "TEXT",
+            }
+            for col_name, col_sql in genotype_ref_new_cols.items():
+                if col_name not in genotype_ref_cols:
+                    conn.execute(f"ALTER TABLE genotype_reference_images ADD COLUMN {col_name} {col_sql}")
+            conn.execute("""
+                UPDATE genotype_reference_images
+                SET reference_group_key = genotype_key
+                WHERE reference_group_key IS NULL OR TRIM(reference_group_key) = ''
+            """)
+            conn.execute("""
+                UPDATE genotype_reference_images
+                SET display_role = 'reference'
+                WHERE display_role IS NULL OR TRIM(display_role) = ''
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_genotype_reference_images_group
+                ON genotype_reference_images(genotype_key, reference_group_key, display_role, is_active)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_genotype_reference_images_transgene
+                ON genotype_reference_images(transgene_key, is_active)
             """)
             conn.commit()
 
@@ -1262,11 +1392,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         references = data_manager.list_genotype_reference_images(
             active_only=not include_inactive,
         )
-        for reference in references:
-            reference["image_url"] = f"/genotype-reference-images/{reference['image_filename']}"
+        reference_groups = _prepare_genotype_reference_groups(references)
 
         return templates.TemplateResponse(request, "references/index.html", {
             "references": references,
+            "reference_groups": reference_groups,
             "status_filter": status,
             "uploaded": uploaded,
         })
@@ -1276,6 +1406,13 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         genotype: str = Form(...),
         file: UploadFile = ...,
         caption: Optional[str] = Form(default=None),
+        display_role: Optional[str] = Form(default="reference"),
+        reference_group_label: Optional[str] = Form(default=None),
+        transgene: Optional[str] = Form(default=None),
+        channel_index: Optional[str] = Form(default=None),
+        channel_name: Optional[str] = Form(default=None),
+        fluor: Optional[str] = Form(default=None),
+        color_hex: Optional[str] = Form(default=None),
         source_dish_id: Optional[str] = Form(default=None),
         notes: Optional[str] = Form(default=None),
     ):
@@ -1283,6 +1420,16 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         genotype_key = data_manager.genotype_reference_key(genotype)
         if not genotype_key:
             raise HTTPException(status_code=400, detail="Genotype is required.")
+
+        display_role = _normalize_reference_role(display_role)
+        reference_group_label = _clean_optional(reference_group_label)
+        transgene = _clean_optional(transgene)
+        channel_name = _clean_optional(channel_name)
+        fluor = _clean_optional(fluor)
+        color_hex = _normalize_reference_color(color_hex)
+        channel_index_int = _parse_optional_int(channel_index, "Channel index")
+        caption = _clean_optional(caption)
+        notes = _clean_optional(notes)
 
         source_dish_id = (source_dish_id or "").strip() or None
         if source_dish_id:
@@ -1304,7 +1451,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         ext = "jpg" if file.content_type == "image/jpeg" else "png"
         digest = hashlib.sha256(contents).hexdigest()[:12]
         safe_key = re.sub(r"[^A-Za-z0-9_.-]+", "_", genotype_key).strip("_")[:80] or "genotype"
-        filename = f"{safe_key}_{digest}.{ext}"
+        filename = f"{safe_key}_{display_role}_{digest}.{ext}"
 
         references_dir: Path = app.state.genotype_reference_images_dir
         references_dir.mkdir(parents=True, exist_ok=True)
@@ -1313,10 +1460,17 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         reference_id = data_manager.save_genotype_reference_image(
             genotype=genotype_key,
             image_filename=filename,
-            caption=caption or None,
+            caption=caption,
             display_genotype=genotype_key,
+            reference_group_label=reference_group_label,
+            display_role=display_role,
+            transgene=transgene,
+            channel_index=channel_index_int,
+            channel_name=channel_name,
+            fluor=fluor,
+            color_hex=color_hex,
             source_dish_id=source_dish_id,
-            notes=notes or None,
+            notes=notes,
         )
         if reference_id is None:
             raise HTTPException(status_code=500, detail="Failed to save genotype reference metadata.")
@@ -2048,12 +2202,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Dish not found")
 
         references = data_manager.get_genotype_reference_images(dish.genotype)
-        for reference in references:
-            reference["image_url"] = f"/genotype-reference-images/{reference['image_filename']}"
+        reference_groups = _prepare_genotype_reference_groups(references)
 
         return templates.TemplateResponse(request, "screening/_genotype_reference.html", {
             "display_genotype": dish.genotype,
             "references": references,
+            "reference_groups": reference_groups,
         })
 
     @app.get("/screening/{dish_id}/steps-table", response_class=HTMLResponse)

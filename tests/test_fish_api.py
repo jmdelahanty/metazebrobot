@@ -535,6 +535,44 @@ class TestScreeningReferencePanels:
         assert f"<code>{seed_full_dish}</code>" in resp.text
         assert "No curated genotype reference image" not in resp.text
 
+    def test_genotype_reference_partial_groups_composite_and_channels(self, client, seed_full_dish):
+        genotype = "Tg(elavl3:GCaMP6s)"
+        group_label = "2026-04-23 source acquisition"
+        assert data_manager.save_genotype_reference_image(
+            genotype,
+            "composite_ref.png",
+            caption="Composite reference",
+            reference_group_label=group_label,
+            display_role="composite",
+            source_dish_id=seed_full_dish,
+        )
+        assert data_manager.save_genotype_reference_image(
+            genotype,
+            "gcamp_channel_ref.png",
+            caption="GCaMP channel",
+            reference_group_label=group_label,
+            display_role="channel",
+            transgene="Tg(elavl3:GCaMP6s)",
+            channel_index=0,
+            channel_name="CaGr1",
+            fluor="GCaMP6s",
+            color_hex="#16FF00",
+            source_dish_id=seed_full_dish,
+        )
+
+        resp = client.get(f"/screening/{seed_full_dish}/genotype-reference")
+
+        assert resp.status_code == 200
+        assert "Reference set: 2026-04-23 source acquisition" in resp.text
+        assert "Composite" in resp.text
+        assert "Channels / Transgenes" in resp.text
+        assert "/genotype-reference-images/composite_ref.png" in resp.text
+        assert "/genotype-reference-images/gcamp_channel_ref.png" in resp.text
+        assert "Tg(elavl3:GCaMP6s)" in resp.text
+        assert "CaGr1" in resp.text
+        assert "GCaMP6s" in resp.text
+        assert "#16FF00" in resp.text
+
 
 # -------------------------------------------------------------------
 # Reference library
@@ -582,6 +620,13 @@ class TestReferenceLibrary:
             data={
                 "genotype": "Tg(elavl3:GCaMP6s)",
                 "caption": "Uploaded reference",
+                "display_role": "channel",
+                "reference_group_label": "2026-04-23 upload",
+                "transgene": "Tg(elavl3:GCaMP6s)",
+                "channel_index": "0",
+                "channel_name": "CaGr1",
+                "fluor": "GCaMP6s",
+                "color_hex": "16ff00",
                 "source_dish_id": seed_full_dish,
                 "notes": "curated from test",
             },
@@ -596,10 +641,19 @@ class TestReferenceLibrary:
         assert len(match) == 1
         assert match[0]["source_dish_id"] == seed_full_dish
         assert match[0]["notes"] == "curated from test"
+        assert match[0]["display_role"] == "channel"
+        assert match[0]["reference_group_label"] == "2026-04-23 upload"
+        assert match[0]["transgene_key"] == "Tg(elavl3:GCaMP6s)"
+        assert match[0]["channel_index"] == 0
+        assert match[0]["channel_name"] == "CaGr1"
+        assert match[0]["fluor"] == "GCaMP6s"
+        assert match[0]["color_hex"] == "#16FF00"
         assert (tmp_db_path.parent / "genotype_reference_images" / match[0]["image_filename"]).exists()
 
         page = client.get("/references/")
         assert "Uploaded reference" in page.text
+        assert "Channels / Transgenes" in page.text
+        assert "Tg(elavl3:GCaMP6s)" in page.text
 
     def test_upload_genotype_reference_rejects_invalid_file_type(self, client):
         resp = client.post(

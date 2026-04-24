@@ -100,6 +100,34 @@ mCher / mCherry -> Red or Magenta
 For curated MetaZebrobot genotype references, adjust the display in Fiji and export
 a display-ready PNG/JPEG. Do not upload raw OME-TIFFs as genotype reference images.
 
+For multi-channel positive fish, export one composite and one PNG/JPEG per
+biologically meaningful channel. Upload these as one reference set:
+
+```text
+Full genotype:
+Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry)
+
+Composite:
+display_role = composite
+
+Green channel:
+display_role = channel
+transgene = Tg(elavl3:jGCaMP8f)
+channel_name = CaGr1 or equivalent acquisition channel name
+fluor = jGCaMP8f
+color_hex = #16FF00 or the OME/Fiji display color
+
+Red/magenta channel:
+display_role = channel
+transgene = Tg(her4.1:PMCA2-mCherry)
+channel_name = mCher or equivalent acquisition channel name
+fluor = mCherry
+color_hex = #FF0900 or the OME/Fiji display color
+```
+
+The full genotype remains the matching key for the screening page. The transgene
+metadata explains what each channel represents and allows future reuse/search.
+
 ## Storage Model
 
 Keep three related but distinct concepts:
@@ -197,8 +225,18 @@ CREATE TABLE genotype_reference_images (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     genotype_key TEXT NOT NULL,
     display_genotype TEXT NOT NULL,
+    reference_group_key TEXT,
+    reference_group_label TEXT,
     image_filename TEXT NOT NULL,
     caption TEXT,
+    display_role TEXT DEFAULT 'reference',
+    display_order INTEGER DEFAULT 0,
+    transgene_key TEXT,
+    display_transgene TEXT,
+    channel_index INTEGER,
+    channel_name TEXT,
+    fluor TEXT,
+    color_hex TEXT,
     source_image_id INTEGER,
     source_dish_id TEXT,
     source_fish_id TEXT,
@@ -209,6 +247,20 @@ CREATE TABLE genotype_reference_images (
     FOREIGN KEY (source_image_id) REFERENCES image_assets(id)
 );
 ```
+
+Expected `genotype_reference_images.display_role` values:
+
+```text
+composite
+channel
+brightfield
+other
+reference
+```
+
+`reference_group_key` groups a composite and its single-channel derivatives into one
+exact-genotype reference set. If no explicit set label is provided, the group key
+falls back to `genotype_key`, so all existing legacy rows remain valid.
 
 Expected `image_links.target_type` values:
 
@@ -339,6 +391,7 @@ A future importer should:
 3. [x] Add the `Genotype Reference` panel below the existing `Atlas Reference` panel.
 4. [x] Add a read-only reference library page for curated genotype references.
 5. [x] Add a simple manual upload/admin path for genotype reference PNGs/JPEGs.
-6. Add image catalog and staging importer for OME-TIFF/PNG files.
-7. Add `Mark as genotype reference` from existing screening image galleries.
-8. Extend linking to housing units and fish for well-plate workflows.
+6. [x] Add structured reference-set metadata for composite/channel/transgene display.
+7. Add image catalog and staging importer for OME-TIFF/PNG files.
+8. Add `Mark as genotype reference` from existing screening image galleries.
+9. Extend linking to housing units and fish for well-plate workflows.

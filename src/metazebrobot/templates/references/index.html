@@ -24,8 +24,44 @@
                 <input type="file" name="file" accept="image/png,image/jpeg" required>
             </label>
             <label>
+                Image role
+                <select name="display_role">
+                    <option value="composite">Composite</option>
+                    <option value="channel">Single channel / transgene</option>
+                    <option value="brightfield">Brightfield</option>
+                    <option value="other">Other</option>
+                    <option value="reference">Legacy reference</option>
+                </select>
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                Reference set label
+                <input type="text" name="reference_group_label" placeholder="Optional, e.g. 2026-04-23 17990_5">
+            </label>
+            <label>
                 Caption
                 <input type="text" name="caption" placeholder="Optional display caption">
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                Transgene for this image
+                <input type="text" name="transgene" placeholder="Optional, e.g. Tg(her4.1:PMCA2-mCherry)">
+            </label>
+            <label>
+                Channel index
+                <input type="number" name="channel_index" min="0" placeholder="Optional, e.g. 1">
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                Channel name
+                <input type="text" name="channel_name" placeholder="Optional, e.g. mCher">
+            </label>
+            <label>
+                Fluor / reporter
+                <input type="text" name="fluor" placeholder="Optional, e.g. mCherry">
             </label>
         </div>
         <div class="grid">
@@ -34,10 +70,14 @@
                 <input type="text" name="source_dish_id" placeholder="Optional source dish">
             </label>
             <label>
-                Notes
-                <input type="text" name="notes" placeholder="Optional curation note">
+                Display color
+                <input type="text" name="color_hex" placeholder="Optional, e.g. #FF0900">
             </label>
         </div>
+        <label>
+            Notes
+            <input type="text" name="notes" placeholder="Optional curation note">
+        </label>
         <button type="submit">Upload Reference</button>
     </form>
 </details>
@@ -52,32 +92,79 @@
     </label>
 </form>
 
-{% if references %}
+{% if reference_groups %}
 <div class="gallery-grid">
-    {% for reference in references %}
+    {% for group in reference_groups %}
     <article style="max-width:32rem">
         <header>
-            <strong>{{ reference.display_genotype }}</strong>
-            {% if not reference.is_active %}
-            <small>(inactive)</small>
+            <strong>{{ group.display_genotype }}</strong>
+            {% if group.reference_group_label %}
+            <br><small>Reference set: {{ group.reference_group_label }}</small>
             {% endif %}
         </header>
-        <figure class="atlas-thumb">
-            <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_genotype }}" loading="lazy">
-            {% if reference.caption %}
-            <figcaption>{{ reference.caption }}</figcaption>
-            {% endif %}
-        </figure>
-        <p><small>Exact key: <code>{{ reference.genotype_key }}</code></small></p>
+
+        {% if group.composite %}
+        <h4>Composite</h4>
+        <div class="indicator-images">
+            {% for reference in group.composite %}
+            <figure class="atlas-thumb">
+                <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_genotype }}" loading="lazy">
+                <figcaption>{{ reference.caption or reference.display_role_label }}</figcaption>
+            </figure>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if group.channels %}
+        <h4>Channels / Transgenes</h4>
+        <div class="indicator-images">
+            {% for reference in group.channels %}
+            <figure class="atlas-thumb">
+                <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_transgene or reference.display_role_label }}" loading="lazy">
+                <figcaption>
+                    {{ reference.caption or reference.display_transgene or reference.display_role_label }}
+                    {% if reference.color_hex %}
+                    <span style="display:inline-block;width:0.8em;height:0.8em;background:{{ reference.color_hex }};border:1px solid var(--muted-border-color);vertical-align:middle"></span>
+                    {% endif %}
+                </figcaption>
+                {% if reference.display_transgene %}
+                <small><code>{{ reference.display_transgene }}</code></small>
+                {% endif %}
+                {% if reference.channel_name or reference.fluor %}
+                <small>{{ reference.channel_name or "" }}{% if reference.channel_name and reference.fluor %} · {% endif %}{{ reference.fluor or "" }}</small>
+                {% endif %}
+            </figure>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if group.other %}
+        <h4>Other References</h4>
+        <div class="indicator-images">
+            {% for reference in group.other %}
+            <figure class="atlas-thumb">
+                <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_role_label }}" loading="lazy">
+                <figcaption>{{ reference.caption or reference.display_role_label }}</figcaption>
+            </figure>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <p><small>Exact key: <code>{{ group.genotype_key }}</code></small></p>
+        {% for reference in group.references %}
         {% if reference.source_dish_id %}
-        <p><small>Source dish: <a href="/screening/{{ reference.source_dish_id }}">{{ reference.source_dish_id }}</a></small></p>
+        <p><small>{{ reference.display_role_label }} source dish: <a href="/screening/{{ reference.source_dish_id }}">{{ reference.source_dish_id }}</a></small></p>
         {% endif %}
         {% if reference.source_fish_id %}
-        <p><small>Source fish: <code>{{ reference.source_fish_id }}</code></small></p>
+        <p><small>{{ reference.display_role_label }} source fish: <code>{{ reference.source_fish_id }}</code></small></p>
         {% endif %}
         {% if reference.notes %}
         <p>{{ reference.notes }}</p>
         {% endif %}
+        {% if not reference.is_active %}
+        <p><small>{{ reference.display_role_label }} reference {{ reference.id }} is inactive.</small></p>
+        {% endif %}
+        {% endfor %}
     </article>
     {% endfor %}
 </div>

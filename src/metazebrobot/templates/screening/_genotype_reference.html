@@ -1,15 +1,67 @@
-{% if references %}
-<div class="indicator-images">
-    {% for reference in references %}
-    <figure class="atlas-thumb">
-        <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_genotype }}" loading="lazy">
-        <figcaption>{{ reference.caption or reference.display_genotype }}</figcaption>
-        {% if reference.source_dish_id %}
-        <small>Source dish: <code>{{ reference.source_dish_id }}</code></small>
-        {% endif %}
-    </figure>
+{% if reference_groups %}
+{% for group in reference_groups %}
+<section>
+    {% if group.reference_group_label %}
+    <p><small>Reference set: {{ group.reference_group_label }}</small></p>
+    {% endif %}
+
+    {% if group.composite %}
+    <h4>Composite</h4>
+    <div class="indicator-images">
+        {% for reference in group.composite %}
+        <figure class="atlas-thumb">
+            <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_genotype }}" loading="lazy">
+            <figcaption>{{ reference.caption or reference.display_role_label }}</figcaption>
+            {% if reference.source_dish_id %}
+            <small>Source dish: <code>{{ reference.source_dish_id }}</code></small>
+            {% endif %}
+        </figure>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if group.channels %}
+    <h4>Channels / Transgenes</h4>
+    <div class="indicator-images">
+        {% for reference in group.channels %}
+        <figure class="atlas-thumb">
+            <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_transgene or reference.display_role_label }}" loading="lazy">
+            <figcaption>
+                {{ reference.caption or reference.display_transgene or reference.display_role_label }}
+                {% if reference.color_hex %}
+                <span style="display:inline-block;width:0.8em;height:0.8em;background:{{ reference.color_hex }};border:1px solid var(--muted-border-color);vertical-align:middle"></span>
+                {% endif %}
+            </figcaption>
+            {% if reference.display_transgene %}
+            <small><code>{{ reference.display_transgene }}</code></small>
+            {% endif %}
+            {% if reference.channel_name or reference.fluor %}
+            <small>{{ reference.channel_name or "" }}{% if reference.channel_name and reference.fluor %} · {% endif %}{{ reference.fluor or "" }}</small>
+            {% endif %}
+            {% if reference.source_dish_id %}
+            <small>Source dish: <code>{{ reference.source_dish_id }}</code></small>
+            {% endif %}
+        </figure>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if group.other %}
+    <h4>Other References</h4>
+    <div class="indicator-images">
+        {% for reference in group.other %}
+        <figure class="atlas-thumb">
+            <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_role_label }}" loading="lazy">
+            <figcaption>{{ reference.caption or reference.display_role_label }}</figcaption>
+            {% if reference.source_dish_id %}
+            <small>Source dish: <code>{{ reference.source_dish_id }}</code></small>
+            {% endif %}
+        </figure>
+        {% endfor %}
+    </div>
+    {% endif %}
+</section>
     {% endfor %}
-</div>
 {% else %}
 <p><em>No curated genotype reference image for this exact genotype yet.</em></p>
 <p>

@@ -673,8 +673,18 @@ class DataManager:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         genotype_key TEXT NOT NULL,
                         display_genotype TEXT NOT NULL,
+                        reference_group_key TEXT,
+                        reference_group_label TEXT,
                         image_filename TEXT NOT NULL,
                         caption TEXT,
+                        display_role TEXT DEFAULT 'reference',
+                        display_order INTEGER DEFAULT 0,
+                        transgene_key TEXT,
+                        display_transgene TEXT,
+                        channel_index INTEGER,
+                        channel_name TEXT,
+                        fluor TEXT,
+                        color_hex TEXT,
                         source_image_id INTEGER,
                         source_dish_id TEXT,
                         source_fish_id TEXT,
@@ -687,6 +697,41 @@ class DataManager:
                 cursor.execute("""
                     CREATE INDEX IF NOT EXISTS idx_genotype_reference_images_key
                     ON genotype_reference_images(genotype_key, is_active)
+                """)
+                cursor.execute("PRAGMA table_info(genotype_reference_images)")
+                genotype_ref_cols = {row[1] for row in cursor.fetchall()}
+                genotype_ref_new_cols = {
+                    "reference_group_key": "TEXT",
+                    "reference_group_label": "TEXT",
+                    "display_role": "TEXT DEFAULT 'reference'",
+                    "display_order": "INTEGER DEFAULT 0",
+                    "transgene_key": "TEXT",
+                    "display_transgene": "TEXT",
+                    "channel_index": "INTEGER",
+                    "channel_name": "TEXT",
+                    "fluor": "TEXT",
+                    "color_hex": "TEXT",
+                }
+                for col_name, col_sql in genotype_ref_new_cols.items():
+                    if col_name not in genotype_ref_cols:
+                        cursor.execute(f"ALTER TABLE genotype_reference_images ADD COLUMN {col_name} {col_sql}")
+                cursor.execute("""
+                    UPDATE genotype_reference_images
+                    SET reference_group_key = genotype_key
+                    WHERE reference_group_key IS NULL OR TRIM(reference_group_key) = ''
+                """)
+                cursor.execute("""
+                    UPDATE genotype_reference_images
+                    SET display_role = 'reference'
+                    WHERE display_role IS NULL OR TRIM(display_role) = ''
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_genotype_reference_images_group
+                    ON genotype_reference_images(genotype_key, reference_group_key, display_role, is_active)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_genotype_reference_images_transgene
+                    ON genotype_reference_images(transgene_key, is_active)
                 """)
 
                 conn.commit()
@@ -3194,12 +3239,35 @@ class DataManager:
         """Return the conservative exact-match key for a full genotype string."""
         return " ".join((genotype or "").split())
 
+    @classmethod
+    def genotype_reference_group_key(
+        cls,
+        genotype: Optional[str],
+        reference_group_label: Optional[str] = None,
+    ) -> str:
+        """Return a stable key for grouping references within an exact genotype."""
+        genotype_key = cls.genotype_reference_key(genotype)
+        group_label_key = cls.genotype_reference_key(reference_group_label)
+        if not group_label_key:
+            return genotype_key
+        return f"{genotype_key}::{group_label_key}"
+
     def save_genotype_reference_image(
         self,
         genotype: str,
         image_filename: str,
         caption: Optional[str] = None,
         display_genotype: Optional[str] = None,
+        reference_group_key: Optional[str] = None,
+        reference_group_label: Optional[str] = None,
+        display_role: str = "reference",
+        display_order: int = 0,
+        transgene: Optional[str] = None,
+        display_transgene: Optional[str] = None,
+        channel_index: Optional[int] = None,
+        channel_name: Optional[str] = None,
+        fluor: Optional[str] = None,
+        color_hex: Optional[str] = None,
         source_image_id: Optional[int] = None,
         source_dish_id: Optional[str] = None,
         source_fish_id: Optional[str] = None,
@@ -3220,21 +3288,49 @@ class DataManager:
             logger.error("Cannot save genotype reference image without image filename.")
             return None
 
+        display_role = (display_role or "reference").strip().lower()
+        allowed_roles = {"reference", "composite", "channel", "brightfield", "other"}
+        if display_role not in allowed_roles:
+            logger.error(f"Invalid genotype reference display role: {display_role}")
+            return None
+
+        reference_group_key = (
+            self.genotype_reference_key(reference_group_key)
+            or self.genotype_reference_group_key(genotype_key, reference_group_label)
+        )
+        reference_group_label = self.genotype_reference_key(reference_group_label) or None
+        transgene_key = self.genotype_reference_key(transgene)
+        display_transgene = display_transgene or transgene_key or None
+
         try:
             with self.get_connection() as conn:
                 cursor = conn.execute(
                     """
                     INSERT INTO genotype_reference_images
-                        (genotype_key, display_genotype, image_filename, caption,
+                        (genotype_key, display_genotype,
+                         reference_group_key, reference_group_label,
+                         image_filename, caption, display_role, display_order,
+                         transgene_key, display_transgene, channel_index,
+                         channel_name, fluor, color_hex,
                          source_image_id, source_dish_id, source_fish_id,
                          channels_json, notes, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         genotype_key,
                         display_genotype or genotype_key,
+                        reference_group_key,
+                        reference_group_label,
                         image_filename,
                         caption,
+                        display_role,
+                        int(display_order or 0),
+                        transgene_key or None,
+                        display_transgene,
+                        channel_index,
+                        channel_name,
+                        fluor,
+                        color_hex,
                         source_image_id,
                         source_dish_id,
                         source_fish_id,
@@ -3270,13 +3366,28 @@ class DataManager:
                     active_filter = "AND is_active = 1"
                 rows = conn.execute(
                     f"""
-                    SELECT id, genotype_key, display_genotype, image_filename,
-                           caption, source_image_id, source_dish_id, source_fish_id,
+                    SELECT id, genotype_key, display_genotype,
+                           reference_group_key, reference_group_label,
+                           image_filename, caption, display_role, display_order,
+                           transgene_key, display_transgene, channel_index,
+                           channel_name, fluor, color_hex,
+                           source_image_id, source_dish_id, source_fish_id,
                            channels_json, notes, is_active, created_at
                     FROM genotype_reference_images
                     WHERE genotype_key = ?
                     {active_filter}
-                    ORDER BY created_at DESC, id DESC
+                    ORDER BY COALESCE(reference_group_label, reference_group_key) COLLATE NOCASE,
+                             CASE display_role
+                                 WHEN 'composite' THEN 0
+                                 WHEN 'channel' THEN 1
+                                 WHEN 'brightfield' THEN 2
+                                 WHEN 'reference' THEN 3
+                                 ELSE 4
+                             END,
+                             COALESCE(channel_index, 9999),
+                             display_order,
+                             created_at DESC,
+                             id DESC
                     """,
                     params,
                 ).fetchall()
@@ -3298,12 +3409,28 @@ class DataManager:
                 active_filter = "WHERE is_active = 1" if active_only else ""
                 rows = conn.execute(
                     f"""
-                    SELECT id, genotype_key, display_genotype, image_filename,
-                           caption, source_image_id, source_dish_id, source_fish_id,
+                    SELECT id, genotype_key, display_genotype,
+                           reference_group_key, reference_group_label,
+                           image_filename, caption, display_role, display_order,
+                           transgene_key, display_transgene, channel_index,
+                           channel_name, fluor, color_hex,
+                           source_image_id, source_dish_id, source_fish_id,
                            channels_json, notes, is_active, created_at
                     FROM genotype_reference_images
                     {active_filter}
-                    ORDER BY display_genotype COLLATE NOCASE, created_at DESC, id DESC
+                    ORDER BY display_genotype COLLATE NOCASE,
+                             COALESCE(reference_group_label, reference_group_key) COLLATE NOCASE,
+                             CASE display_role
+                                 WHEN 'composite' THEN 0
+                                 WHEN 'channel' THEN 1
+                                 WHEN 'brightfield' THEN 2
+                                 WHEN 'reference' THEN 3
+                                 ELSE 4
+                             END,
+                             COALESCE(channel_index, 9999),
+                             display_order,
+                             created_at DESC,
+                             id DESC
                     """
                 ).fetchall()
                 return [{k: row[k] for k in row.keys()} for row in rows]
