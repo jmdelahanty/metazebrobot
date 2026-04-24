@@ -248,6 +248,19 @@ class TestGenotypeReferenceImageData:
         assert data_manager.get_genotype_reference_images(f" {genotype} ")
         assert data_manager.get_genotype_reference_images(genotype.replace("GCaMP6s", "GCaMP6f")) == []
 
+    def test_genotype_reference_matching_ignores_semicolon_spacing(self, client):
+        genotype_with_space = "Tg(elavl3:jGCaMP8f); Tg(her4.1:PMCA2-mCherry)"
+        genotype_without_space = "Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry)"
+        ref_id = data_manager.save_genotype_reference_image(
+            genotype_without_space,
+            "two_transgene_ref.png",
+        )
+
+        assert ref_id is not None
+        refs = data_manager.get_genotype_reference_images(genotype_with_space)
+        assert len(refs) == 1
+        assert refs[0]["genotype_key"] == genotype_without_space
+
     def test_inactive_genotype_reference_images_are_hidden_by_default(self, client):
         genotype = f"Tg(elavl3:GCaMP6s);test-{uuid.uuid4().hex[:6]}"
         data_manager.save_genotype_reference_image(

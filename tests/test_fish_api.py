@@ -598,6 +598,33 @@ class TestScreeningReferencePanels:
         assert "GCaMP6s" in resp.text
         assert "#16FF00" in resp.text
 
+    def test_genotype_reference_partial_ignores_semicolon_spacing(self, client):
+        from metazebrobot.models.fish_dish import FishDish
+
+        dish_genotype = "Tg(elavl3:jGCaMP8f); Tg(her4.1:PMCA2-mCherry)"
+        reference_genotype = "Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry)"
+        dish = FishDish.create_new(
+            cross_id=f"CROSS_{uuid.uuid4().hex[:6]}",
+            dish_number=1,
+            genotype=dish_genotype,
+            responsible="test-user",
+            fish_count=1,
+            dof="20260401",
+        )
+        assert data_manager.save_fish_dish(dish.model_dump(mode="json", exclude_none=True))
+        assert data_manager.save_genotype_reference_image(
+            reference_genotype,
+            "semicolon_spacing_ref.png",
+            caption="Semicolon spacing reference",
+        )
+
+        resp = client.get(f"/screening/{dish.dish_id}/genotype-reference")
+
+        assert resp.status_code == 200
+        assert "/genotype-reference-images/semicolon_spacing_ref.png" in resp.text
+        assert "Semicolon spacing reference" in resp.text
+        assert "No curated genotype reference image" not in resp.text
+
 
 # -------------------------------------------------------------------
 # Reference library

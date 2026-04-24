@@ -3237,7 +3237,8 @@ class DataManager:
     @staticmethod
     def genotype_reference_key(genotype: Optional[str]) -> str:
         """Return the conservative exact-match key for a full genotype string."""
-        return " ".join((genotype or "").split())
+        key = " ".join((genotype or "").split())
+        return re.sub(r"\s*;\s*", ";", key)
 
     @classmethod
     def genotype_reference_group_key(
