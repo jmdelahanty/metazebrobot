@@ -1642,6 +1642,7 @@ class TestCrossLevelFish:
         resp = client.get(f"/crosses/{cross_id}/fish/")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
+        assert f'href="/crosses/{cross_id}/lineage/"' in resp.text
 
     def test_nonexistent_cross_returns_empty(self, client):
         resp = client.get("/crosses/NO_SUCH_CROSS/fish")
@@ -1678,6 +1679,71 @@ class TestCrossLevelFish:
         assert resp.status_code == 200
         assert child_id in resp.text
         assert grandchild_id in resp.text
+
+    def test_cross_lineage_api_includes_derived_and_transfer_edges(self, client, seed_full_dish):
+        parent = client.get(f"/dishes/{seed_full_dish}").json()
+        cross_id = parent["cross_id"]
+
+        client.post(
+            f"/screening/{seed_full_dish}/steps",
+            data={
+                "screening_datetime": "20260408T09:00:00",
+                "dpf_screened": 5,
+                "indicators_screened": "GFP",
+                "count_screened_this_step": 20,
+            },
+        )
+        client.post(
+            f"/screening/{seed_full_dish}/steps/20260408T09:00:00/split",
+            data={"fish_count": 5, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        child_id = f"{seed_full_dish}_pos1"
+
+        client.post(
+            f"/dishes/{seed_full_dish}/transfer",
+            data={
+                "destination_dish_id": child_id,
+                "count": 3,
+                "reason": "manual_transfer",
+                "return_status": "active",
+            },
+            follow_redirects=False,
+        )
+
+        resp = client.get(f"/crosses/{cross_id}/lineage")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        node_ids = {node["id"] for node in data["nodes"]}
+        assert {seed_full_dish, child_id}.issubset(node_ids)
+
+        screening_edge = next(
+            edge for edge in data["edges"]
+            if edge["type"] == "screening_allocation" and edge["target"] == child_id
+        )
+        assert screening_edge["source"] == seed_full_dish
+        assert screening_edge["count"] == 5
+        assert screening_edge["reason"] == "positive_screened"
+
+        transfer_edge = next(
+            edge for edge in data["edges"]
+            if edge["type"] == "transfer" and edge["target"] == child_id
+        )
+        assert transfer_edge["source"] == seed_full_dish
+        assert transfer_edge["count"] == 3
+        assert transfer_edge["reason"] == "manual_transfer"
+
+    def test_cross_lineage_web_page(self, client, seed_full_dish):
+        parent = client.get(f"/dishes/{seed_full_dish}").json()
+        cross_id = parent["cross_id"]
+
+        resp = client.get(f"/crosses/{cross_id}/lineage/")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert f"Lineage - Cross {cross_id}" in resp.text
+        assert seed_full_dish in resp.text
 
 
 # -------------------------------------------------------------------

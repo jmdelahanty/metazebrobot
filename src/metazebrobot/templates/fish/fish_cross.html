@@ -7,6 +7,10 @@
     <p>{{ total_fish }} fish across {{ total_dishes }} dish{{ "es" if total_dishes != 1 }}</p>
 </hgroup>
 
+<p>
+    <a href="{{ lineage_url }}" role="button" class="outline">View lineage graph</a>
+</p>
+
 {% macro dish_fish_table(node, depth=0) %}
 {% set dish = node.dish %}
 {% set fish_list = node.fish %}

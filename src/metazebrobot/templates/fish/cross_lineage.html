@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Lineage - Cross {{ cross_id }}{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Lineage - Cross {{ cross_id }}</h2>
+    <p>
+        {{ summary.node_count }} dish{{ "es" if summary.node_count != 1 }},
+        {{ summary.edge_count }} lineage event{{ "s" if summary.edge_count != 1 }}.
+        Merges appear as multiple edges into the same destination dish.
+    </p>
+</hgroup>
+
+<p>
+    <a href="/crosses/{{ cross_id }}/fish/" role="button" class="outline">Fish for this cross</a>
+    <a href="/dishes/" role="button" class="outline secondary">Dishes</a>
+</p>
+
+<section>
+    <h3>Lineage Events</h3>
+    {% if edges %}
+    <table role="grid" class="screening-steps-table">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Event</th>
+                <th>Source</th>
+                <th>Count</th>
+                <th>Destination</th>
+                <th>Reason</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for edge in edges %}
+            <tr>
+                <td>{{ edge.date_display or "-" }}</td>
+                <td>{{ edge.type_label }}</td>
+                <td><a href="/screening/{{ edge.source }}">{{ edge.source }}</a></td>
+                <td>{{ edge.count if edge.count is not none else "-" }}</td>
+                <td><a href="/screening/{{ edge.target }}">{{ edge.target }}</a></td>
+                <td>
+                    {{ edge.reason_label or "-" }}
+                    {% if edge.details and edge.details != edge.reason_label %}
+                    <br><small>{{ edge.details }}</small>
+                    {% endif %}
+                </td>
+                <td>{{ edge.notes or "-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p><em>No lineage edges found for this cross yet.</em></p>
+    {% endif %}
+</section>
+
+<section>
+    <h3>Dishes</h3>
+    {% if nodes %}
+    <table role="grid" class="screening-steps-table">
+        <thead>
+            <tr>
+                <th>Dish</th>
+                <th>Population</th>
+                <th>Current Fish</th>
+                <th>Registered</th>
+                <th>Status</th>
+                <th>Edges</th>
+                <th>Genotype</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for node in nodes %}
+            <tr>
+                <td>
+                    <a href="/screening/{{ node.dish_id }}"><strong>{{ node.dish_id }}</strong></a>
+                    {% if node.parent_dish_id %}
+                    <br><small>parent {{ node.parent_dish_id }}</small>
+                    {% endif %}
+                </td>
+                <td>{{ node.population_label }}</td>
+                <td>
+                    {{ node.current_fish_count if node.current_fish_count is not none else "-" }}
+                    {% if node.fish_count is not none and node.current_fish_count is not none and node.fish_count != node.current_fish_count %}
+                    <br><small>opened at {{ node.fish_count }}</small>
+                    {% endif %}
+                </td>
+                <td>{{ node.registered_fish_count }}</td>
+                <td>
+                    {{ node.status or "-" }}
+                    {% if node.termination_date_display %}
+                    <br><small>terminated {{ node.termination_date_display }}</small>
+                    {% endif %}
+                    {% if node.termination_reason_display %}
+                    <br><small>{{ node.termination_reason_display }}</small>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ node.incoming_edge_count }} in / {{ node.outgoing_edge_count }} out
+                </td>
+                <td>{{ node.genotype or "-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p><em>No local dishes found for this cross.</em></p>
+    {% endif %}
+</section>
+
+<p><a href="/fish/">&larr; Fish index</a> | <a href="/screening/">&larr; Dish list</a></p>
+{% endblock %}

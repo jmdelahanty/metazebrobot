@@ -24,6 +24,7 @@ from fastapi.templating import Jinja2Templates
 from .controllers.fish_dish_controller import FishDishController
 from .data.data_manager import data_manager
 from .models.fish_dish import (
+    DISH_TRANSFER_REASON_LABELS,
     DISH_TRANSFER_REASON_OPTIONS,
     TERMINATION_REASON_OPTIONS,
     termination_reason_label,
@@ -1518,6 +1519,229 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             return (today - dof).days
         except (ValueError, TypeError):
             return None
+
+    def _label_from_token(value: Optional[str]) -> str:
+        """Convert stored enum-like values into compact display labels."""
+        return (value or "").replace("_", " ").strip().title()
+
+    def _load_cross_lineage(cross_id: str) -> Dict[str, Any]:
+        """Build a cross-level dish lineage graph from existing event records."""
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            dish_rows = conn.execute(
+                """
+                SELECT
+                    d.dish_id,
+                    d.cross_id,
+                    d.genotype,
+                    d.responsible,
+                    d.status,
+                    d.date_created,
+                    d.dof,
+                    d.fish_count,
+                    d.current_fish_count,
+                    d.parent_dish_id,
+                    d.dish_population_type,
+                    d.source_screening_datetime,
+                    d.source_screening_bucket,
+                    d.termination_date,
+                    d.termination_reason,
+                    COALESCE(fs.registered_fish_count, 0) AS registered_fish_count
+                FROM dishes d
+                LEFT JOIN (
+                    SELECT dish_id, COUNT(*) AS registered_fish_count
+                    FROM fish_subjects
+                    GROUP BY dish_id
+                ) fs ON fs.dish_id = d.dish_id
+                WHERE d.cross_id = ?
+                ORDER BY
+                    CASE WHEN d.parent_dish_id IS NULL THEN 0 ELSE 1 END,
+                    d.date_created ASC,
+                    d.dish_id ASC
+                """,
+                (cross_id,),
+            ).fetchall()
+
+            allocation_rows = conn.execute(
+                """
+                SELECT
+                    a.id,
+                    a.dish_id,
+                    a.screening_datetime,
+                    a.bucket,
+                    a.disposition,
+                    a.count,
+                    COALESCE(a.destination_dish_id, a.derived_dish_id) AS destination_dish_id,
+                    a.notes
+                FROM screening_step_allocations a
+                JOIN dishes d ON d.dish_id = a.dish_id
+                WHERE d.cross_id = ?
+                  AND COALESCE(a.destination_dish_id, a.derived_dish_id) IS NOT NULL
+                ORDER BY a.screening_datetime ASC, a.id ASC
+                """,
+                (cross_id,),
+            ).fetchall()
+
+            transfer_rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    source_dish_id,
+                    destination_dish_id,
+                    count,
+                    reason,
+                    event_datetime,
+                    notes
+                FROM dish_transfer_events
+                WHERE cross_id = ?
+                ORDER BY event_datetime ASC, id ASC
+                """,
+                (cross_id,),
+            ).fetchall()
+
+        nodes: List[Dict[str, Any]] = []
+        node_ids = set()
+        for row in dish_rows:
+            d = _row_to_dict(row)
+            dish_id = d["dish_id"]
+            node_ids.add(dish_id)
+            population_type = d.get("dish_population_type") or "primary"
+            current_count = d.get("current_fish_count")
+            if current_count is None:
+                current_count = d.get("fish_count")
+            nodes.append({
+                "id": dish_id,
+                "dish_id": dish_id,
+                "type": "dish",
+                "population_type": population_type,
+                "population_label": _label_from_token(population_type),
+                "cross_id": d.get("cross_id"),
+                "genotype": d.get("genotype"),
+                "responsible": d.get("responsible"),
+                "status": d.get("status"),
+                "date_created": d.get("date_created"),
+                "dof": d.get("dof"),
+                "dpf": _dpf_from_dof(d.get("dof") or ""),
+                "fish_count": d.get("fish_count"),
+                "current_fish_count": current_count,
+                "registered_fish_count": d.get("registered_fish_count") or 0,
+                "parent_dish_id": d.get("parent_dish_id"),
+                "source_screening_datetime": d.get("source_screening_datetime"),
+                "source_screening_bucket": d.get("source_screening_bucket"),
+                "termination_date": d.get("termination_date"),
+                "termination_date_display": _normalize_html_date(d.get("termination_date")),
+                "termination_reason": d.get("termination_reason"),
+                "termination_reason_display": termination_reason_label(d.get("termination_reason")),
+            })
+
+        edges: List[Dict[str, Any]] = []
+        explicit_derivation_pairs = set()
+
+        for row in allocation_rows:
+            a = _row_to_dict(row)
+            source_id = a.get("dish_id")
+            target_id = a.get("destination_dish_id")
+            if source_id not in node_ids or target_id not in node_ids:
+                continue
+
+            explicit_derivation_pairs.add((source_id, target_id))
+            bucket_label = _label_from_token(a.get("bucket"))
+            disposition_label = _label_from_token(a.get("disposition"))
+            edges.append({
+                "id": f"screening:{a['id']}",
+                "type": "screening_allocation",
+                "type_label": "Screening allocation",
+                "source": source_id,
+                "target": target_id,
+                "count": a.get("count"),
+                "event_datetime": a.get("screening_datetime"),
+                "date_display": (a.get("screening_datetime") or "")[:8],
+                "reason": a.get("bucket"),
+                "reason_label": bucket_label,
+                "details": disposition_label,
+                "notes": a.get("notes"),
+                "label": f"{bucket_label} ({a.get('count')} fish)",
+            })
+
+        for node in nodes:
+            parent_id = node.get("parent_dish_id")
+            dish_id = node["dish_id"]
+            if (
+                parent_id
+                and parent_id in node_ids
+                and (parent_id, dish_id) not in explicit_derivation_pairs
+            ):
+                bucket_label = _label_from_token(node.get("source_screening_bucket") or node.get("population_type"))
+                count = node.get("fish_count")
+                edges.append({
+                    "id": f"derived-fallback:{parent_id}:{dish_id}",
+                    "type": "derived_fallback",
+                    "type_label": "Derived dish",
+                    "source": parent_id,
+                    "target": dish_id,
+                    "count": count,
+                    "event_datetime": node.get("source_screening_datetime"),
+                    "date_display": (node.get("source_screening_datetime") or "")[:8],
+                    "reason": node.get("source_screening_bucket") or node.get("population_type"),
+                    "reason_label": bucket_label,
+                    "details": "Parent dish lineage",
+                    "notes": "Fallback from parent_dish_id",
+                    "label": f"{bucket_label} ({count} fish)",
+                })
+
+        for row in transfer_rows:
+            t = _row_to_dict(row)
+            source_id = t.get("source_dish_id")
+            target_id = t.get("destination_dish_id")
+            if source_id not in node_ids or target_id not in node_ids:
+                continue
+
+            reason = t.get("reason") or ""
+            reason_label = DISH_TRANSFER_REASON_LABELS.get(reason, _label_from_token(reason))
+            edges.append({
+                "id": f"transfer:{t['id']}",
+                "type": "transfer",
+                "type_label": "Transfer",
+                "source": source_id,
+                "target": target_id,
+                "count": t.get("count"),
+                "event_datetime": t.get("event_datetime"),
+                "date_display": (t.get("event_datetime") or "")[:8],
+                "reason": reason,
+                "reason_label": reason_label,
+                "details": reason_label,
+                "notes": t.get("notes"),
+                "label": f"{reason_label} ({t.get('count')} fish)",
+            })
+
+        edges.sort(key=lambda edge: (
+            edge.get("event_datetime") or "",
+            edge.get("type") or "",
+            edge.get("source") or "",
+            edge.get("target") or "",
+            edge.get("id") or "",
+        ))
+        incoming_counts: Dict[str, int] = {node["id"]: 0 for node in nodes}
+        outgoing_counts: Dict[str, int] = {node["id"]: 0 for node in nodes}
+        for edge in edges:
+            incoming_counts[edge["target"]] = incoming_counts.get(edge["target"], 0) + 1
+            outgoing_counts[edge["source"]] = outgoing_counts.get(edge["source"], 0) + 1
+        for node in nodes:
+            node["incoming_edge_count"] = incoming_counts.get(node["id"], 0)
+            node["outgoing_edge_count"] = outgoing_counts.get(node["id"], 0)
+
+        return {
+            "cross_id": cross_id,
+            "nodes": nodes,
+            "edges": edges,
+            "summary": {
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+                "root_count": sum(1 for node in nodes if node["incoming_edge_count"] == 0),
+                "active_count": sum(1 for node in nodes if node.get("status") == "active"),
+                "inactive_count": sum(1 for node in nodes if node.get("status") == "inactive"),
+            },
+        }
 
     def _last_screening_date(dish) -> Optional[datetime]:
         """Return the datetime of the most recent screening step, or None."""
@@ -3345,6 +3569,17 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         subjects = data_manager.get_fish_subjects_for_cross(cross_id)
         return {"items": subjects}
 
+    @app.get("/crosses/{cross_id}/lineage")
+    def cross_lineage_api(cross_id: str) -> Dict[str, Any]:
+        """Return a cross-level dish lineage graph derived from event records."""
+        return _load_cross_lineage(cross_id)
+
+    @app.get("/crosses/{cross_id}/lineage/", response_class=HTMLResponse)
+    def cross_lineage_page(request: Request, cross_id: str):
+        """Web page showing dish lineage edges for a cross."""
+        lineage = _load_cross_lineage(cross_id)
+        return templates.TemplateResponse(request, "fish/cross_lineage.html", lineage)
+
     @app.get("/crosses/{cross_id}/fish/", response_class=HTMLResponse)
     def fish_cross_page(request: Request, cross_id: str):
         """Web page showing all fish for a cross, grouped by dish."""
@@ -3415,6 +3650,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "dish_tree": dish_tree,
             "total_fish": len(subjects),
             "total_dishes": len(dish_meta),
+            "lineage_url": f"/crosses/{cross_id}/lineage/",
         })
 
     # ------------------------------------------------------------------
