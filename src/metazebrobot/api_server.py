@@ -15,7 +15,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -1635,7 +1635,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         request: Request,
         genotype: str = Form(...),
         ome_path: Optional[str] = Form(default=None),
-        ome_file: Optional[UploadFile] = None,
+        ome_file: Optional[UploadFile] = File(default=None),
         reference_group_label: Optional[str] = Form(default=None),
         source_dish_id: Optional[str] = Form(default=None),
         notes: Optional[str] = Form(default=None),
