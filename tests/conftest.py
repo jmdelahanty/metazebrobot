@@ -108,6 +108,37 @@ def tmp_db_path(tmp_path_factory) -> Path:
         ON screening_step_allocations(destination_dish_id)
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS dish_transfer_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_dish_id TEXT NOT NULL,
+            destination_dish_id TEXT NOT NULL,
+            cross_id TEXT NOT NULL,
+            count INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            event_datetime TEXT NOT NULL,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (source_dish_id) REFERENCES dishes(dish_id),
+            FOREIGN KEY (destination_dish_id) REFERENCES dishes(dish_id)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_source
+        ON dish_transfer_events(source_dish_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_destination
+        ON dish_transfer_events(destination_dish_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_cross
+        ON dish_transfer_events(cross_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_datetime
+        ON dish_transfer_events(event_datetime)
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS dish_transgenes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             dish_id TEXT NOT NULL,

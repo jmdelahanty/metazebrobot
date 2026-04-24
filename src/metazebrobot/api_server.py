@@ -21,7 +21,11 @@ from fastapi.templating import Jinja2Templates
 
 from .controllers.fish_dish_controller import FishDishController
 from .data.data_manager import data_manager
-from .models.fish_dish import TERMINATION_REASON_OPTIONS, termination_reason_label
+from .models.fish_dish import (
+    DISH_TRANSFER_REASON_OPTIONS,
+    TERMINATION_REASON_OPTIONS,
+    termination_reason_label,
+)
 from .utils.label_generator import generate_dish_label
 from .utils.pyrat_credentials import get_pyrat_api_credentials
 from .utils.pyrat_frontend_client import (
@@ -913,6 +917,37 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_screening_step_allocations_destination_dish
                 ON screening_step_allocations(destination_dish_id)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dish_transfer_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_dish_id TEXT NOT NULL,
+                    destination_dish_id TEXT NOT NULL,
+                    cross_id TEXT NOT NULL,
+                    count INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    event_datetime TEXT NOT NULL,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (source_dish_id) REFERENCES dishes(dish_id),
+                    FOREIGN KEY (destination_dish_id) REFERENCES dishes(dish_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_source
+                ON dish_transfer_events(source_dish_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_destination
+                ON dish_transfer_events(destination_dish_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_cross
+                ON dish_transfer_events(cross_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_datetime
+                ON dish_transfer_events(event_datetime)
+            """)
             # Normalized transgenes table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS dish_transgenes (
@@ -1415,6 +1450,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         request: Request,
         status: str = Query(default="all"),
         terminated: Optional[str] = Query(default=None),
+        transferred: Optional[str] = Query(default=None),
     ):
         """Inventory-style dish index for local MetaZebrobot dishes."""
         db_path = _require_db_path()
@@ -1514,19 +1550,42 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "screening_status": screening_status,
                 "step_count": step_count,
                 "search_text": search_text,
+                "transfer_destinations": [],
             })
+
+        active_by_cross: Dict[str, List[Dict[str, Any]]] = {}
+        for d in dishes:
+            if d["status"] == "active" and d["cross_id"]:
+                active_by_cross.setdefault(d["cross_id"], []).append(d)
+        for d in dishes:
+            if d["status"] == "active" and d["cross_id"]:
+                d["transfer_destinations"] = [
+                    {
+                        "dish_id": candidate["dish_id"],
+                        "population_label": candidate["population_label"],
+                        "current_fish_count": candidate["current_fish_count"],
+                    }
+                    for candidate in active_by_cross.get(d["cross_id"], [])
+                    if candidate["dish_id"] != d["dish_id"]
+                ]
 
         summary = {
             "total": len(dishes),
             "active": sum(1 for d in dishes if d["status"] == "active"),
             "inactive": sum(1 for d in dishes if d["status"] == "inactive"),
         }
+        flash_message = None
+        if terminated:
+            flash_message = f"Terminated dish {terminated}."
+        elif transferred:
+            flash_message = f"Transferred fish from dish {transferred}."
         return templates.TemplateResponse(request, "dishes/dish_list.html", {
             "dishes": dishes,
             "summary": summary,
             "status_filter": normalized_status,
             "termination_reason_options": TERMINATION_REASON_OPTIONS,
-            "flash_message": f"Terminated dish {terminated}." if terminated else None,
+            "transfer_reason_options": DISH_TRANSFER_REASON_OPTIONS,
+            "flash_message": flash_message,
             "flash_level": "success",
         })
 
@@ -1552,6 +1611,36 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         return RedirectResponse(
             url=f"/dishes/?status={normalized_status}&terminated={dish_id}",
+            status_code=303,
+        )
+
+    @app.post("/dishes/{source_dish_id}/transfer", response_class=HTMLResponse)
+    def transfer_dish_fish_web(
+        source_dish_id: str,
+        destination_dish_id: str = Form(...),
+        count: int = Form(...),
+        reason: str = Form(...),
+        notes: Optional[str] = Form(default=None),
+        return_status: str = Form(default="all"),
+    ):
+        """Transfer fish from one active dish into another active same-cross dish."""
+        _require_db_path()
+        normalized_status = (return_status or "all").strip().lower()
+        if normalized_status not in {"all", "active", "inactive"}:
+            normalized_status = "all"
+
+        success, message, _ = fish_dish_ctrl.transfer_fish_between_dishes(
+            source_dish_id=source_dish_id,
+            destination_dish_id=destination_dish_id,
+            count=count,
+            reason=reason,
+            notes=notes or None,
+        )
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+
+        return RedirectResponse(
+            url=f"/dishes/?status={normalized_status}&transferred={source_dish_id}",
             status_code=303,
         )
 

@@ -99,6 +99,45 @@
                 <a href="/dishes/{{ d.dish_id }}/fish/" role="button" class="outline secondary" style="margin-left:0.25rem">Fish</a>
                 <a href="/dishes/{{ d.dish_id }}/label" target="_blank" role="button" class="outline secondary" style="margin-left:0.25rem">Label</a>
                 {% if d.status == "active" %}
+                {% if d.transfer_destinations %}
+                {% set source_current_count = d.current_fish_count if d.current_fish_count is not none else d.fish_count %}
+                <details style="display:inline-block; margin-left:0.25rem; vertical-align:top">
+                    <summary role="button" class="outline secondary" style="width:auto; margin-bottom:0">Transfer</summary>
+                    <form method="post"
+                          action="/dishes/{{ d.dish_id }}/transfer"
+                          style="min-width:18rem; padding:0.5rem"
+                          onsubmit="return confirm('Transfer fish from dish {{ d.dish_id }}?');">
+                        <input type="hidden" name="return_status" value="{{ status_filter }}">
+                        <label>
+                            Destination
+                            <select name="destination_dish_id" required>
+                                {% for destination in d.transfer_destinations %}
+                                <option value="{{ destination.dish_id }}">
+                                    {{ destination.dish_id }} · {{ destination.population_label }} · {{ destination.current_fish_count if destination.current_fish_count is not none else "?" }} fish
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label>
+                            Count
+                            <input type="number" name="count" min="1" max="{{ source_current_count }}" required>
+                        </label>
+                        <label>
+                            Reason
+                            <select name="reason" required>
+                                {% for reason in transfer_reason_options %}
+                                <option value="{{ reason.value }}">{{ reason.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label>
+                            Notes
+                            <input type="text" name="notes" placeholder="Optional transfer note">
+                        </label>
+                        <button type="submit" class="secondary" style="margin-bottom:0">Transfer Fish</button>
+                    </form>
+                </details>
+                {% endif %}
                 <form method="post"
                       action="/dishes/{{ d.dish_id }}/terminate"
                       style="display:inline"

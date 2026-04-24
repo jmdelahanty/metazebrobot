@@ -7,13 +7,16 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 TERMINATION_REASON_EUTHANASIA = "euthanasia"
 TERMINATION_REASON_PROPAGATION = "propagation"
+TERMINATION_REASON_TRANSFER = "transfer"
 TERMINATION_REASON_CATEGORIES: Tuple[str, ...] = (
     TERMINATION_REASON_EUTHANASIA,
     TERMINATION_REASON_PROPAGATION,
+    TERMINATION_REASON_TRANSFER,
 )
 TERMINATION_REASON_LABELS = {
     TERMINATION_REASON_EUTHANASIA: "Euthanasia",
     TERMINATION_REASON_PROPAGATION: "Propagation",
+    TERMINATION_REASON_TRANSFER: "Transfer",
 }
 TERMINATION_REASON_OPTIONS = tuple(
     {"value": reason, "label": TERMINATION_REASON_LABELS[reason]}
@@ -56,6 +59,47 @@ def termination_reason_label(reason: Optional[str]) -> str:
 def termination_reason_options_text() -> str:
     """Human-readable list of allowed termination reasons."""
     return ", ".join(TERMINATION_REASON_CATEGORIES)
+
+
+DISH_TRANSFER_REASON_MANUAL = "manual_transfer"
+DISH_TRANSFER_REASON_WELL_PLATE_SETUP = "well_plate_setup"
+DISH_TRANSFER_REASON_CONSOLIDATION = "consolidation"
+DISH_TRANSFER_REASON_CATEGORIES: Tuple[str, ...] = (
+    DISH_TRANSFER_REASON_MANUAL,
+    DISH_TRANSFER_REASON_WELL_PLATE_SETUP,
+    DISH_TRANSFER_REASON_CONSOLIDATION,
+)
+DISH_TRANSFER_REASON_LABELS = {
+    DISH_TRANSFER_REASON_MANUAL: "Manual transfer",
+    DISH_TRANSFER_REASON_WELL_PLATE_SETUP: "Well plate setup",
+    DISH_TRANSFER_REASON_CONSOLIDATION: "Consolidation",
+}
+DISH_TRANSFER_REASON_OPTIONS = tuple(
+    {"value": reason, "label": DISH_TRANSFER_REASON_LABELS[reason]}
+    for reason in DISH_TRANSFER_REASON_CATEGORIES
+)
+
+_DISH_TRANSFER_REASON_ALIASES = {
+    reason.casefold(): reason
+    for reason in DISH_TRANSFER_REASON_CATEGORIES
+}
+_DISH_TRANSFER_REASON_ALIASES.update({
+    label.casefold(): reason
+    for reason, label in DISH_TRANSFER_REASON_LABELS.items()
+})
+
+
+def normalize_dish_transfer_reason(reason: Optional[str]) -> Optional[str]:
+    """Return the canonical stored dish transfer reason, if it is recognized."""
+    normalized = (reason or "").strip()
+    if not normalized:
+        return None
+    return _DISH_TRANSFER_REASON_ALIASES.get(normalized.casefold())
+
+
+def dish_transfer_reason_options_text() -> str:
+    """Human-readable list of allowed dish transfer reasons."""
+    return ", ".join(DISH_TRANSFER_REASON_CATEGORIES)
 
 
 # Define allowed population types
@@ -294,6 +338,16 @@ class FishDish(BaseModel):
         ge=0,
         description="Additional fish moved into this dish after the dish record was created",
     )
+    incoming_transfer_count: int = Field(
+        default=0,
+        ge=0,
+        description="Fish moved into this dish through dish-to-dish transfer events",
+    )
+    outgoing_transfer_count: int = Field(
+        default=0,
+        ge=0,
+        description="Fish moved out of this dish through dish-to-dish transfer events",
+    )
     current_fish_count: Optional[int] = Field(
         default=None,
         ge=0,
@@ -498,7 +552,13 @@ class FishDish(BaseModel):
 
     def refresh_screening_state(self) -> None:
         """Recompute per-step before/after counts and the dish's current fish count."""
-        current_count = self.fish_count + (self.incoming_fish_count or 0)
+        current_count = max(
+            self.fish_count
+            + (self.incoming_fish_count or 0)
+            + (self.incoming_transfer_count or 0)
+            - (self.outgoing_transfer_count or 0),
+            0,
+        )
         if self.screening_results is None:
             self.current_fish_count = current_count
             return

@@ -12,6 +12,9 @@ from ..models.fish_dish import (
     ScreeningStepAllocation,
     ScreeningResults,
     DishPopulationType,
+    normalize_dish_transfer_reason,
+    dish_transfer_reason_options_text,
+    TERMINATION_REASON_TRANSFER,
     normalize_termination_reason,
     termination_reason_options_text,
 )
@@ -604,6 +607,116 @@ class FishDishController:
                 "Error allocating fish from dish %s step %s to %s: %s",
                 source_dish_id,
                 screening_datetime,
+                destination_dish_id,
+                e,
+                exc_info=True,
+            )
+            return False, f"An unexpected error occurred: {str(e)}", None
+
+    def transfer_fish_between_dishes(
+        self,
+        source_dish_id: str,
+        destination_dish_id: str,
+        count: int,
+        reason: str,
+        event_datetime: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+        """Transfer fish between two existing active dishes in the same cross."""
+        try:
+            if source_dish_id == destination_dish_id:
+                return False, "Destination dish must be different from the source dish.", None
+
+            source_dish = self.get_dish(source_dish_id)
+            if not source_dish:
+                return False, f"Source dish {source_dish_id} not found.", None
+
+            destination_dish = self.get_dish(destination_dish_id)
+            if not destination_dish:
+                return False, f"Destination dish {destination_dish_id} not found.", None
+
+            if source_dish.status != "active":
+                return False, f"Source dish {source_dish_id} is not active.", None
+            if destination_dish.status != "active":
+                return False, f"Destination dish {destination_dish_id} is not active.", None
+            if source_dish.cross_id != destination_dish.cross_id:
+                return False, "Destination dish must have the same cross ID as the source dish.", None
+
+            if count <= 0:
+                return False, "Transfer count must be greater than zero.", None
+
+            source_current_count = source_dish.current_fish_count
+            if source_current_count is None:
+                source_current_count = source_dish.fish_count
+            if count > source_current_count:
+                return False, (
+                    f"Transfer count ({count}) exceeds source current fish count "
+                    f"({source_current_count})."
+                ), None
+
+            normalized_reason = normalize_dish_transfer_reason(reason)
+            if not normalized_reason:
+                return False, (
+                    "Transfer reason is required and must be one of: "
+                    f"{dish_transfer_reason_options_text()}."
+                ), None
+
+            if event_datetime:
+                try:
+                    datetime.strptime(event_datetime, "%Y%m%dT%H:%M:%S")
+                except ValueError:
+                    return False, "Invalid transfer datetime format. Expected YYYYMMDDTHH:MM:SS.", None
+            else:
+                event_datetime = datetime.now().strftime("%Y%m%dT%H:%M:%S")
+
+            transfer_event = {
+                "source_dish_id": source_dish_id,
+                "destination_dish_id": destination_dish_id,
+                "cross_id": source_dish.cross_id,
+                "count": count,
+                "reason": normalized_reason,
+                "event_datetime": event_datetime,
+                "notes": notes or None,
+            }
+            if not data_manager.save_dish_transfer_event(transfer_event):
+                return False, "Failed to save dish transfer event.", None
+
+            refreshed_source = self.get_dish(source_dish_id)
+            refreshed_destination = self.get_dish(destination_dish_id)
+            if not refreshed_source or not refreshed_destination:
+                return False, "Transfer event saved, but failed to reload affected dishes.", transfer_event
+
+            if count == source_current_count:
+                refreshed_source.status = "inactive"
+                refreshed_source.termination_date = event_datetime[:8]
+                refreshed_source.termination_reason = TERMINATION_REASON_TRANSFER
+
+            if not data_manager.save_fish_dish(refreshed_source.model_dump(mode='json', exclude_none=True)):
+                return False, "Transfer event saved, but failed to update source dish count.", transfer_event
+            if not data_manager.save_fish_dish(refreshed_destination.model_dump(mode='json', exclude_none=True)):
+                return False, "Transfer event saved, but failed to update destination dish count.", transfer_event
+
+            data_manager.data_cache['fish_dishes'][source_dish_id] = refreshed_source.model_dump(
+                mode='json',
+                exclude_none=True,
+            )
+            data_manager.data_cache['fish_dishes'][destination_dish_id] = refreshed_destination.model_dump(
+                mode='json',
+                exclude_none=True,
+            )
+
+            logger.info(
+                "Transferred %s fish from %s to %s",
+                count,
+                source_dish_id,
+                destination_dish_id,
+            )
+            return True, "Fish transferred successfully.", transfer_event
+
+        except Exception as e:
+            logger.error(
+                "Error transferring fish from %s to %s: %s",
+                source_dish_id,
                 destination_dish_id,
                 e,
                 exc_info=True,

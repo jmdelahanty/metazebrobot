@@ -648,7 +648,145 @@ class TestDishInventory:
         assert 'name="termination_reason"' in resp.text
         assert '<option value="euthanasia">Euthanasia</option>' in resp.text
         assert '<option value="propagation">Propagation</option>' in resp.text
+        assert '<option value="transfer">Transfer</option>' in resp.text
         assert "Terminate" in resp.text
+
+    def test_dishes_inventory_page_shows_transfer_for_same_cross_dishes(self, client, seed_full_dish):
+        client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 2, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        destination_id = f"{seed_full_dish}_pos1"
+
+        resp = client.get("/dishes/")
+
+        assert resp.status_code == 200
+        assert f'action="/dishes/{seed_full_dish}/transfer"' in resp.text
+        assert f'value="{destination_id}"' in resp.text
+        assert '<option value="manual_transfer">Manual transfer</option>' in resp.text
+        assert '<option value="well_plate_setup">Well plate setup</option>' in resp.text
+        assert '<option value="consolidation">Consolidation</option>' in resp.text
+
+    def test_transfer_dish_fish_web_persists_event_and_counts(self, client, seed_full_dish, tmp_db_path):
+        client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 2, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        destination_id = f"{seed_full_dish}_pos1"
+
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/transfer",
+            data={
+                "destination_dish_id": destination_id,
+                "count": 4,
+                "reason": "well_plate_setup",
+                "notes": "seed wells",
+                "return_status": "active",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/dishes/?status=active&transferred={seed_full_dish}"
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            """
+            SELECT source_dish_id, destination_dish_id, cross_id, count, reason, notes
+            FROM dish_transfer_events
+            WHERE source_dish_id = ?
+            """,
+            (seed_full_dish,),
+        ).fetchone()
+        conn.close()
+
+        assert row == (seed_full_dish, destination_id, seed_full_dish.rsplit("_", 1)[0], 4, "well_plate_setup", "seed wells")
+
+        source = client.get(f"/dishes/{seed_full_dish}").json()["data"]
+        destination = client.get(f"/dishes/{destination_id}").json()["data"]
+        assert source["fish_count"] == 50
+        assert source["outgoing_transfer_count"] == 4
+        assert source["current_fish_count"] == 46
+        assert destination["fish_count"] == 2
+        assert destination["incoming_transfer_count"] == 4
+        assert destination["current_fish_count"] == 6
+
+    def test_transfer_all_dish_fish_web_terminates_empty_source(self, client, seed_full_dish, tmp_db_path):
+        client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 2, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        destination_id = f"{seed_full_dish}_pos1"
+
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/transfer",
+            data={
+                "destination_dish_id": destination_id,
+                "count": 50,
+                "reason": "consolidation",
+                "return_status": "active",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        source_row = conn.execute(
+            """
+            SELECT status, current_fish_count, termination_date, termination_reason
+            FROM dishes
+            WHERE dish_id = ?
+            """,
+            (seed_full_dish,),
+        ).fetchone()
+        destination_row = conn.execute(
+            """
+            SELECT current_fish_count
+            FROM dishes
+            WHERE dish_id = ?
+            """,
+            (destination_id,),
+        ).fetchone()
+        conn.close()
+
+        assert source_row is not None
+        assert source_row[0] == "inactive"
+        assert source_row[1] == 0
+        assert re.fullmatch(r"\d{8}", source_row[2])
+        assert source_row[3] == "transfer"
+        assert destination_row == (52,)
+
+    def test_transfer_dish_fish_web_rejects_cross_mismatch(self, client, seed_full_dish):
+        create_resp = client.post(
+            "/dishes/new",
+            data={
+                "cross_id": "OTHER_CROSS",
+                "dish_number": 1,
+                "genotype": "wt",
+                "responsible": "test",
+                "dof": "2026-03-27",
+            },
+            follow_redirects=False,
+        )
+        assert create_resp.status_code == 303
+
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/transfer",
+            data={
+                "destination_dish_id": "OTHER_CROSS_1",
+                "count": 1,
+                "reason": "manual_transfer",
+                "return_status": "all",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 400
+        assert "same cross ID" in resp.text
 
     def test_terminate_dish_web_marks_inactive(self, client, seed_full_dish, tmp_db_path):
         resp = client.post(

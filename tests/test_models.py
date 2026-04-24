@@ -264,6 +264,20 @@ class TestFishDish:
         assert dish.status == "inactive"
         assert dish.termination_reason == "propagation"
 
+        transfer_dish = FishDish.create_new(
+            cross_id="C1",
+            dish_number=2,
+            genotype="wt",
+            responsible="jd",
+            fish_count=20,
+            dof="20260301",
+        )
+
+        transfer_dish.terminate("transfer")
+
+        assert transfer_dish.status == "inactive"
+        assert transfer_dish.termination_reason == "transfer"
+
     def test_terminate_rejects_nonstandard_reason(self):
         dish = FishDish.create_new(
             cross_id="C1",

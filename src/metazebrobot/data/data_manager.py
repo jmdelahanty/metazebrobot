@@ -194,6 +194,38 @@ class DataManager:
                     ON screening_step_allocations(destination_dish_id)
                 """)
 
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS dish_transfer_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        source_dish_id TEXT NOT NULL,
+                        destination_dish_id TEXT NOT NULL,
+                        cross_id TEXT NOT NULL,
+                        count INTEGER NOT NULL,
+                        reason TEXT NOT NULL,
+                        event_datetime TEXT NOT NULL,
+                        notes TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (source_dish_id) REFERENCES dishes(dish_id),
+                        FOREIGN KEY (destination_dish_id) REFERENCES dishes(dish_id)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_source
+                    ON dish_transfer_events(source_dish_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_destination
+                    ON dish_transfer_events(destination_dish_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_cross
+                    ON dish_transfer_events(cross_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_datetime
+                    ON dish_transfer_events(event_datetime)
+                """)
+
                 # Migrate screening_steps columns for new screening model
                 cursor.execute("PRAGMA table_info(screening_steps)")
                 screening_cols = {row[1] for row in cursor.fetchall()}
@@ -1089,6 +1121,75 @@ class DataManager:
         creation_count = min(creation_match_total, fish_count or 0)
         return max(incoming_total - creation_count, 0)
 
+    def _transfer_counts_for_dish(
+        self,
+        conn: sqlite3.Connection,
+        dish_id: str,
+    ) -> Tuple[int, int]:
+        """Return incoming and outgoing dish-to-dish transfer counts for a dish."""
+        row = conn.execute("""
+            SELECT
+                COALESCE(SUM(CASE WHEN destination_dish_id = ? THEN count ELSE 0 END), 0) AS incoming,
+                COALESCE(SUM(CASE WHEN source_dish_id = ? THEN count ELSE 0 END), 0) AS outgoing
+            FROM dish_transfer_events
+            WHERE destination_dish_id = ? OR source_dish_id = ?
+        """, (dish_id, dish_id, dish_id, dish_id)).fetchone()
+        return int(row["incoming"] or 0), int(row["outgoing"] or 0)
+
+    def save_dish_transfer_event(self, transfer_data: Dict[str, Any]) -> bool:
+        """Persist a dish-to-dish transfer event."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized. Cannot save transfer event.")
+            return False
+
+        try:
+            with self.get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO dish_transfer_events
+                    (source_dish_id, destination_dish_id, cross_id, count, reason, event_datetime, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    transfer_data["source_dish_id"],
+                    transfer_data["destination_dish_id"],
+                    transfer_data["cross_id"],
+                    transfer_data["count"],
+                    transfer_data["reason"],
+                    transfer_data["event_datetime"],
+                    transfer_data.get("notes"),
+                ))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving dish transfer event: {e}", exc_info=True)
+            return False
+
+    def get_dish_transfer_events(self, dish_id: str) -> List[Dict[str, Any]]:
+        """Load transfer events where the dish was either source or destination."""
+        if not self.is_initialized:
+            return []
+
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute("""
+                    SELECT
+                        id,
+                        source_dish_id,
+                        destination_dish_id,
+                        cross_id,
+                        count,
+                        reason,
+                        event_datetime,
+                        notes,
+                        created_at
+                    FROM dish_transfer_events
+                    WHERE source_dish_id = ? OR destination_dish_id = ?
+                    ORDER BY event_datetime DESC, id DESC
+                """, (dish_id, dish_id)).fetchall()
+            return [{key: row[key] for key in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error loading dish transfer events for dish {dish_id}: {e}", exc_info=True)
+            return []
+
     @staticmethod
     def _dish_transgene_source(dish_data: Dict[str, Any]) -> Tuple[str, Optional[str]]:
         """Determine provenance for dish transgene rows."""
@@ -1547,6 +1648,10 @@ class DataManager:
                         source_screening_bucket=row['source_screening_bucket'],
                         fish_count=row['fish_count'] or 0,
                     )
+                    incoming_transfer_count, outgoing_transfer_count = self._transfer_counts_for_dish(
+                        conn,
+                        row['dish_id'],
+                    )
 
                     # Override with flattened column values (columns are authoritative)
                     dish_data['dish_id'] = row['dish_id']
@@ -1560,6 +1665,8 @@ class DataManager:
                     dish_data['status'] = row['status']
                     dish_data['fish_count'] = row['fish_count']
                     dish_data['incoming_fish_count'] = incoming_fish_count
+                    dish_data['incoming_transfer_count'] = incoming_transfer_count
+                    dish_data['outgoing_transfer_count'] = outgoing_transfer_count
                     dish_data['current_fish_count'] = row['current_fish_count']
                     dish_data['species'] = row['species'] or 'Danio rerio'
                     dish_data['sex'] = row['sex'] or 'unknown'
@@ -1731,6 +1838,10 @@ class DataManager:
                         source_screening_bucket=row['source_screening_bucket'],
                         fish_count=row['fish_count'] or 0,
                     )
+                    incoming_transfer_count, outgoing_transfer_count = self._transfer_counts_for_dish(
+                        conn,
+                        dish_id,
+                    )
 
                     # Reconstruct dish data from columns
                     dish_data = {
@@ -1745,6 +1856,8 @@ class DataManager:
                         'status': row['status'],
                         'fish_count': row['fish_count'],
                         'incoming_fish_count': incoming_fish_count,
+                        'incoming_transfer_count': incoming_transfer_count,
+                        'outgoing_transfer_count': outgoing_transfer_count,
                         'current_fish_count': row['current_fish_count'],
                         'species': row['species'] or 'Danio rerio',
                         'sex': row['sex'] or 'unknown',
