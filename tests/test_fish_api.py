@@ -663,6 +663,8 @@ class TestReferenceLibrary:
         assert "Reference library example" in resp.text
         assert "/genotype-reference-images/library_ref.png" in resp.text
         assert f'href="/screening/{seed_full_dish}"' in resp.text
+        assert "Deactivate Set" in resp.text
+        assert "Deactivate Image" in resp.text
 
     def test_upload_genotype_reference(self, client, seed_full_dish, tmp_db_path):
         fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
@@ -717,6 +719,62 @@ class TestReferenceLibrary:
 
         assert resp.status_code == 400
         assert "Only JPEG and PNG are accepted" in resp.text
+
+    def test_deactivate_genotype_reference_image(self, client):
+        genotype = f"Tg(elavl3:GCaMP6s);test-{uuid.uuid4().hex[:6]}"
+        ref_id = data_manager.save_genotype_reference_image(
+            genotype,
+            "deactivate_single.png",
+            caption="Deactivate single",
+        )
+        assert ref_id is not None
+
+        resp = client.post(
+            f"/references/genotype/{ref_id}/deactivate",
+            data={"status": "active"},
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert f"deactivated={ref_id}" in resp.headers["location"]
+        assert data_manager.get_genotype_reference_images(genotype) == []
+        refs = data_manager.get_genotype_reference_images(genotype, active_only=False)
+        assert len(refs) == 1
+        assert refs[0]["is_active"] == 0
+
+    def test_deactivate_genotype_reference_set(self, client):
+        genotype = f"Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry);test-{uuid.uuid4().hex[:6]}"
+        assert data_manager.save_genotype_reference_image(
+            genotype,
+            "set_composite.png",
+            reference_group_label="bad set",
+            display_role="composite",
+        )
+        assert data_manager.save_genotype_reference_image(
+            genotype,
+            "set_channel.png",
+            reference_group_label="bad set",
+            display_role="channel",
+        )
+        refs = data_manager.get_genotype_reference_images(genotype)
+        group_key = refs[0]["reference_group_key"]
+
+        resp = client.post(
+            "/references/genotype-set/deactivate",
+            data={
+                "genotype_key": genotype,
+                "reference_group_key": group_key,
+                "status": "active",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert "deactivated_set=2" in resp.headers["location"]
+        assert data_manager.get_genotype_reference_images(genotype) == []
+        refs = data_manager.get_genotype_reference_images(genotype, active_only=False)
+        assert len(refs) == 2
+        assert all(ref["is_active"] == 0 for ref in refs)
 
     def test_preview_ome_genotype_reference_suggests_transgenes(self, client, tmp_db_path):
         ome_path = tmp_db_path.parent / "source.ome.tiff"

@@ -10,6 +10,12 @@
 {% if uploaded %}
 <div class="flash flash-success">Uploaded genotype reference {{ uploaded }}.</div>
 {% endif %}
+{% if deactivated %}
+<div class="flash flash-success">Deactivated genotype reference {{ deactivated }}.</div>
+{% endif %}
+{% if deactivated_set %}
+<div class="flash flash-success">Deactivated {{ deactivated_set }} genotype reference image(s).</div>
+{% endif %}
 
 <details class="protocol-box">
     <summary><strong>Upload Genotype Reference</strong></summary>
@@ -162,6 +168,14 @@
             {% if group.reference_group_label %}
             <br><small>Reference set: {{ group.reference_group_label }}</small>
             {% endif %}
+            {% if group.has_active %}
+            <form method="post" action="/references/genotype-set/deactivate" style="margin-top:0.5rem" onsubmit="return confirm('Deactivate this entire genotype reference set?');">
+                <input type="hidden" name="genotype_key" value="{{ group.genotype_key }}">
+                <input type="hidden" name="reference_group_key" value="{{ group.reference_group_key }}">
+                <input type="hidden" name="status" value="{{ status_filter }}">
+                <button type="submit" class="secondary">Deactivate Set</button>
+            </form>
+            {% endif %}
         </header>
 
         {% if group.composite %}
@@ -171,6 +185,12 @@
             <figure class="atlas-thumb">
                 <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_genotype }}" loading="lazy">
                 <figcaption>{{ reference.caption or reference.display_role_label }}</figcaption>
+                {% if reference.is_active %}
+                <form method="post" action="/references/genotype/{{ reference.id }}/deactivate" onsubmit="return confirm('Deactivate this genotype reference image?');">
+                    <input type="hidden" name="status" value="{{ status_filter }}">
+                    <button type="submit" class="secondary">Deactivate Image</button>
+                </form>
+                {% endif %}
             </figure>
             {% endfor %}
         </div>
@@ -194,6 +214,12 @@
                 {% if reference.channel_name or reference.fluor %}
                 <small>{{ reference.channel_name or "" }}{% if reference.channel_name and reference.fluor %} · {% endif %}{{ reference.fluor or "" }}</small>
                 {% endif %}
+                {% if reference.is_active %}
+                <form method="post" action="/references/genotype/{{ reference.id }}/deactivate" onsubmit="return confirm('Deactivate this genotype reference image?');">
+                    <input type="hidden" name="status" value="{{ status_filter }}">
+                    <button type="submit" class="secondary">Deactivate Image</button>
+                </form>
+                {% endif %}
             </figure>
             {% endfor %}
         </div>
@@ -206,6 +232,12 @@
             <figure class="atlas-thumb">
                 <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_role_label }}" loading="lazy">
                 <figcaption>{{ reference.caption or reference.display_role_label }}</figcaption>
+                {% if reference.is_active %}
+                <form method="post" action="/references/genotype/{{ reference.id }}/deactivate" onsubmit="return confirm('Deactivate this genotype reference image?');">
+                    <input type="hidden" name="status" value="{{ status_filter }}">
+                    <button type="submit" class="secondary">Deactivate Image</button>
+                </form>
+                {% endif %}
             </figure>
             {% endfor %}
         </div>

@@ -144,6 +144,11 @@ color_hex = #FF0900 or the OME/Fiji display color
 The full genotype remains the matching key for the screening page. The transgene
 metadata explains what each channel represents and allows future reuse/search.
 
+Reference management should prefer deactivation over deletion. The References page
+can deactivate a single image row or a whole reference set by setting `is_active = 0`.
+This removes the reference from default screening/library views while preserving
+the source metadata and generated PNGs for audit/recovery.
+
 ## Storage Model
 
 Keep three related but distinct concepts:
@@ -411,5 +416,6 @@ A future importer should:
 6. [x] Add structured reference-set metadata for composite/channel/transgene display.
 7. [x] Add narrow OME-TIFF-to-reference PNG generation with reviewed channel mapping.
 8. Add image catalog and staging importer for OME-TIFF/PNG files.
-9. Add `Mark as genotype reference` from existing screening image galleries.
-10. Extend linking to housing units and fish for well-plate workflows.
+9. [x] Add safe deactivation controls for reference images and reference sets.
+10. Add `Mark as genotype reference` from existing screening image galleries.
+11. Extend linking to housing units and fish for well-plate workflows.

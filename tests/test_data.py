@@ -290,6 +290,39 @@ class TestGenotypeReferenceImageData:
         assert ref_id is not None
         assert any(ref["id"] == ref_id and ref["caption"] == "listed" for ref in refs)
 
+    def test_set_genotype_reference_active(self, client):
+        genotype = f"Tg(elavl3:GCaMP6s);test-{uuid.uuid4().hex[:6]}"
+        ref_id = data_manager.save_genotype_reference_image(genotype, "toggle_ref.png")
+
+        assert ref_id is not None
+        assert data_manager.set_genotype_reference_active(ref_id, False)
+        assert data_manager.get_genotype_reference_images(genotype) == []
+        refs = data_manager.get_genotype_reference_images(genotype, active_only=False)
+        assert len(refs) == 1
+        assert refs[0]["is_active"] == 0
+
+    def test_deactivate_genotype_reference_group(self, client):
+        genotype = f"Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry);test-{uuid.uuid4().hex[:6]}"
+        ref_a = data_manager.save_genotype_reference_image(
+            genotype,
+            "group_composite.png",
+            reference_group_label="same acquisition",
+            display_role="composite",
+        )
+        ref_b = data_manager.save_genotype_reference_image(
+            genotype,
+            "group_channel.png",
+            reference_group_label="same acquisition",
+            display_role="channel",
+        )
+        refs = data_manager.get_genotype_reference_images(genotype)
+        group_key = refs[0]["reference_group_key"]
+
+        assert ref_a is not None
+        assert ref_b is not None
+        assert data_manager.deactivate_genotype_reference_group(genotype, group_key) == 2
+        assert data_manager.get_genotype_reference_images(genotype) == []
+
 
 class TestGenotypeParser:
     """parse_genotype() — structured transgene extraction."""

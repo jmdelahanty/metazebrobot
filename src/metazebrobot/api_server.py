@@ -118,9 +118,12 @@ def _prepare_genotype_reference_groups(references: List[Dict[str, Any]]) -> List
                 "channels": [],
                 "other": [],
                 "references": [],
+                "has_active": False,
             },
         )
         group["references"].append(reference)
+        if bool(reference.get("is_active")):
+            group["has_active"] = True
         if role == "composite":
             group["composite"].append(reference)
         elif role == "channel":
@@ -1657,6 +1660,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         request: Request,
         status: str = Query(default="active", pattern="^(active|all)$"),
         uploaded: Optional[str] = Query(default=None),
+        deactivated: Optional[str] = Query(default=None),
+        deactivated_set: Optional[str] = Query(default=None),
     ):
         """Read-only reference library page."""
         include_inactive = status == "all"
@@ -1670,6 +1675,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "reference_groups": reference_groups,
             "status_filter": status,
             "uploaded": uploaded,
+            "deactivated": deactivated,
+            "deactivated_set": deactivated_set,
         })
 
     @app.post("/references/genotype", response_class=HTMLResponse)
@@ -1747,6 +1754,30 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             raise HTTPException(status_code=500, detail="Failed to save genotype reference metadata.")
 
         return RedirectResponse(url=f"/references/?uploaded={reference_id}", status_code=303)
+
+    @app.post("/references/genotype/{reference_id}/deactivate", response_class=HTMLResponse)
+    def deactivate_genotype_reference(
+        reference_id: int,
+        status: str = Form(default="active"),
+    ):
+        """Deactivate one curated genotype reference image row."""
+        status = status if status in {"active", "all"} else "active"
+        if not data_manager.set_genotype_reference_active(reference_id, False):
+            raise HTTPException(status_code=404, detail="Genotype reference image not found.")
+        return RedirectResponse(url=f"/references/?status={status}&deactivated={reference_id}", status_code=303)
+
+    @app.post("/references/genotype-set/deactivate", response_class=HTMLResponse)
+    def deactivate_genotype_reference_set(
+        genotype_key: str = Form(...),
+        reference_group_key: str = Form(...),
+        status: str = Form(default="active"),
+    ):
+        """Deactivate every image in one curated genotype reference set."""
+        status = status if status in {"active", "all"} else "active"
+        count = data_manager.deactivate_genotype_reference_group(genotype_key, reference_group_key)
+        if count == 0:
+            raise HTTPException(status_code=404, detail="Active genotype reference set not found.")
+        return RedirectResponse(url=f"/references/?status={status}&deactivated_set={count}", status_code=303)
 
     @app.post("/references/genotype/ome-preview", response_class=HTMLResponse)
     async def preview_ome_genotype_reference(

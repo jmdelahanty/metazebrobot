@@ -3439,6 +3439,59 @@ class DataManager:
             logger.error(f"Error listing genotype reference images: {e}")
             return []
 
+    def set_genotype_reference_active(self, reference_id: int, is_active: bool) -> bool:
+        """Activate/deactivate a single curated genotype reference image row."""
+        if not self.is_initialized:
+            return False
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE genotype_reference_images
+                    SET is_active = ?
+                    WHERE id = ?
+                    """,
+                    (1 if is_active else 0, reference_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating genotype reference image {reference_id}: {e}")
+            return False
+
+    def deactivate_genotype_reference_group(
+        self,
+        genotype: str,
+        reference_group_key: str,
+    ) -> int:
+        """Deactivate every image in one exact-genotype reference set."""
+        if not self.is_initialized:
+            return 0
+
+        genotype_key = self.genotype_reference_key(genotype)
+        reference_group_key = (reference_group_key or "").strip()
+        if not genotype_key or not reference_group_key:
+            return 0
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE genotype_reference_images
+                    SET is_active = 0
+                    WHERE genotype_key = ?
+                      AND reference_group_key = ?
+                      AND is_active = 1
+                    """,
+                    (genotype_key, reference_group_key),
+                )
+                conn.commit()
+                return int(cursor.rowcount)
+        except Exception as e:
+            logger.error(f"Error deactivating genotype reference group {reference_group_key}: {e}")
+            return 0
+
     # --- Material Management (using database backend) ---
 
     def add_agarose_solution(self, solution_id: str, solution_data: Dict[str, Any]) -> bool:
