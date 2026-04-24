@@ -42,8 +42,12 @@
                 {% if c.local_dish_count > 0 %}
                 <a href="/screening/?cross_id={{ c.crossing_id }}">{{ c.local_dish_count }} dish{{ "es" if c.local_dish_count != 1 }}</a>
                 |
+                <a href="/crosses/{{ c.crossing_id }}/lineage/">Lineage</a>
+                |
                 <a href="/dishes/new?cross_id={{ c.crossing_id }}">New dish</a>
                 {% else %}
+                <a href="/crosses/{{ c.crossing_id }}/lineage/">Lineage</a>
+                |
                 <a href="/dishes/new?cross_id={{ c.crossing_id }}">New dish</a>
                 {% endif %}
             </td>

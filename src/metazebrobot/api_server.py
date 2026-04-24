@@ -739,10 +739,14 @@ def _load_cached_cross_payloads(
         return {}
 
     placeholders = ",".join("?" for _ in cross_ids)
-    rows = conn.execute(
-        f"SELECT cross_id, data FROM crosses WHERE cross_id IN ({placeholders})",
-        tuple(cross_ids),
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            f"SELECT cross_id, data FROM crosses WHERE cross_id IN ({placeholders})",
+            tuple(cross_ids),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+
     payloads: Dict[str, Dict[str, Any]] = {}
     for row in rows:
         try:

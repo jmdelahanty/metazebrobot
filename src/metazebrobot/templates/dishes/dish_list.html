@@ -61,7 +61,13 @@
                     {% endif %}
                 </small>
             </td>
-            <td>{{ d.cross_id or "-" }}</td>
+            <td>
+                {% if d.cross_id %}
+                <a href="/crosses/{{ d.cross_id }}/lineage/">{{ d.cross_id }}</a>
+                {% else %}
+                -
+                {% endif %}
+            </td>
             <td>{{ d.genotype or "-" }}</td>
             <td>{{ d.dof or "-" }}</td>
             <td>{{ d.dpf if d.dpf is not none else "?" }}</td>

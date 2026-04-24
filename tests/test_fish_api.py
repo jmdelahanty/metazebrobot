@@ -1065,6 +1065,15 @@ class TestDishInventory:
         assert f'href="/dishes/{seed_dish}/fish/"' in resp.text
         assert f'href="/dishes/{seed_dish}/label"' in resp.text
 
+    def test_dishes_inventory_cross_links_to_lineage(self, client, seed_full_dish):
+        dish = client.get(f"/dishes/{seed_full_dish}").json()
+        cross_id = dish["cross_id"]
+
+        resp = client.get("/dishes/")
+
+        assert resp.status_code == 200
+        assert f'href="/crosses/{cross_id}/lineage/"' in resp.text
+
     def test_dishes_inventory_page_shows_count_editor_for_active_dishes(self, client, seed_full_dish):
         resp = client.get("/dishes/")
 
@@ -1745,6 +1754,16 @@ class TestCrossLevelFish:
         assert f"Lineage - Cross {cross_id}" in resp.text
         assert seed_full_dish in resp.text
 
+    def test_screening_page_links_to_cross_lineage(self, client, seed_full_dish):
+        dish = client.get(f"/dishes/{seed_full_dish}").json()
+        cross_id = dish["cross_id"]
+
+        resp = client.get(f"/screening/{seed_full_dish}")
+
+        assert resp.status_code == 200
+        assert f'href="/crosses/{cross_id}/lineage/"' in resp.text
+        assert "Cross lineage" in resp.text
+
 
 # -------------------------------------------------------------------
 # Fish index page
@@ -1870,7 +1889,13 @@ class TestPyRATCrossingsPage:
         resp = client.get("/pyrat/crossings/")
         assert resp.status_code == 200
         assert "Crossing Tanks" in resp.text
-        assert "50%" in resp.text
-        assert 'title="1 / 2"' in resp.text
         assert 'href="/dishes/new?cross_id=14783"' in resp.text
+        assert 'href="/crosses/14783/lineage/"' in resp.text
+        assert "Lineage" in resp.text
         assert "New dish" in resp.text
+
+        table_resp = client.get("/pyrat/crossings/table")
+        assert table_resp.status_code == 200
+        assert "50%" in table_resp.text
+        assert 'title="1 / 2"' in table_resp.text
+        assert 'href="/crosses/14783/lineage/"' in table_resp.text
