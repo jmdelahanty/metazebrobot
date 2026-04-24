@@ -26,6 +26,8 @@ from .data.data_manager import data_manager
 from .models.fish_dish import (
     DISH_TRANSFER_REASON_LABELS,
     DISH_TRANSFER_REASON_OPTIONS,
+    DISH_COUNT_REASON_LABELS,
+    DISH_COUNT_REASON_OPTIONS,
     TERMINATION_REASON_OPTIONS,
     termination_reason_label,
 )
@@ -1253,6 +1255,34 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_datetime
                 ON dish_transfer_events(event_datetime)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dish_count_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dish_id TEXT NOT NULL,
+                    cross_id TEXT,
+                    event_datetime TEXT NOT NULL,
+                    previous_current_fish_count INTEGER,
+                    new_current_fish_count INTEGER NOT NULL,
+                    previous_fish_count INTEGER,
+                    new_fish_count INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_count_events_dish
+                ON dish_count_events(dish_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_count_events_cross
+                ON dish_count_events(cross_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dish_count_events_datetime
+                ON dish_count_events(event_datetime)
+            """)
             # Normalized transgenes table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS dish_transgenes (
@@ -1602,6 +1632,26 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 """,
                 (cross_id,),
             ).fetchall()
+            count_event_rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    dish_id,
+                    cross_id,
+                    event_datetime,
+                    previous_current_fish_count,
+                    new_current_fish_count,
+                    previous_fish_count,
+                    new_fish_count,
+                    reason,
+                    notes,
+                    created_at
+                FROM dish_count_events
+                WHERE cross_id = ?
+                ORDER BY event_datetime ASC, id ASC
+                """,
+                (cross_id,),
+            ).fetchall()
 
         nodes: List[Dict[str, Any]] = []
         node_ids = set()
@@ -1718,6 +1768,30 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "label": f"{reason_label} ({t.get('count')} fish)",
             })
 
+        count_events_by_dish: Dict[str, List[Dict[str, Any]]] = {node["id"]: [] for node in nodes}
+        count_events: List[Dict[str, Any]] = []
+        for row in count_event_rows:
+            event = _row_to_dict(row)
+            dish_id = event.get("dish_id")
+            if dish_id not in node_ids:
+                continue
+
+            reason = event.get("reason") or ""
+            reason_label = DISH_COUNT_REASON_LABELS.get(reason, _label_from_token(reason))
+            normalized_event = {
+                **event,
+                "type": "count_adjustment",
+                "type_label": "Count adjustment",
+                "reason_label": reason_label,
+                "date_display": (event.get("event_datetime") or "")[:8],
+                "label": (
+                    f"{event.get('previous_current_fish_count')} -> "
+                    f"{event.get('new_current_fish_count')} fish"
+                ),
+            }
+            count_events.append(normalized_event)
+            count_events_by_dish.setdefault(dish_id, []).append(normalized_event)
+
         edges.sort(key=lambda edge: (
             edge.get("event_datetime") or "",
             edge.get("type") or "",
@@ -1733,6 +1807,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         for node in nodes:
             node["incoming_edge_count"] = incoming_counts.get(node["id"], 0)
             node["outgoing_edge_count"] = outgoing_counts.get(node["id"], 0)
+            node_events = count_events_by_dish.get(node["id"], [])
+            node["count_events"] = node_events
+            node["count_event_count"] = len(node_events)
+            node["latest_count_event"] = node_events[-1] if node_events else None
 
         graph = _build_lineage_svg_graph(nodes, edges)
 
@@ -1740,10 +1818,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "cross_id": cross_id,
             "nodes": nodes,
             "edges": edges,
+            "count_events": count_events,
             "graph": graph,
             "summary": {
                 "node_count": len(nodes),
                 "edge_count": len(edges),
+                "count_event_count": len(count_events),
                 "root_count": sum(1 for node in nodes if node["incoming_edge_count"] == 0),
                 "active_count": sum(1 for node in nodes if node.get("status") == "active"),
                 "inactive_count": sum(1 for node in nodes if node.get("status") == "inactive"),
@@ -2618,6 +2698,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "status_filter": normalized_status,
             "termination_reason_options": TERMINATION_REASON_OPTIONS,
             "transfer_reason_options": DISH_TRANSFER_REASON_OPTIONS,
+            "count_reason_options": DISH_COUNT_REASON_OPTIONS,
             "flash_message": flash_message,
             "flash_level": "success",
         })
@@ -2651,6 +2732,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     def update_dish_fish_count_web(
         dish_id: str,
         current_fish_count: int = Form(...),
+        reason: str = Form(...),
+        notes: Optional[str] = Form(default=None),
         return_status: str = Form(default="all"),
     ):
         """Correct a dish's current fish count from the inventory page."""
@@ -2662,6 +2745,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         success, message, _ = fish_dish_ctrl.update_dish_fish_count(
             dish_id=dish_id,
             current_fish_count=current_fish_count,
+            reason=reason,
+            notes=notes or None,
         )
         if not success:
             raise HTTPException(status_code=400, detail=message)

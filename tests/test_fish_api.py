@@ -1080,6 +1080,9 @@ class TestDishInventory:
         assert resp.status_code == 200
         assert f'action="/dishes/{seed_full_dish}/fish-count"' in resp.text
         assert 'name="current_fish_count"' in resp.text
+        assert 'name="reason"' in resp.text
+        assert '<option value="initial_count_correction">Initial count correction</option>' in resp.text
+        assert '<option value="manual_recount">Manual recount</option>' in resp.text
         assert "Edit Count" in resp.text
 
     def test_dishes_inventory_page_shows_terminate_for_active_dishes(self, client, seed_full_dish):
@@ -1208,6 +1211,8 @@ class TestDishInventory:
             f"/dishes/{seed_full_dish}/fish-count",
             data={
                 "current_fish_count": 37,
+                "reason": "initial_count_correction",
+                "notes": "missed at creation",
                 "return_status": "active",
             },
             follow_redirects=False,
@@ -1225,9 +1230,19 @@ class TestDishInventory:
             """,
             (seed_full_dish,),
         ).fetchone()
+        event_row = conn.execute(
+            """
+            SELECT previous_current_fish_count, new_current_fish_count,
+                   previous_fish_count, new_fish_count, reason, notes
+            FROM dish_count_events
+            WHERE dish_id = ?
+            """,
+            (seed_full_dish,),
+        ).fetchone()
         conn.close()
 
         assert row == (37, 37)
+        assert event_row == (50, 37, 50, 37, "initial_count_correction", "missed at creation")
 
         dish = client.get(f"/dishes/{seed_full_dish}").json()["data"]
         assert dish["fish_count"] == 37
@@ -1255,6 +1270,7 @@ class TestDishInventory:
             f"/dishes/{seed_full_dish}/fish-count",
             data={
                 "current_fish_count": 40,
+                "reason": "manual_recount",
                 "return_status": "active",
             },
             follow_redirects=False,
@@ -1289,6 +1305,7 @@ class TestDishInventory:
             f"/dishes/{seed_full_dish}/fish-count",
             data={
                 "current_fish_count": -1,
+                "reason": "manual_recount",
                 "return_status": "all",
             },
             follow_redirects=False,
@@ -1719,6 +1736,16 @@ class TestCrossLevelFish:
             },
             follow_redirects=False,
         )
+        client.post(
+            f"/dishes/{child_id}/fish-count",
+            data={
+                "current_fish_count": 9,
+                "reason": "manual_recount",
+                "notes": "counted under scope",
+                "return_status": "active",
+            },
+            follow_redirects=False,
+        )
 
         resp = client.get(f"/crosses/{cross_id}/lineage")
 
@@ -1730,6 +1757,13 @@ class TestCrossLevelFish:
         graph_node_ids = {node["id"] for node in data["graph"]["nodes"]}
         assert {seed_full_dish, child_id}.issubset(graph_node_ids)
         assert data["graph"]["edges"]
+        assert data["summary"]["count_event_count"] == 1
+        count_event = data["count_events"][0]
+        assert count_event["dish_id"] == child_id
+        assert count_event["new_current_fish_count"] == 9
+        assert count_event["reason"] == "manual_recount"
+        child_node = next(node for node in data["nodes"] if node["id"] == child_id)
+        assert child_node["latest_count_event"]["notes"] == "counted under scope"
 
         screening_edge = next(
             edge for edge in data["edges"]
@@ -1757,6 +1791,7 @@ class TestCrossLevelFish:
         assert "text/html" in resp.headers["content-type"]
         assert f"Lineage - Cross {cross_id}" in resp.text
         assert "Lineage Graph" in resp.text
+        assert "Count Adjustments" in resp.text
         assert '<svg class="lineage-graph"' in resp.text
         assert seed_full_dish in resp.text
 

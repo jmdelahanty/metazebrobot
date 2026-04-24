@@ -6,7 +6,8 @@
     <h2>Lineage - Cross {{ cross_id }}</h2>
     <p>
         {{ summary.node_count }} dish{{ "es" if summary.node_count != 1 }},
-        {{ summary.edge_count }} lineage event{{ "s" if summary.edge_count != 1 }}.
+        {{ summary.edge_count }} movement event{{ "s" if summary.edge_count != 1 }},
+        {{ summary.count_event_count }} count adjustment{{ "s" if summary.count_event_count != 1 }}.
         Merges appear as multiple edges into the same destination dish.
     </p>
 </hgroup>
@@ -47,6 +48,11 @@
 .lineage-node .node-count {
     fill: var(--pico-muted-color);
     font-size: 12px;
+}
+.lineage-node .count-audit {
+    fill: #8a5a12;
+    font-size: 11px;
+    font-weight: 600;
 }
 .lineage-edge {
     fill: none;
@@ -147,6 +153,11 @@
                     <text class="node-count" x="{{ node.x + 14 }}" y="{{ node.y + 83 }}">
                         {{ node.status or "unknown" }} · {{ node.incoming_edge_count }} in / {{ node.outgoing_edge_count }} out
                     </text>
+                    {% if node.latest_count_event %}
+                    <text class="count-audit" x="{{ node.x + 118 }}" y="{{ node.y + 45 }}">
+                        adjusted {{ node.latest_count_event.new_current_fish_count }}
+                    </text>
+                    {% endif %}
                 </g>
             </a>
             {% endfor %}
@@ -159,6 +170,38 @@
     </p>
     {% else %}
     <p><em>No local dishes found for this cross.</em></p>
+    {% endif %}
+</section>
+
+<section>
+    <h3>Count Adjustments</h3>
+    {% if count_events %}
+    <table role="grid" class="screening-steps-table">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Dish</th>
+                <th>Current Count</th>
+                <th>Baseline</th>
+                <th>Reason</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in count_events %}
+            <tr>
+                <td>{{ event.date_display or "-" }}</td>
+                <td><a href="/screening/{{ event.dish_id }}">{{ event.dish_id }}</a></td>
+                <td>{{ event.previous_current_fish_count }} &rarr; {{ event.new_current_fish_count }}</td>
+                <td>{{ event.previous_fish_count }} &rarr; {{ event.new_fish_count }}</td>
+                <td>{{ event.reason_label }}</td>
+                <td>{{ event.notes or "-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p><em>No count adjustments recorded for this cross.</em></p>
     {% endif %}
 </section>
 
@@ -244,6 +287,9 @@
                 </td>
                 <td>
                     {{ node.incoming_edge_count }} in / {{ node.outgoing_edge_count }} out
+                    {% if node.count_event_count %}
+                    <br><small>{{ node.count_event_count }} count adjustment{{ "s" if node.count_event_count != 1 }}</small>
+                    {% endif %}
                 </td>
                 <td>{{ node.genotype or "-" }}</td>
             </tr>

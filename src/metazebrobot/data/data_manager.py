@@ -225,6 +225,34 @@ class DataManager:
                     CREATE INDEX IF NOT EXISTS idx_dish_transfer_events_datetime
                     ON dish_transfer_events(event_datetime)
                 """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS dish_count_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        dish_id TEXT NOT NULL,
+                        cross_id TEXT,
+                        event_datetime TEXT NOT NULL,
+                        previous_current_fish_count INTEGER,
+                        new_current_fish_count INTEGER NOT NULL,
+                        previous_fish_count INTEGER,
+                        new_fish_count INTEGER NOT NULL,
+                        reason TEXT NOT NULL,
+                        notes TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_count_events_dish
+                    ON dish_count_events(dish_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_count_events_cross
+                    ON dish_count_events(cross_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dish_count_events_datetime
+                    ON dish_count_events(event_datetime)
+                """)
 
                 # Migrate screening_steps columns for new screening model
                 cursor.execute("PRAGMA table_info(screening_steps)")
@@ -1255,6 +1283,66 @@ class DataManager:
             return [{key: row[key] for key in row.keys()} for row in rows]
         except Exception as e:
             logger.error(f"Error loading dish transfer events for dish {dish_id}: {e}", exc_info=True)
+            return []
+
+    def save_dish_count_event(self, event_data: Dict[str, Any]) -> bool:
+        """Persist a dish count correction/recount event."""
+        if not self.is_initialized:
+            logger.error("DataManager not initialized. Cannot save count event.")
+            return False
+
+        try:
+            with self.get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO dish_count_events
+                    (dish_id, cross_id, event_datetime, previous_current_fish_count,
+                     new_current_fish_count, previous_fish_count, new_fish_count,
+                     reason, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    event_data["dish_id"],
+                    event_data.get("cross_id"),
+                    event_data["event_datetime"],
+                    event_data.get("previous_current_fish_count"),
+                    event_data["new_current_fish_count"],
+                    event_data.get("previous_fish_count"),
+                    event_data["new_fish_count"],
+                    event_data["reason"],
+                    event_data.get("notes"),
+                ))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving dish count event: {e}", exc_info=True)
+            return False
+
+    def get_dish_count_events(self, dish_id: str) -> List[Dict[str, Any]]:
+        """Load count correction/recount events for a dish."""
+        if not self.is_initialized:
+            return []
+
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute("""
+                    SELECT
+                        id,
+                        dish_id,
+                        cross_id,
+                        event_datetime,
+                        previous_current_fish_count,
+                        new_current_fish_count,
+                        previous_fish_count,
+                        new_fish_count,
+                        reason,
+                        notes,
+                        created_at
+                    FROM dish_count_events
+                    WHERE dish_id = ?
+                    ORDER BY event_datetime DESC, id DESC
+                """, (dish_id,)).fetchall()
+            return [{key: row[key] for key in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error loading dish count events for dish {dish_id}: {e}", exc_info=True)
             return []
 
     @staticmethod

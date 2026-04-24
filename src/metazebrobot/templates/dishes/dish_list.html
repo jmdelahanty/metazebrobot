@@ -121,6 +121,18 @@
                                    value="{{ editable_current_count }}"
                                    required>
                         </label>
+                        <label>
+                            Reason
+                            <select name="reason" required>
+                                {% for reason in count_reason_options %}
+                                <option value="{{ reason.value }}">{{ reason.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label>
+                            Notes
+                            <input type="text" name="notes" placeholder="Optional count note">
+                        </label>
                         <button type="submit" class="secondary" style="margin-bottom:0">Update Count</button>
                     </form>
                 </details>

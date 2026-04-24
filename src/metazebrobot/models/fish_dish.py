@@ -102,6 +102,46 @@ def dish_transfer_reason_options_text() -> str:
     return ", ".join(DISH_TRANSFER_REASON_CATEGORIES)
 
 
+DISH_COUNT_REASON_INITIAL_CORRECTION = "initial_count_correction"
+DISH_COUNT_REASON_MANUAL_RECOUNT = "manual_recount"
+DISH_COUNT_REASON_DATA_CLEANUP = "data_cleanup"
+DISH_COUNT_REASON_CATEGORIES: Tuple[str, ...] = (
+    DISH_COUNT_REASON_INITIAL_CORRECTION,
+    DISH_COUNT_REASON_MANUAL_RECOUNT,
+    DISH_COUNT_REASON_DATA_CLEANUP,
+)
+DISH_COUNT_REASON_LABELS = {
+    DISH_COUNT_REASON_INITIAL_CORRECTION: "Initial count correction",
+    DISH_COUNT_REASON_MANUAL_RECOUNT: "Manual recount",
+    DISH_COUNT_REASON_DATA_CLEANUP: "Data cleanup",
+}
+DISH_COUNT_REASON_OPTIONS = tuple(
+    {"value": reason, "label": DISH_COUNT_REASON_LABELS[reason]}
+    for reason in DISH_COUNT_REASON_CATEGORIES
+)
+_DISH_COUNT_REASON_ALIASES = {
+    reason.casefold(): reason
+    for reason in DISH_COUNT_REASON_CATEGORIES
+}
+_DISH_COUNT_REASON_ALIASES.update({
+    label.casefold(): reason
+    for reason, label in DISH_COUNT_REASON_LABELS.items()
+})
+
+
+def normalize_dish_count_reason(reason: Optional[str]) -> Optional[str]:
+    """Return the canonical stored count-adjustment reason, if recognized."""
+    normalized = (reason or "").strip()
+    if not normalized:
+        return None
+    return _DISH_COUNT_REASON_ALIASES.get(normalized.casefold())
+
+
+def dish_count_reason_options_text() -> str:
+    """Human-readable list of allowed count-adjustment reasons."""
+    return ", ".join(DISH_COUNT_REASON_CATEGORIES)
+
+
 # Define allowed population types
 DishPopulationType = Literal[
     "primary",

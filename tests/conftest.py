@@ -139,6 +139,34 @@ def tmp_db_path(tmp_path_factory) -> Path:
         ON dish_transfer_events(event_datetime)
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS dish_count_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dish_id TEXT NOT NULL,
+            cross_id TEXT,
+            event_datetime TEXT NOT NULL,
+            previous_current_fish_count INTEGER,
+            new_current_fish_count INTEGER NOT NULL,
+            previous_fish_count INTEGER,
+            new_fish_count INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_dish_count_events_dish
+        ON dish_count_events(dish_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_dish_count_events_cross
+        ON dish_count_events(cross_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_dish_count_events_datetime
+        ON dish_count_events(event_datetime)
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS dish_transgenes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             dish_id TEXT NOT NULL,

@@ -14,6 +14,8 @@ from ..models.fish_dish import (
     DishPopulationType,
     normalize_dish_transfer_reason,
     dish_transfer_reason_options_text,
+    normalize_dish_count_reason,
+    dish_count_reason_options_text,
     TERMINATION_REASON_TRANSFER,
     normalize_termination_reason,
     termination_reason_options_text,
@@ -727,6 +729,9 @@ class FishDishController:
         self,
         dish_id: str,
         current_fish_count: int,
+        reason: str,
+        notes: Optional[str] = None,
+        event_datetime: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[FishDish]]:
         """Correct the dish count while preserving derived-count semantics.
 
@@ -742,6 +747,26 @@ class FishDishController:
             dish = self.get_dish(dish_id)
             if not dish:
                 return False, f"Dish {dish_id} not found.", None
+
+            normalized_reason = normalize_dish_count_reason(reason)
+            if not normalized_reason:
+                return False, (
+                    "Count adjustment reason is required and must be one of: "
+                    f"{dish_count_reason_options_text()}."
+                ), None
+
+            if event_datetime:
+                try:
+                    datetime.strptime(event_datetime, "%Y%m%dT%H:%M:%S")
+                except ValueError:
+                    return False, "Invalid count event datetime format. Expected YYYYMMDDTHH:MM:SS.", None
+            else:
+                event_datetime = datetime.now().strftime("%Y%m%dT%H:%M:%S")
+
+            previous_current_count = dish.current_fish_count
+            if previous_current_count is None:
+                previous_current_count = dish.fish_count
+            previous_fish_count = dish.fish_count
 
             screening_outgoing_count = 0
             if dish.screening_results:
@@ -769,6 +794,23 @@ class FishDishController:
 
             if not data_manager.save_fish_dish(dish.model_dump(mode='json', exclude_none=True)):
                 return False, "Failed to save dish fish count.", None
+
+            event_data = {
+                "dish_id": dish_id,
+                "cross_id": dish.cross_id,
+                "event_datetime": event_datetime,
+                "previous_current_fish_count": previous_current_count,
+                "new_current_fish_count": dish.current_fish_count,
+                "previous_fish_count": previous_fish_count,
+                "new_fish_count": dish.fish_count,
+                "reason": normalized_reason,
+                "notes": notes or None,
+            }
+            if not data_manager.save_dish_count_event(event_data):
+                logger.error(
+                    "Dish %s count updated, but failed to persist count event.",
+                    dish_id,
+                )
 
             data_manager.data_cache['fish_dishes'][dish_id] = dish.model_dump(
                 mode='json',
