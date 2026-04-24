@@ -142,6 +142,11 @@ def _resolve_ome_tiff_path(value: Optional[str]) -> Path:
     raw_path = _clean_optional(value)
     if not raw_path:
         raise HTTPException(status_code=400, detail="OME-TIFF path is required.")
+    if "\\fakepath\\" in raw_path.lower():
+        raise HTTPException(
+            status_code=400,
+            detail="Browser fake paths are not usable server paths. Use the OME-TIFF file upload field instead.",
+        )
 
     path = Path(raw_path).expanduser()
     if not path.is_absolute():
@@ -1657,6 +1662,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 app.state.genotype_reference_ome_uploads_dir,
             )
         else:
+            if not _clean_optional(ome_path):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Choose an OME-TIFF file to upload or enter an absolute server path.",
+                )
             ome_tiff_path = _resolve_ome_tiff_path(ome_path)
         try:
             metadata = read_ome_tiff_metadata(ome_tiff_path)
