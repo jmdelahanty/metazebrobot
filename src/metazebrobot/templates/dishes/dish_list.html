@@ -99,6 +99,25 @@
                 <a href="/dishes/{{ d.dish_id }}/fish/" role="button" class="outline secondary" style="margin-left:0.25rem">Fish</a>
                 <a href="/dishes/{{ d.dish_id }}/label" target="_blank" role="button" class="outline secondary" style="margin-left:0.25rem">Label</a>
                 {% if d.status == "active" %}
+                {% set editable_current_count = d.current_fish_count if d.current_fish_count is not none else (d.fish_count if d.fish_count is not none else 0) %}
+                <details style="display:inline-block; margin-left:0.25rem; vertical-align:top">
+                    <summary role="button" class="outline secondary" style="width:auto; margin-bottom:0">Edit Count</summary>
+                    <form method="post"
+                          action="/dishes/{{ d.dish_id }}/fish-count"
+                          style="min-width:12rem; padding:0.5rem"
+                          onsubmit="return confirm('Update fish count for dish {{ d.dish_id }}?');">
+                        <input type="hidden" name="return_status" value="{{ status_filter }}">
+                        <label>
+                            Current fish count
+                            <input type="number"
+                                   name="current_fish_count"
+                                   min="0"
+                                   value="{{ editable_current_count }}"
+                                   required>
+                        </label>
+                        <button type="submit" class="secondary" style="margin-bottom:0">Update Count</button>
+                    </form>
+                </details>
                 {% if d.transfer_destinations %}
                 {% set source_current_count = d.current_fish_count if d.current_fish_count is not none else d.fish_count %}
                 <details style="display:inline-block; margin-left:0.25rem; vertical-align:top">

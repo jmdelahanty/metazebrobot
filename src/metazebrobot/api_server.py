@@ -2142,6 +2142,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         status: str = Query(default="all"),
         terminated: Optional[str] = Query(default=None),
         transferred: Optional[str] = Query(default=None),
+        count_updated: Optional[str] = Query(default=None),
     ):
         """Inventory-style dish index for local MetaZebrobot dishes."""
         db_path = _require_db_path()
@@ -2270,6 +2271,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             flash_message = f"Terminated dish {terminated}."
         elif transferred:
             flash_message = f"Transferred fish from dish {transferred}."
+        elif count_updated:
+            flash_message = f"Updated fish count for dish {count_updated}."
         return templates.TemplateResponse(request, "dishes/dish_list.html", {
             "dishes": dishes,
             "summary": summary,
@@ -2302,6 +2305,30 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         return RedirectResponse(
             url=f"/dishes/?status={normalized_status}&terminated={dish_id}",
+            status_code=303,
+        )
+
+    @app.post("/dishes/{dish_id}/fish-count", response_class=HTMLResponse)
+    def update_dish_fish_count_web(
+        dish_id: str,
+        current_fish_count: int = Form(...),
+        return_status: str = Form(default="all"),
+    ):
+        """Correct a dish's current fish count from the inventory page."""
+        _require_db_path()
+        normalized_status = (return_status or "all").strip().lower()
+        if normalized_status not in {"all", "active", "inactive"}:
+            normalized_status = "all"
+
+        success, message, _ = fish_dish_ctrl.update_dish_fish_count(
+            dish_id=dish_id,
+            current_fish_count=current_fish_count,
+        )
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+
+        return RedirectResponse(
+            url=f"/dishes/?status={normalized_status}&count_updated={dish_id}",
             status_code=303,
         )
 

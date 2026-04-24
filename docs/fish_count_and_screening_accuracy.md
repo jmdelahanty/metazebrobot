@@ -6,6 +6,16 @@ The `fish_count` field on a dish represents the operator's best estimate at the 
 
 There is intentionally no validation that prevents a screening step from reporting more kept + removed than the dish's initial `fish_count`. This avoids hard failures caused by minor estimation errors that have no practical impact on the workflow.
 
+## Editing Dish Counts
+
+The dishes inventory page exposes an **Edit Count** control for active dishes. The operator-entered value is the intended current physical fish count for the dish.
+
+Internally, MetaZebrobot keeps `current_fish_count` derived from the dish's baseline `fish_count` plus screening and transfer history. To make the correction durable, the edit adjusts the baseline `fish_count` enough that the derived `current_fish_count` reloads to the entered value. For a dish that was accidentally created with no count, this simply fills in the missing opening estimate.
+
+This count correction is inventory context only. It does not rewrite screening-step counts and does not change yield calculations.
+
+If the entered count cannot be represented without changing existing screening or transfer history, the update is rejected instead of silently corrupting provenance.
+
 ## Screening Counts Are the Source of Truth
 
 For aggregate metrics (yield percentage, total initially produced, total positive final), the system uses values from `ScreeningStep` records — specifically `count_screened_this_step` and `number_kept` — rather than the dish-level `fish_count`.

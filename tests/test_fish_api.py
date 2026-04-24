@@ -1065,6 +1065,14 @@ class TestDishInventory:
         assert f'href="/dishes/{seed_dish}/fish/"' in resp.text
         assert f'href="/dishes/{seed_dish}/label"' in resp.text
 
+    def test_dishes_inventory_page_shows_count_editor_for_active_dishes(self, client, seed_full_dish):
+        resp = client.get("/dishes/")
+
+        assert resp.status_code == 200
+        assert f'action="/dishes/{seed_full_dish}/fish-count"' in resp.text
+        assert 'name="current_fish_count"' in resp.text
+        assert "Edit Count" in resp.text
+
     def test_dishes_inventory_page_shows_terminate_for_active_dishes(self, client, seed_full_dish):
         resp = client.get("/dishes/")
 
@@ -1185,6 +1193,100 @@ class TestDishInventory:
         assert re.fullmatch(r"\d{8}", source_row[2])
         assert source_row[3] == "transfer"
         assert destination_row == (52,)
+
+    def test_update_dish_fish_count_web_persists_baseline_and_current(self, client, seed_full_dish, tmp_db_path):
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/fish-count",
+            data={
+                "current_fish_count": 37,
+                "return_status": "active",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/dishes/?status=active&count_updated={seed_full_dish}"
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            """
+            SELECT fish_count, current_fish_count
+            FROM dishes
+            WHERE dish_id = ?
+            """,
+            (seed_full_dish,),
+        ).fetchone()
+        conn.close()
+
+        assert row == (37, 37)
+
+        dish = client.get(f"/dishes/{seed_full_dish}").json()["data"]
+        assert dish["fish_count"] == 37
+        assert dish["current_fish_count"] == 37
+
+    def test_update_dish_fish_count_web_preserves_transfer_history(self, client, seed_full_dish, tmp_db_path):
+        client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 2, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        destination_id = f"{seed_full_dish}_pos1"
+        client.post(
+            f"/dishes/{seed_full_dish}/transfer",
+            data={
+                "destination_dish_id": destination_id,
+                "count": 4,
+                "reason": "manual_transfer",
+                "return_status": "active",
+            },
+            follow_redirects=False,
+        )
+
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/fish-count",
+            data={
+                "current_fish_count": 40,
+                "return_status": "active",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            """
+            SELECT fish_count, current_fish_count
+            FROM dishes
+            WHERE dish_id = ?
+            """,
+            (seed_full_dish,),
+        ).fetchone()
+        transfer_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM dish_transfer_events
+            WHERE source_dish_id = ?
+            """,
+            (seed_full_dish,),
+        ).fetchone()[0]
+        conn.close()
+
+        assert row == (44, 40)
+        assert transfer_count == 1
+
+    def test_update_dish_fish_count_web_rejects_negative_count(self, client, seed_full_dish):
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/fish-count",
+            data={
+                "current_fish_count": -1,
+                "return_status": "all",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 400
+        assert "Fish count must be zero or greater" in resp.text
 
     def test_transfer_dish_fish_web_rejects_cross_mismatch(self, client, seed_full_dish):
         create_resp = client.post(

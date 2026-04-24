@@ -723,6 +723,68 @@ class FishDishController:
             )
             return False, f"An unexpected error occurred: {str(e)}", None
 
+    def update_dish_fish_count(
+        self,
+        dish_id: str,
+        current_fish_count: int,
+    ) -> Tuple[bool, str, Optional[FishDish]]:
+        """Correct the dish count while preserving derived-count semantics.
+
+        `fish_count` is the editable baseline. `current_fish_count` is derived
+        from that baseline plus screening/transfer history, so update the
+        baseline enough for the derived current count to match the requested
+        present count after reload.
+        """
+        try:
+            if current_fish_count < 0:
+                return False, "Fish count must be zero or greater.", None
+
+            dish = self.get_dish(dish_id)
+            if not dish:
+                return False, f"Dish {dish_id} not found.", None
+
+            screening_outgoing_count = 0
+            if dish.screening_results:
+                screening_outgoing_count = sum(
+                    step.outgoing_count for step in dish.screening_results.screenings
+                )
+
+            count_offset = (
+                (dish.incoming_fish_count or 0)
+                + (dish.incoming_transfer_count or 0)
+                - (dish.outgoing_transfer_count or 0)
+                - screening_outgoing_count
+            )
+            target_baseline_count = current_fish_count - count_offset
+            if target_baseline_count < 0:
+                return False, (
+                    "This current count cannot be represented without changing existing "
+                    "screening or transfer history."
+                ), None
+
+            dish.fish_count = target_baseline_count
+            dish.refresh_screening_state()
+            if dish.current_fish_count != current_fish_count:
+                return False, "Failed to derive the requested current fish count.", None
+
+            if not data_manager.save_fish_dish(dish.model_dump(mode='json', exclude_none=True)):
+                return False, "Failed to save dish fish count.", None
+
+            data_manager.data_cache['fish_dishes'][dish_id] = dish.model_dump(
+                mode='json',
+                exclude_none=True,
+            )
+            return True, "Dish fish count updated successfully.", dish
+
+        except Exception as e:
+            logger.error(
+                "Error updating fish count for dish %s: %s",
+                dish_id,
+                e,
+                exc_info=True,
+            )
+            return False, f"An unexpected error occurred: {str(e)}", None
+
     def finalize_screening(self, dish_id: str, final_count: int, date_finalized: str) -> Tuple[bool, str]:
         """
         Updates the screening results with the final positive count and date.
