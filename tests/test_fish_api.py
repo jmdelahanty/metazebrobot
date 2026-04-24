@@ -711,6 +711,8 @@ class TestReferenceLibrary:
         assert "#FF0900" in resp.text
         assert "Tg(elavl3:jGCaMP8f)" in resp.text
         assert "Tg(her4.1:PMCA2-mCherry)" in resp.text
+        assert "Tg(elavl3:jGCaMP8f) (elavl3:jGCaMP8f)" not in resp.text
+        assert "Tg(her4.1:PMCA2-mCherry) (her4.1:PMCA2-mCherry)" not in resp.text
         assert "suggested" in resp.text
 
     def test_preview_ome_genotype_reference_accepts_browser_upload(self, client, tmp_db_path):

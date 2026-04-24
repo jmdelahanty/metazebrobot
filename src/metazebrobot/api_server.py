@@ -190,14 +190,9 @@ def _reference_transgene_options(genotype: str) -> List[Dict[str, Optional[str]]
         construct = transgene.get("construct")
         if not construct:
             continue
-        detail_parts = [
-            transgene.get("promoter_raw") or transgene.get("promoter"),
-            transgene.get("reporter_raw") or transgene.get("reporter"),
-        ]
-        detail = ":".join([part for part in detail_parts if part])
         options.append({
             "construct": construct,
-            "label": f"{construct} ({detail})" if detail else construct,
+            "label": construct,
             "reporter": transgene.get("reporter"),
             "reporter_raw": transgene.get("reporter_raw"),
             "fluorophore": transgene.get("fluorophore"),
