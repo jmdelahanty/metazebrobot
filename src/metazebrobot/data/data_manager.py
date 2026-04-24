@@ -3285,6 +3285,32 @@ class DataManager:
             logger.error(f"Error querying genotype reference images: {e}")
             return []
 
+    def list_genotype_reference_images(
+        self,
+        active_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """List curated full-genotype reference images for library management."""
+        if not self.is_initialized:
+            return []
+
+        try:
+            with self.get_connection() as conn:
+                active_filter = "WHERE is_active = 1" if active_only else ""
+                rows = conn.execute(
+                    f"""
+                    SELECT id, genotype_key, display_genotype, image_filename,
+                           caption, source_image_id, source_dish_id, source_fish_id,
+                           channels_json, notes, is_active, created_at
+                    FROM genotype_reference_images
+                    {active_filter}
+                    ORDER BY display_genotype COLLATE NOCASE, created_at DESC, id DESC
+                    """
+                ).fetchall()
+                return [{k: row[k] for k in row.keys()} for row in rows]
+        except Exception as e:
+            logger.error(f"Error listing genotype reference images: {e}")
+            return []
+
     # --- Material Management (using database backend) ---
 
     def add_agarose_solution(self, solution_id: str, solution_data: Dict[str, Any]) -> bool:

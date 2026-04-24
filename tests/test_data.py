@@ -233,6 +233,19 @@ class TestGenotypeReferenceImageData:
         assert len(refs) == 1
         assert refs[0]["image_filename"] == "inactive_ref.png"
 
+    def test_list_genotype_reference_images(self, client):
+        genotype = f"Tg(elavl3:GCaMP6s);test-{uuid.uuid4().hex[:6]}"
+        ref_id = data_manager.save_genotype_reference_image(
+            genotype,
+            "listed_ref.png",
+            caption="listed",
+        )
+
+        refs = data_manager.list_genotype_reference_images()
+
+        assert ref_id is not None
+        assert any(ref["id"] == ref_id and ref["caption"] == "listed" for ref in refs)
+
 
 class TestGenotypeParser:
     """parse_genotype() — structured transgene extraction."""

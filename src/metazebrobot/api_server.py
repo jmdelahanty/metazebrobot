@@ -1250,6 +1250,24 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """Landing page."""
         return templates.TemplateResponse(request, "home.html", {})
 
+    @app.get("/references/", response_class=HTMLResponse)
+    def references_page(
+        request: Request,
+        status: str = Query(default="active", pattern="^(active|all)$"),
+    ):
+        """Read-only reference library page."""
+        include_inactive = status == "all"
+        references = data_manager.list_genotype_reference_images(
+            active_only=not include_inactive,
+        )
+        for reference in references:
+            reference["image_url"] = f"/genotype-reference-images/{reference['image_filename']}"
+
+        return templates.TemplateResponse(request, "references/index.html", {
+            "references": references,
+            "status_filter": status,
+        })
+
     # ------------------------------------------------------------------
     # Dish creation (web UI)
     # ------------------------------------------------------------------

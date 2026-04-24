@@ -499,11 +499,24 @@ class TestScreeningReferencePanels:
         assert "Atlas Reference" in resp.text
 
     def test_genotype_reference_partial_placeholder(self, client, seed_full_dish):
-        resp = client.get(f"/screening/{seed_full_dish}/genotype-reference")
+        from metazebrobot.models.fish_dish import FishDish
+
+        unique_genotype = f"Tg(unique:placeholder-{uuid.uuid4().hex[:6]})"
+        dish = FishDish.create_new(
+            cross_id=f"CROSS_{uuid.uuid4().hex[:6]}",
+            dish_number=1,
+            genotype=unique_genotype,
+            responsible="test-user",
+            fish_count=1,
+            dof="20260401",
+        )
+        assert data_manager.save_fish_dish(dish.model_dump(mode="json", exclude_none=True))
+
+        resp = client.get(f"/screening/{dish.dish_id}/genotype-reference")
 
         assert resp.status_code == 200
         assert "No curated genotype reference image for this exact genotype yet." in resp.text
-        assert "Tg(elavl3:GCaMP6s)" in resp.text
+        assert "Tg(unique:placeholder-" in resp.text
 
     def test_genotype_reference_partial_renders_matching_reference(self, client, seed_full_dish):
         reference_id = data_manager.save_genotype_reference_image(
@@ -521,6 +534,44 @@ class TestScreeningReferencePanels:
         assert "Known good elavl3 GCaMP pattern" in resp.text
         assert f"<code>{seed_full_dish}</code>" in resp.text
         assert "No curated genotype reference image" not in resp.text
+
+
+# -------------------------------------------------------------------
+# Reference library
+# -------------------------------------------------------------------
+
+
+class TestReferenceLibrary:
+    """Read-only reference library page."""
+
+    def test_reference_library_page_empty(self, client):
+        conn = sqlite3.connect(str(data_manager.database_path))
+        conn.execute("DELETE FROM genotype_reference_images")
+        conn.commit()
+        conn.close()
+
+        resp = client.get("/references/")
+
+        assert resp.status_code == 200
+        assert "Reference Library" in resp.text
+        assert "No curated genotype reference images yet." in resp.text
+
+    def test_reference_library_page_lists_genotype_references(self, client, seed_full_dish):
+        reference_id = data_manager.save_genotype_reference_image(
+            "Tg(elavl3:GCaMP6s)",
+            "library_ref.png",
+            caption="Reference library example",
+            source_dish_id=seed_full_dish,
+        )
+        assert reference_id is not None
+
+        resp = client.get("/references/")
+
+        assert resp.status_code == 200
+        assert "Tg(elavl3:GCaMP6s)" in resp.text
+        assert "Reference library example" in resp.text
+        assert "/genotype-reference-images/library_ref.png" in resp.text
+        assert f'href="/screening/{seed_full_dish}"' in resp.text
 
 
 # -------------------------------------------------------------------

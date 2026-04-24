@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}References — MetaZebrobot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Reference Library</h2>
+    <p>Curated exact-genotype reference images for screening decisions.</p>
+</hgroup>
+
+<form method="get" action="/references/" style="margin-bottom:1rem">
+    <label>
+        Status
+        <select name="status" onchange="this.form.submit()" style="max-width:16rem">
+            <option value="active"{% if status_filter == "active" %} selected{% endif %}>Active references</option>
+            <option value="all"{% if status_filter == "all" %} selected{% endif %}>All references</option>
+        </select>
+    </label>
+</form>
+
+{% if references %}
+<div class="gallery-grid">
+    {% for reference in references %}
+    <article style="max-width:32rem">
+        <header>
+            <strong>{{ reference.display_genotype }}</strong>
+            {% if not reference.is_active %}
+            <small>(inactive)</small>
+            {% endif %}
+        </header>
+        <figure class="atlas-thumb">
+            <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_genotype }}" loading="lazy">
+            {% if reference.caption %}
+            <figcaption>{{ reference.caption }}</figcaption>
+            {% endif %}
+        </figure>
+        <p><small>Exact key: <code>{{ reference.genotype_key }}</code></small></p>
+        {% if reference.source_dish_id %}
+        <p><small>Source dish: <a href="/screening/{{ reference.source_dish_id }}">{{ reference.source_dish_id }}</a></small></p>
+        {% endif %}
+        {% if reference.source_fish_id %}
+        <p><small>Source fish: <code>{{ reference.source_fish_id }}</code></small></p>
+        {% endif %}
+        {% if reference.notes %}
+        <p>{{ reference.notes }}</p>
+        {% endif %}
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+<article>
+    <p><em>No curated genotype reference images yet.</em></p>
+    <p><small>Upload and curation workflows will be added separately; this page is currently read-only.</small></p>
+</article>
+{% endif %}
+{% endblock %}

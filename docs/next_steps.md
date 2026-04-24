@@ -36,6 +36,7 @@
 - [x] Larger atlas-thumb CSS class for brain images
 - [x] Full-genotype reference image design documented in `docs/genotype_reference_images_design.md`
 - [x] Genotype Reference panel reads curated exact-genotype PNG metadata
+- [x] Read-only References page lists curated exact-genotype references
 
 ### Daily care web form
 - [x] `/care/` dish list with red highlight for unchecked dishes
