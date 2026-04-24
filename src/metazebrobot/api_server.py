@@ -28,6 +28,10 @@ from .models.fish_dish import (
     termination_reason_label,
 )
 from .utils.label_generator import generate_dish_label
+from .utils.ome_reference_export import (
+    export_reference_pngs_from_ome_tiff,
+    read_ome_tiff_metadata,
+)
 from .utils.pyrat_credentials import get_pyrat_api_credentials
 from .utils.pyrat_frontend_client import (
     enrich_crossings_with_frontend_details,
@@ -123,6 +127,128 @@ def _prepare_genotype_reference_groups(references: List[Dict[str, Any]]) -> List
             group["other"].append(reference)
 
     return list(groups_by_key.values())
+
+
+def _form_str(form: Any, field_name: str) -> Optional[str]:
+    """Return a string form value, ignoring missing values and uploaded files."""
+    value = form.get(field_name)
+    if value is None or isinstance(value, UploadFile):
+        return None
+    return str(value)
+
+
+def _resolve_ome_tiff_path(value: Optional[str]) -> Path:
+    """Validate an operator-provided server-side OME-TIFF path."""
+    raw_path = _clean_optional(value)
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="OME-TIFF path is required.")
+
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        raise HTTPException(status_code=400, detail="OME-TIFF path must be an absolute server path.")
+    if not path.exists():
+        raise HTTPException(status_code=400, detail=f"OME-TIFF path does not exist: {path}")
+    if not path.is_file():
+        raise HTTPException(status_code=400, detail=f"OME-TIFF path is not a file: {path}")
+
+    lower_name = path.name.lower()
+    if not lower_name.endswith((".ome.tif", ".ome.tiff", ".tif", ".tiff")):
+        raise HTTPException(status_code=400, detail="OME-TIFF path must end with .ome.tif, .ome.tiff, .tif, or .tiff.")
+    return path
+
+
+def _reference_transgene_options(genotype: str) -> List[Dict[str, Optional[str]]]:
+    """Parse a full genotype into template-friendly transgene options."""
+    options = []
+    for transgene in data_manager.parse_genotype(genotype):
+        construct = transgene.get("construct")
+        if not construct:
+            continue
+        detail_parts = [
+            transgene.get("promoter_raw") or transgene.get("promoter"),
+            transgene.get("reporter_raw") or transgene.get("reporter"),
+        ]
+        detail = ":".join([part for part in detail_parts if part])
+        options.append({
+            "construct": construct,
+            "label": f"{construct} ({detail})" if detail else construct,
+            "reporter": transgene.get("reporter"),
+            "reporter_raw": transgene.get("reporter_raw"),
+            "fluorophore": transgene.get("fluorophore"),
+        })
+    return options
+
+
+def _compact_match_text(value: Optional[str]) -> str:
+    """Normalize biological labels for rough string matching."""
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def _suggest_transgene_for_channel(
+    channel: Dict[str, Any],
+    transgenes: List[Dict[str, Optional[str]]],
+) -> Optional[str]:
+    """Suggest a transgene for a channel from OME fluor/name and genotype reporter terms."""
+    channel_text = " ".join([
+        str(channel.get("name") or ""),
+        str(channel.get("fluor") or ""),
+        str(channel.get("label") or ""),
+    ]).lower()
+    compact_channel_text = _compact_match_text(channel_text)
+
+    fluor_synonyms = {
+        "gcamp": ["gcamp", "camp", "calciumgreen", "calcium green", "cagr", "green"],
+        "mcherry": ["mcherry", "mcher", "cherry", "red"],
+        "gfp": ["gfp", "egfp", "green"],
+        "rfp": ["rfp", "tagrfp", "red"],
+        "jrgeco": ["jrgeco", "rgeco", "red"],
+        "tdtomato": ["tdtomato", "tomato", "red"],
+        "campari": ["campari"],
+        "cerulean": ["cerulean", "cyan"],
+    }
+
+    best_score = 0
+    best_construct = None
+    for transgene in transgenes:
+        score = 0
+        reporter_values = [
+            transgene.get("reporter"),
+            transgene.get("reporter_raw"),
+            transgene.get("fluorophore"),
+        ]
+        for reporter in reporter_values:
+            compact_reporter = _compact_match_text(reporter)
+            if compact_reporter and compact_reporter in compact_channel_text:
+                score += 5
+            elif compact_reporter and compact_channel_text and compact_channel_text in compact_reporter:
+                score += 3
+
+        fluorophore = (transgene.get("fluorophore") or "").lower()
+        for synonym in fluor_synonyms.get(fluorophore, []):
+            if _compact_match_text(synonym) in compact_channel_text:
+                score += 4
+
+        if score > best_score:
+            best_score = score
+            best_construct = transgene.get("construct")
+
+    return best_construct if best_score > 0 else None
+
+
+def _reference_import_filename_prefix(genotype_key: str, ome_path: Path) -> str:
+    """Build a stable-ish safe filename prefix for generated reference PNGs."""
+    stat = ome_path.stat()
+    digest_source = f"{ome_path}:{stat.st_size}:{stat.st_mtime_ns}".encode("utf-8")
+    digest = hashlib.sha256(digest_source).hexdigest()[:12]
+    safe_genotype = re.sub(r"[^A-Za-z0-9_.-]+", "_", genotype_key).strip("_")[:80] or "genotype"
+    safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", ome_path.stem).strip("_")[:60] or "ome"
+    return f"{safe_genotype}_{safe_stem}_{digest}"
+
+
+def _notes_with_source_ome(notes: Optional[str], ome_path: Path) -> str:
+    """Preserve source OME path provenance in current reference metadata."""
+    source_note = f"Source OME-TIFF: {ome_path}"
+    return f"{notes}\n{source_note}" if notes else source_note
 
 
 def _load_user_list() -> List[str]:
@@ -1476,6 +1602,122 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             raise HTTPException(status_code=500, detail="Failed to save genotype reference metadata.")
 
         return RedirectResponse(url=f"/references/?uploaded={reference_id}", status_code=303)
+
+    @app.post("/references/genotype/ome-preview", response_class=HTMLResponse)
+    async def preview_ome_genotype_reference(
+        request: Request,
+        genotype: str = Form(...),
+        ome_path: str = Form(...),
+        reference_group_label: Optional[str] = Form(default=None),
+        source_dish_id: Optional[str] = Form(default=None),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Preview OME-TIFF channels and suggested transgene mappings before import."""
+        genotype_key = data_manager.genotype_reference_key(genotype)
+        if not genotype_key:
+            raise HTTPException(status_code=400, detail="Genotype is required.")
+
+        source_dish_id = _clean_optional(source_dish_id)
+        if source_dish_id:
+            dish = fish_dish_ctrl.get_dish(source_dish_id)
+            if not dish:
+                raise HTTPException(status_code=400, detail=f"Source dish {source_dish_id} not found.")
+
+        ome_tiff_path = _resolve_ome_tiff_path(ome_path)
+        try:
+            metadata = read_ome_tiff_metadata(ome_tiff_path)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not read OME-TIFF metadata: {exc}")
+
+        transgenes = _reference_transgene_options(genotype_key)
+        channels = metadata["channels"]
+        for channel in channels:
+            channel["suggested_transgene"] = _suggest_transgene_for_channel(channel, transgenes)
+
+        reference_group_label = _clean_optional(reference_group_label) or ome_tiff_path.stem
+
+        return templates.TemplateResponse(request, "references/ome_preview.html", {
+            "genotype": genotype_key,
+            "ome_path": str(ome_tiff_path),
+            "reference_group_label": reference_group_label,
+            "source_dish_id": source_dish_id,
+            "notes": _clean_optional(notes),
+            "metadata": metadata,
+            "channels": channels,
+            "transgenes": transgenes,
+        })
+
+    @app.post("/references/genotype/ome-import", response_class=HTMLResponse)
+    async def import_ome_genotype_reference(request: Request):
+        """Generate composite/channel PNG references from a reviewed OME-TIFF mapping."""
+        form = await request.form()
+        genotype_key = data_manager.genotype_reference_key(_form_str(form, "genotype"))
+        if not genotype_key:
+            raise HTTPException(status_code=400, detail="Genotype is required.")
+
+        source_dish_id = _clean_optional(_form_str(form, "source_dish_id"))
+        if source_dish_id:
+            dish = fish_dish_ctrl.get_dish(source_dish_id)
+            if not dish:
+                raise HTTPException(status_code=400, detail=f"Source dish {source_dish_id} not found.")
+
+        ome_tiff_path = _resolve_ome_tiff_path(_form_str(form, "ome_path"))
+        reference_group_label = _clean_optional(_form_str(form, "reference_group_label")) or ome_tiff_path.stem
+        notes = _notes_with_source_ome(_clean_optional(_form_str(form, "notes")), ome_tiff_path)
+
+        try:
+            metadata = read_ome_tiff_metadata(ome_tiff_path)
+            generated = export_reference_pngs_from_ome_tiff(
+                ome_tiff_path,
+                app.state.genotype_reference_images_dir,
+                _reference_import_filename_prefix(genotype_key, ome_tiff_path),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not generate reference PNGs: {exc}")
+
+        channels_by_index = {channel["index"]: channel for channel in metadata["channels"]}
+        inserted_ids = []
+        for image in generated:
+            if image["display_role"] == "composite":
+                caption = _clean_optional(_form_str(form, "composite_caption")) or "Composite"
+                reference_id = data_manager.save_genotype_reference_image(
+                    genotype=genotype_key,
+                    image_filename=image["image_filename"],
+                    caption=caption,
+                    display_genotype=genotype_key,
+                    reference_group_label=reference_group_label,
+                    display_role="composite",
+                    source_dish_id=source_dish_id,
+                    notes=notes,
+                )
+            else:
+                channel = image["channel"]
+                channel_index = int(channel["index"])
+                selected_transgene = _clean_optional(_form_str(form, f"channel_{channel_index}_transgene"))
+                caption = channel.get("label") or f"Channel {channel_index}"
+                reference_id = data_manager.save_genotype_reference_image(
+                    genotype=genotype_key,
+                    image_filename=image["image_filename"],
+                    caption=caption,
+                    display_genotype=genotype_key,
+                    reference_group_label=reference_group_label,
+                    display_role="channel",
+                    transgene=selected_transgene,
+                    channel_index=channel_index,
+                    channel_name=channel.get("name"),
+                    fluor=channel.get("fluor"),
+                    color_hex=channel.get("color_hex"),
+                    source_dish_id=source_dish_id,
+                    channels_json=json.dumps(channels_by_index.get(channel_index, channel)),
+                    notes=notes,
+                )
+
+            if reference_id is None:
+                raise HTTPException(status_code=500, detail="Failed to save generated genotype reference metadata.")
+            inserted_ids.append(reference_id)
+
+        first_id = inserted_ids[0] if inserted_ids else ""
+        return RedirectResponse(url=f"/references/?uploaded={first_id}", status_code=303)
 
     # ------------------------------------------------------------------
     # Dish creation (web UI)

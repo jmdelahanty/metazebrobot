@@ -12,13 +12,36 @@ import json
 import sqlite3
 import uuid
 
+import numpy as np
 import pytest
+from PIL import Image, TiffImagePlugin
 
 from metazebrobot.data.data_manager import data_manager
 
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
+
+
+def _write_two_channel_ome_tiff(path):
+    """Write a minimal two-channel OME-TIFF fixture."""
+    ome_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">
+  <Image ID="Image:0">
+    <Pixels BigEndian="false" DimensionOrder="XYCZT" ID="Pixels:0"
+            SizeC="2" SizeT="1" SizeX="8" SizeY="6" SizeZ="1" Type="uint16">
+      <Channel Color="385810687" Fluor="Calcium Green-1" ID="Channel:0:0" Name="CaGr1" SamplesPerPixel="1"/>
+      <Channel Color="-16187137" Fluor="mCherry" ID="Channel:0:1" Name="mCher" SamplesPerPixel="1"/>
+      <TiffData/>
+    </Pixels>
+  </Image>
+</OME>"""
+    channel_0 = np.arange(48, dtype=np.uint16).reshape(6, 8) * 100
+    channel_1 = np.flipud(channel_0)
+    frames = [Image.fromarray(channel_0), Image.fromarray(channel_1)]
+    tiff_info = TiffImagePlugin.ImageFileDirectory_v2()
+    tiff_info[270] = ome_xml
+    frames[0].save(path, save_all=True, append_images=frames[1:], tiffinfo=tiff_info)
 
 
 # -------------------------------------------------------------------
@@ -665,6 +688,79 @@ class TestReferenceLibrary:
 
         assert resp.status_code == 400
         assert "Only JPEG and PNG are accepted" in resp.text
+
+    def test_preview_ome_genotype_reference_suggests_transgenes(self, client, tmp_db_path):
+        ome_path = tmp_db_path.parent / "source.ome.tiff"
+        _write_two_channel_ome_tiff(ome_path)
+        genotype = "Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry)"
+
+        resp = client.post(
+            "/references/genotype/ome-preview",
+            data={
+                "genotype": genotype,
+                "ome_path": str(ome_path),
+                "reference_group_label": "source acquisition",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert "Preview OME-TIFF Reference Set" in resp.text
+        assert "CaGr1" in resp.text
+        assert "mCher" in resp.text
+        assert "#16FF00" in resp.text
+        assert "#FF0900" in resp.text
+        assert "Tg(elavl3:jGCaMP8f)" in resp.text
+        assert "Tg(her4.1:PMCA2-mCherry)" in resp.text
+        assert "suggested" in resp.text
+
+    def test_import_ome_genotype_reference_creates_composite_and_channels(self, client, seed_full_dish, tmp_db_path):
+        ome_path = tmp_db_path.parent / "source_import.ome.tiff"
+        _write_two_channel_ome_tiff(ome_path)
+        genotype = f"Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry);test-{uuid.uuid4().hex[:6]}"
+
+        resp = client.post(
+            "/references/genotype/ome-import",
+            data={
+                "genotype": genotype,
+                "ome_path": str(ome_path),
+                "reference_group_label": "source import",
+                "source_dish_id": seed_full_dish,
+                "notes": "generated from test OME",
+                "channel_0_transgene": "Tg(elavl3:jGCaMP8f)",
+                "channel_1_transgene": "Tg(her4.1:PMCA2-mCherry)",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        refs = data_manager.get_genotype_reference_images(genotype)
+        assert len(refs) == 3
+        assert {ref["display_role"] for ref in refs} == {"composite", "channel"}
+
+        composite = [ref for ref in refs if ref["display_role"] == "composite"]
+        channels = sorted(
+            [ref for ref in refs if ref["display_role"] == "channel"],
+            key=lambda ref: ref["channel_index"],
+        )
+        assert len(composite) == 1
+        assert len(channels) == 2
+        assert composite[0]["caption"] == "Composite"
+        assert channels[0]["transgene_key"] == "Tg(elavl3:jGCaMP8f)"
+        assert channels[0]["channel_name"] == "CaGr1"
+        assert channels[0]["color_hex"] == "#16FF00"
+        assert channels[1]["transgene_key"] == "Tg(her4.1:PMCA2-mCherry)"
+        assert channels[1]["channel_name"] == "mCher"
+        assert channels[1]["color_hex"] == "#FF0900"
+        assert "Source OME-TIFF:" in channels[0]["notes"]
+
+        image_dir = tmp_db_path.parent / "genotype_reference_images"
+        for ref in refs:
+            assert (image_dir / ref["image_filename"]).exists()
+
+        page = client.get("/references/")
+        assert "source import" in page.text
+        assert "Composite" in page.text
+        assert "Channels / Transgenes" in page.text
 
 
 # -------------------------------------------------------------------

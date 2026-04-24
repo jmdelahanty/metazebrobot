@@ -100,8 +100,18 @@ mCher / mCherry -> Red or Magenta
 For curated MetaZebrobot genotype references, adjust the display in Fiji and export
 a display-ready PNG/JPEG. Do not upload raw OME-TIFFs as genotype reference images.
 
-For multi-channel positive fish, export one composite and one PNG/JPEG per
-biologically meaningful channel. Upload these as one reference set:
+MetaZebrobot can also generate these display-ready PNGs directly from a
+server-visible OME-TIFF path on the Reference Library page. The narrow first
+implementation expects a simple OME-TIFF with one Z plane, one T point, and one
+plane per channel. It uses embedded OME channel metadata to:
+
+- detect channel index, channel name, fluor/reporter label, and display color;
+- suggest channel-to-transgene mappings from the exact genotype;
+- generate one composite PNG plus one PNG per channel;
+- save structured `genotype_reference_images` rows for the composite and channels.
+
+For multi-channel positive fish, each imported or manually uploaded reference set
+should include one composite and one PNG/JPEG per biologically meaningful channel:
 
 ```text
 Full genotype:
@@ -379,8 +389,9 @@ A future importer should:
 - Should source OME-TIFF/CZI files be copied into MetaZebrobot-managed storage or
   referenced in place from group storage?
 - What image conversion stack should be used for OME-TIFF and CZI previews?
-  Pillow can inspect some TIFF metadata, but `tifffile`/`aicsimageio` may be needed
-  for robust multi-channel microscopy data.
+  Current OME-TIFF reference generation uses Pillow/numpy for simple OME-TIFFs,
+  but `tifffile`/`aicsimageio` may be needed for robust multi-channel microscopy
+  data and CZI support.
 - Should curated genotype references be versioned, or is `is_active` enough for
   the first implementation?
 
@@ -392,6 +403,7 @@ A future importer should:
 4. [x] Add a read-only reference library page for curated genotype references.
 5. [x] Add a simple manual upload/admin path for genotype reference PNGs/JPEGs.
 6. [x] Add structured reference-set metadata for composite/channel/transgene display.
-7. Add image catalog and staging importer for OME-TIFF/PNG files.
-8. Add `Mark as genotype reference` from existing screening image galleries.
-9. Extend linking to housing units and fish for well-plate workflows.
+7. [x] Add narrow OME-TIFF-to-reference PNG generation with reviewed channel mapping.
+8. Add image catalog and staging importer for OME-TIFF/PNG files.
+9. Add `Mark as genotype reference` from existing screening image galleries.
+10. Extend linking to housing units and fish for well-plate workflows.

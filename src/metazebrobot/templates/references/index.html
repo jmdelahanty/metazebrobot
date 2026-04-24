@@ -82,6 +82,35 @@
     </form>
 </details>
 
+<details class="protocol-box">
+    <summary><strong>Create Reference Set from OME-TIFF</strong></summary>
+    <form method="post" action="/references/genotype/ome-preview">
+        <label>
+            Exact genotype
+            <input type="text" name="genotype" placeholder="e.g. Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry)" required>
+        </label>
+        <label>
+            Server OME-TIFF path
+            <input type="text" name="ome_path" placeholder="/groups/ahrens/ahrenslab/jeremy/screening_staging/.../image.ome.tiff" required>
+        </label>
+        <div class="grid">
+            <label>
+                Reference set label
+                <input type="text" name="reference_group_label" placeholder="Optional; defaults to OME file name">
+            </label>
+            <label>
+                Source dish ID
+                <input type="text" name="source_dish_id" placeholder="Optional source dish">
+            </label>
+        </div>
+        <label>
+            Notes
+            <input type="text" name="notes" placeholder="Optional curation note">
+        </label>
+        <button type="submit">Preview Channels</button>
+    </form>
+</details>
+
 <form method="get" action="/references/" style="margin-bottom:1rem">
     <label>
         Status

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Preview OME-TIFF Reference — MetaZebrobot{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Preview OME-TIFF Reference Set</h2>
+    <p>Review detected channels and confirm which transgene each channel represents.</p>
+</hgroup>
+
+<article>
+    <p><strong>Exact genotype:</strong> <code>{{ genotype }}</code></p>
+    <p><strong>OME-TIFF:</strong> <code>{{ ome_path }}</code></p>
+    <p><strong>Reference set:</strong> {{ reference_group_label }}</p>
+    <p>
+        <small>
+            {{ metadata.size_x }} × {{ metadata.size_y }},
+            {{ metadata.size_c }} channel(s),
+            Z={{ metadata.size_z }},
+            T={{ metadata.size_t }},
+            {{ metadata.pixel_type or "unknown pixel type" }},
+            order {{ metadata.dimension_order or "unknown" }}
+        </small>
+    </p>
+</article>
+
+<form method="post" action="/references/genotype/ome-import">
+    <input type="hidden" name="genotype" value="{{ genotype }}">
+    <input type="hidden" name="ome_path" value="{{ ome_path }}">
+    <input type="hidden" name="reference_group_label" value="{{ reference_group_label }}">
+    <input type="hidden" name="source_dish_id" value="{{ source_dish_id or '' }}">
+    <input type="hidden" name="notes" value="{{ notes or '' }}">
+
+    <label>
+        Composite caption
+        <input type="text" name="composite_caption" value="Composite">
+    </label>
+
+    <h3>Channel Mapping</h3>
+    {% if transgenes %}
+    <p><small>Suggestions are based on OME channel name/fluor text and parsed reporter terms from the genotype.</small></p>
+    {% else %}
+    <p><small>No transgenes were parsed from this genotype. Channel references will still be generated without transgene links.</small></p>
+    {% endif %}
+
+    {% for channel in channels %}
+    <article>
+        <header>
+            <strong>Channel {{ channel.index }}</strong>
+            {% if channel.name %} · {{ channel.name }}{% endif %}
+            {% if channel.fluor %} · {{ channel.fluor }}{% endif %}
+            {% if channel.color_hex %}
+            <span style="display:inline-block;width:0.8em;height:0.8em;background:{{ channel.color_hex }};border:1px solid var(--muted-border-color);vertical-align:middle"></span>
+            <small>{{ channel.color_hex }}</small>
+            {% endif %}
+        </header>
+        <label>
+            Transgene represented by this channel
+            <select name="channel_{{ channel.index }}_transgene">
+                <option value="">No transgene / leave unassigned</option>
+                {% for transgene in transgenes %}
+                <option value="{{ transgene.construct }}"{% if channel.suggested_transgene == transgene.construct %} selected{% endif %}>
+                    {{ transgene.label }}
+                    {% if channel.suggested_transgene == transgene.construct %} — suggested{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <p>
+            <small>
+                OME ID: <code>{{ channel.channel_id or "n/a" }}</code>
+                {% if channel.excitation_wavelength %} · excitation {{ channel.excitation_wavelength }} nm{% endif %}
+                {% if channel.emission_wavelength %} · emission {{ channel.emission_wavelength }} nm{% endif %}
+            </small>
+        </p>
+    </article>
+    {% endfor %}
+
+    <button type="submit">Generate PNG References</button>
+    <a href="/references/" role="button" class="secondary">Cancel</a>
+</form>
+{% endblock %}
