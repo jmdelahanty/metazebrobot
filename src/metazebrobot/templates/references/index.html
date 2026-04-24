@@ -84,15 +84,22 @@
 
 <details class="protocol-box">
     <summary><strong>Create Reference Set from OME-TIFF</strong></summary>
-    <form method="post" action="/references/genotype/ome-preview">
+    <form method="post" action="/references/genotype/ome-preview" enctype="multipart/form-data">
         <label>
             Exact genotype
             <input type="text" name="genotype" placeholder="e.g. Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry)" required>
         </label>
-        <label>
-            Server OME-TIFF path
-            <input type="text" name="ome_path" placeholder="/groups/ahrens/ahrenslab/jeremy/screening_staging/.../image.ome.tiff" required>
-        </label>
+        <div class="grid">
+            <label>
+                Choose OME-TIFF file
+                <input type="file" name="ome_file" accept=".ome.tif,.ome.tiff,.tif,.tiff">
+            </label>
+            <label>
+                Or server OME-TIFF path
+                <input type="text" name="ome_path" placeholder="/groups/ahrens/ahrenslab/jeremy/screening_staging/.../image.ome.tiff">
+            </label>
+        </div>
+        <p><small>Use the file selector from your Mac, or paste a path visible to the server. If both are provided, the uploaded file is used.</small></p>
         <div class="grid">
             <label>
                 Reference set label

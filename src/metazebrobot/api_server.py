@@ -157,6 +157,32 @@ def _resolve_ome_tiff_path(value: Optional[str]) -> Path:
     return path
 
 
+def _validate_ome_tiff_filename(filename: Optional[str]) -> str:
+    """Validate and sanitize an uploaded OME-TIFF filename."""
+    name = Path(filename or "uploaded.ome.tiff").name
+    lower_name = name.lower()
+    if not lower_name.endswith((".ome.tif", ".ome.tiff", ".tif", ".tiff")):
+        raise HTTPException(status_code=400, detail="Uploaded OME-TIFF must end with .ome.tif, .ome.tiff, .tif, or .tiff.")
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._") or "uploaded.ome.tiff"
+
+
+async def _save_uploaded_ome_tiff(file: UploadFile, upload_dir: Path) -> Path:
+    """Persist an uploaded OME-TIFF so it can be reviewed then imported."""
+    safe_name = _validate_ome_tiff_filename(file.filename)
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded OME-TIFF is empty.")
+    digest = hashlib.sha256(contents).hexdigest()[:12]
+    stem = Path(safe_name).stem
+    suffix = "".join(Path(safe_name).suffixes[-2:]) if safe_name.lower().endswith((".ome.tif", ".ome.tiff")) else Path(safe_name).suffix
+    if not suffix:
+        suffix = ".ome.tiff"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    upload_path = upload_dir / f"{stem}_{digest}{suffix}"
+    upload_path.write_bytes(contents)
+    return upload_path
+
+
 def _reference_transgene_options(genotype: str) -> List[Dict[str, Optional[str]]]:
     """Parse a full genotype into template-friendly transgene options."""
     options = []
@@ -1340,6 +1366,12 @@ async def lifespan(app: FastAPI):
         app.state.genotype_reference_images_dir = genotype_reference_images_dir
         logger.info(f"Genotype reference images directory: {genotype_reference_images_dir}")
 
+        # Ensure uploaded OME-TIFF staging directory exists
+        ome_uploads_dir = db_path.parent / "genotype_reference_ome_uploads"
+        ome_uploads_dir.mkdir(parents=True, exist_ok=True)
+        app.state.genotype_reference_ome_uploads_dir = ome_uploads_dir
+        logger.info(f"Genotype reference OME upload directory: {ome_uploads_dir}")
+
     yield
 
 
@@ -1607,7 +1639,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     async def preview_ome_genotype_reference(
         request: Request,
         genotype: str = Form(...),
-        ome_path: str = Form(...),
+        ome_path: Optional[str] = Form(default=None),
+        ome_file: Optional[UploadFile] = None,
         reference_group_label: Optional[str] = Form(default=None),
         source_dish_id: Optional[str] = Form(default=None),
         notes: Optional[str] = Form(default=None),
@@ -1623,7 +1656,13 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             if not dish:
                 raise HTTPException(status_code=400, detail=f"Source dish {source_dish_id} not found.")
 
-        ome_tiff_path = _resolve_ome_tiff_path(ome_path)
+        if ome_file is not None and ome_file.filename:
+            ome_tiff_path = await _save_uploaded_ome_tiff(
+                ome_file,
+                app.state.genotype_reference_ome_uploads_dir,
+            )
+        else:
+            ome_tiff_path = _resolve_ome_tiff_path(ome_path)
         try:
             metadata = read_ome_tiff_metadata(ome_tiff_path)
         except Exception as exc:

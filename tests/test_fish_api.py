@@ -713,6 +713,34 @@ class TestReferenceLibrary:
         assert "Tg(her4.1:PMCA2-mCherry)" in resp.text
         assert "suggested" in resp.text
 
+    def test_preview_ome_genotype_reference_accepts_browser_upload(self, client, tmp_db_path):
+        ome_path = tmp_db_path.parent / "upload_source.ome.tiff"
+        _write_two_channel_ome_tiff(ome_path)
+        genotype = "Tg(elavl3:jGCaMP8f);Tg(her4.1:PMCA2-mCherry)"
+
+        resp = client.post(
+            "/references/genotype/ome-preview",
+            files={
+                "ome_file": (
+                    "selected.ome.tiff",
+                    ome_path.read_bytes(),
+                    "image/tiff",
+                ),
+            },
+            data={
+                "genotype": genotype,
+                "reference_group_label": "browser upload",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert "Preview OME-TIFF Reference Set" in resp.text
+        assert "browser upload" in resp.text
+        assert "genotype_reference_ome_uploads" in resp.text
+        assert "CaGr1" in resp.text
+        staged_files = list((tmp_db_path.parent / "genotype_reference_ome_uploads").glob("selected*.tiff"))
+        assert len(staged_files) == 1
+
     def test_import_ome_genotype_reference_creates_composite_and_channels(self, client, seed_full_dish, tmp_db_path):
         ome_path = tmp_db_path.parent / "source_import.ome.tiff"
         _write_two_channel_ome_tiff(ome_path)

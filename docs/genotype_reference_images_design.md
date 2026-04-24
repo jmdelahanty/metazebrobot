@@ -100,10 +100,13 @@ mCher / mCherry -> Red or Magenta
 For curated MetaZebrobot genotype references, adjust the display in Fiji and export
 a display-ready PNG/JPEG. Do not upload raw OME-TIFFs as genotype reference images.
 
-MetaZebrobot can also generate these display-ready PNGs directly from a
-server-visible OME-TIFF path on the Reference Library page. The narrow first
-implementation expects a simple OME-TIFF with one Z plane, one T point, and one
-plane per channel. It uses embedded OME channel metadata to:
+MetaZebrobot can also generate these display-ready PNGs directly from the
+Reference Library page. Operators can either choose an OME-TIFF from the browser
+or paste a server-visible OME-TIFF path. Browser-selected files are staged in
+`genotype_reference_ome_uploads/` next to the database before preview/import.
+
+The narrow first implementation expects a simple OME-TIFF with one Z plane, one T
+point, and one plane per channel. It uses embedded OME channel metadata to:
 
 - detect channel index, channel name, fluor/reporter label, and display color;
 - suggest channel-to-transgene mappings from the exact genotype;
