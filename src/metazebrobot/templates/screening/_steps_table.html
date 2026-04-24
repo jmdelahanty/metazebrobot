@@ -98,6 +98,53 @@
 </form>
 {% endmacro %}
 
+{% macro existing_destination_form(dish_id, screening_datetime, has_indicator_screen, pigment_screened, destination_dishes) %}
+{% if destination_dishes %}
+<form method="post"
+      hx-post="/screening/{{ dish_id }}/steps/{{ screening_datetime }}/destination"
+      hx-target="#steps-table"
+      hx-swap="innerHTML"
+      style="margin:0.5rem 0 0.25rem">
+    <div class="grid">
+        <label>
+            Allocation Bucket
+            <select name="bucket" required>
+                {% if pigment_screened %}
+                <option value="pigmented_screened">Pigmented</option>
+                {% endif %}
+                {% if has_indicator_screen %}
+                <option value="positive_screened">Positive</option>
+                <option value="negative_screened">Negative</option>
+                {% endif %}
+                <option value="other">Other</option>
+            </select>
+        </label>
+        <label>
+            Destination Dish
+            <select name="destination_dish_id" required>
+                {% for destination in destination_dishes %}
+                <option value="{{ destination.dish_id }}">
+                    {{ destination.dish_id }} · {{ destination.population_label }} · {{ destination.current_fish_count if destination.current_fish_count is not none else "?" }} fish
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Count
+            <input type="number" name="count" min="1" required>
+        </label>
+    </div>
+    <label>
+        Notes
+        <input type="text" name="notes" placeholder="Optional destination allocation note">
+    </label>
+    <button type="submit" class="secondary">Add To Existing Dish</button>
+</form>
+{% else %}
+<p><small>No other active dishes are available for this cross.</small></p>
+{% endif %}
+{% endmacro %}
+
 {% macro quick_remainder_form(dish_id, screening_datetime, remainder_count) %}
 <form method="post"
       hx-post="/screening/{{ dish_id }}/steps/{{ screening_datetime }}/allocations"
@@ -198,7 +245,14 @@
                             {{ allocation_form(dish_id, s.screening_datetime, has_indicator_screen, s.pigment_screened) }}
                         </section>
                         <section class="screening-step-action-panel">
-                            <h6>Create Derived Dish</h6>
+                            <h6>Add To Existing Dish</h6>
+                            <small style="display:block; margin-top:0.1rem">
+                                Move screened fish into an active same-cross destination dish.
+                            </small>
+                            {{ existing_destination_form(dish_id, s.screening_datetime, has_indicator_screen, s.pigment_screened, destination_dishes | default([])) }}
+                        </section>
+                        <section class="screening-step-action-panel">
+                            <h6>Create New Derived Dish</h6>
                             <small style="display:block; margin-top:0.1rem">
                                 Create a derived dish when fish move into a new dish from this step.
                             </small>

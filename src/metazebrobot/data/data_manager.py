@@ -1055,6 +1055,40 @@ class DataManager:
             logger.error(f"Error loading screening step allocations for dish {dish_id}: {e}")
             return {}
 
+    def _extra_incoming_allocation_count(
+        self,
+        conn: sqlite3.Connection,
+        dish_id: str,
+        parent_dish_id: Optional[str],
+        source_screening_datetime: Optional[str],
+        source_screening_bucket: Optional[str],
+        fish_count: int,
+    ) -> int:
+        """Count incoming destination allocations beyond the dish's creation allocation."""
+        rows = conn.execute("""
+            SELECT dish_id, screening_datetime, bucket, count
+            FROM screening_step_allocations
+            WHERE disposition = 'derived_dish'
+              AND COALESCE(destination_dish_id, derived_dish_id) = ?
+        """, (dish_id,)).fetchall()
+
+        incoming_total = sum(int(row["count"] or 0) for row in rows)
+        if incoming_total <= 0:
+            return 0
+
+        creation_match_total = 0
+        if parent_dish_id and source_screening_datetime:
+            for row in rows:
+                if (
+                    row["dish_id"] == parent_dish_id
+                    and row["screening_datetime"] == source_screening_datetime
+                    and (not source_screening_bucket or row["bucket"] == source_screening_bucket)
+                ):
+                    creation_match_total += int(row["count"] or 0)
+
+        creation_count = min(creation_match_total, fish_count or 0)
+        return max(incoming_total - creation_count, 0)
+
     @staticmethod
     def _dish_transgene_source(dish_data: Dict[str, Any]) -> Tuple[str, Optional[str]]:
         """Determine provenance for dish transgene rows."""
@@ -1505,6 +1539,15 @@ class DataManager:
                     # Start with JSON data as base (for backward compatibility)
                     dish_data = json.loads(row['data']) if row['data'] else {}
 
+                    incoming_fish_count = self._extra_incoming_allocation_count(
+                        conn,
+                        dish_id=row['dish_id'],
+                        parent_dish_id=row['parent_dish_id'],
+                        source_screening_datetime=row['source_screening_datetime'],
+                        source_screening_bucket=row['source_screening_bucket'],
+                        fish_count=row['fish_count'] or 0,
+                    )
+
                     # Override with flattened column values (columns are authoritative)
                     dish_data['dish_id'] = row['dish_id']
                     dish_data['cross_id'] = row['cross_id']
@@ -1516,6 +1559,7 @@ class DataManager:
                     dish_data['responsible'] = row['responsible']
                     dish_data['status'] = row['status']
                     dish_data['fish_count'] = row['fish_count']
+                    dish_data['incoming_fish_count'] = incoming_fish_count
                     dish_data['current_fish_count'] = row['current_fish_count']
                     dish_data['species'] = row['species'] or 'Danio rerio'
                     dish_data['sex'] = row['sex'] or 'unknown'
@@ -1679,6 +1723,14 @@ class DataManager:
                 dishes = {}
                 for row in cursor.fetchall():
                     dish_id = row['dish_id']
+                    incoming_fish_count = self._extra_incoming_allocation_count(
+                        conn,
+                        dish_id=dish_id,
+                        parent_dish_id=row['parent_dish_id'],
+                        source_screening_datetime=row['source_screening_datetime'],
+                        source_screening_bucket=row['source_screening_bucket'],
+                        fish_count=row['fish_count'] or 0,
+                    )
 
                     # Reconstruct dish data from columns
                     dish_data = {
@@ -1692,6 +1744,7 @@ class DataManager:
                         'responsible': row['responsible'],
                         'status': row['status'],
                         'fish_count': row['fish_count'],
+                        'incoming_fish_count': incoming_fish_count,
                         'current_fish_count': row['current_fish_count'],
                         'species': row['species'] or 'Danio rerio',
                         'sex': row['sex'] or 'unknown',

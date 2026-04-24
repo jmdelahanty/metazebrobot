@@ -289,6 +289,11 @@ class FishDish(BaseModel):
     responsible: str # Person managing dish day-to-day
     # --- DESCRIPTION CLARIFIED ---
     fish_count: int = Field(..., ge=0, description="Initial fish count when dish record created (can be an estimate)")
+    incoming_fish_count: int = Field(
+        default=0,
+        ge=0,
+        description="Additional fish moved into this dish after the dish record was created",
+    )
     current_fish_count: Optional[int] = Field(
         default=None,
         ge=0,
@@ -493,7 +498,7 @@ class FishDish(BaseModel):
 
     def refresh_screening_state(self) -> None:
         """Recompute per-step before/after counts and the dish's current fish count."""
-        current_count = self.fish_count
+        current_count = self.fish_count + (self.incoming_fish_count or 0)
         if self.screening_results is None:
             self.current_fish_count = current_count
             return

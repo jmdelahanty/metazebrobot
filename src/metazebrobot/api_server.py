@@ -374,6 +374,57 @@ def _load_cross_dish_counts(conn: sqlite3.Connection) -> Dict[str, int]:
     return {r["cross_id"]: r["cnt"] for r in rows}
 
 
+def _load_destination_dish_options(
+    db_path: Path,
+    busy_timeout_ms: int,
+    source_dish: Any,
+) -> List[Dict[str, Any]]:
+    """Load active same-cross dishes that can receive screening-step fish."""
+    cross_id = getattr(source_dish, "cross_id", None)
+    source_dish_id = getattr(source_dish, "dish_id", None)
+    if not cross_id or not source_dish_id:
+        return []
+
+    with _open_readonly_connection(db_path, busy_timeout_ms) as conn:
+        rows = conn.execute("""
+            SELECT
+                dish_id,
+                dish_population_type,
+                current_fish_count,
+                fish_count,
+                genotype
+            FROM dishes
+            WHERE status = 'active'
+              AND cross_id = ?
+              AND dish_id != ?
+            ORDER BY
+                CASE dish_population_type
+                    WHEN 'positive_screened' THEN 0
+                    WHEN 'negative_screened' THEN 1
+                    WHEN 'pigmented_screened' THEN 2
+                    WHEN 'other' THEN 3
+                    ELSE 4
+                END,
+                date_created DESC,
+                dish_id ASC
+        """, (cross_id, source_dish_id)).fetchall()
+
+    options = []
+    for row in rows:
+        population_type = row["dish_population_type"] or "primary"
+        current_count = row["current_fish_count"]
+        if current_count is None:
+            current_count = row["fish_count"]
+        options.append({
+            "dish_id": row["dish_id"],
+            "population_type": population_type,
+            "population_label": population_type.replace("_", " "),
+            "current_fish_count": current_count,
+            "genotype": row["genotype"],
+        })
+    return options
+
+
 def _load_cached_cross_payloads(
     conn: sqlite3.Connection,
     cross_ids: List[str],
@@ -1752,6 +1803,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         indicator_suggestions, default_indicator_value = _screening_indicator_suggestions(
             transgenes, current_step
         )
+        destination_dishes = _load_destination_dish_options(
+            _require_db_path(),
+            app.state.busy_timeout_ms,
+            dish,
+        )
 
         return templates.TemplateResponse(request, "screening/screening_form.html", {
             "dish": dish,
@@ -1766,6 +1822,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "transgenes": transgenes,
             "indicator_suggestions": indicator_suggestions,
             "default_indicator_value": default_indicator_value,
+            "destination_dishes": destination_dishes,
         })
 
     @app.get("/screening/{dish_id}/atlas", response_class=HTMLResponse)
@@ -1797,6 +1854,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return templates.TemplateResponse(request, "screening/_steps_table.html", {
             "steps": steps,
             "dish_id": dish_id,
+            "destination_dishes": _load_destination_dish_options(
+                _require_db_path(),
+                app.state.busy_timeout_ms,
+                dish,
+            ),
         })
 
     @app.post("/screening/{dish_id}/steps", response_class=HTMLResponse)
@@ -1845,6 +1907,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "dish_id": dish_id,
             "flash_message": message,
             "flash_level": "success",
+            "destination_dishes": _load_destination_dish_options(
+                _require_db_path(),
+                app.state.busy_timeout_ms,
+                dish,
+            ) if dish else [],
         })
 
     @app.post("/screening/{dish_id}/steps/{screening_datetime}/allocations", response_class=HTMLResponse)
@@ -1884,6 +1951,51 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "dish_id": dish_id,
             "flash_message": message,
             "flash_level": "success",
+            "destination_dishes": _load_destination_dish_options(
+                _require_db_path(),
+                app.state.busy_timeout_ms,
+                dish,
+            ) if dish else [],
+        })
+
+    @app.post("/screening/{dish_id}/steps/{screening_datetime}/destination", response_class=HTMLResponse)
+    def allocate_screening_step_to_existing_dish(
+        request: Request,
+        dish_id: str,
+        screening_datetime: str,
+        bucket: str = Form(...),
+        count: int = Form(...),
+        destination_dish_id: str = Form(...),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Allocate screening-step fish into an existing same-cross destination dish."""
+        success, message, _ = fish_dish_ctrl.allocate_screening_step_to_existing_dish(
+            source_dish_id=dish_id,
+            screening_datetime=screening_datetime,
+            bucket=bucket,
+            count=count,
+            destination_dish_id=destination_dish_id,
+            notes=notes or None,
+        )
+
+        if not success:
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": message,
+                "level": "error",
+            })
+
+        dish = fish_dish_ctrl.get_dish(dish_id)
+        steps = dish.screening_results.screenings if dish and dish.screening_results else []
+        return templates.TemplateResponse(request, "screening/_steps_table.html", {
+            "steps": steps,
+            "dish_id": dish_id,
+            "flash_message": message,
+            "flash_level": "success",
+            "destination_dishes": _load_destination_dish_options(
+                _require_db_path(),
+                app.state.busy_timeout_ms,
+                dish,
+            ) if dish else [],
         })
 
     @app.post("/screening/{dish_id}/finalize", response_class=HTMLResponse)

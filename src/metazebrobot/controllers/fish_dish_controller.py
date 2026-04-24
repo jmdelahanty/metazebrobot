@@ -508,6 +508,108 @@ class FishDishController:
             )
             return False, f"An unexpected error occurred: {str(e)}", None
 
+    def allocate_screening_step_to_existing_dish(
+        self,
+        source_dish_id: str,
+        screening_datetime: str,
+        bucket: str,
+        count: int,
+        destination_dish_id: str,
+        notes: Optional[str] = None,
+    ) -> Tuple[bool, str, Optional[ScreeningStepAllocation]]:
+        """Move fish from a screening step into an existing same-cross dish."""
+        try:
+            if source_dish_id == destination_dish_id:
+                return False, "Destination dish must be different from the source dish.", None
+
+            source_dish = self.get_dish(source_dish_id)
+            if not source_dish:
+                return False, f"Source dish {source_dish_id} not found", None
+
+            destination_dish = self.get_dish(destination_dish_id)
+            if not destination_dish:
+                return False, f"Destination dish {destination_dish_id} not found", None
+
+            if destination_dish.status != "active":
+                return False, f"Destination dish {destination_dish_id} is not active.", None
+
+            if source_dish.cross_id != destination_dish.cross_id:
+                return False, "Destination dish must have the same cross ID as the source dish.", None
+
+            destination_population = destination_dish.dish_population_type or "primary"
+            compatible_destination_types = {
+                "positive_screened",
+                "negative_screened",
+                "pigmented_screened",
+                "other",
+            }
+            if destination_population in compatible_destination_types and destination_population != bucket:
+                return False, (
+                    f"Destination dish population type ({destination_population}) does not match "
+                    f"allocation bucket ({bucket})."
+                ), None
+
+            allocation = ScreeningStepAllocation(
+                bucket=bucket,
+                disposition="derived_dish",
+                count=count,
+                destination_dish_id=destination_dish_id,
+                notes=notes or None,
+            )
+            source_dish.add_screening_step_allocation(screening_datetime, allocation)
+
+            destination_dish.incoming_fish_count = (destination_dish.incoming_fish_count or 0) + count
+            destination_dish.refresh_screening_state()
+
+            if not data_manager.save_fish_dish(source_dish.model_dump(mode='json', exclude_none=True)):
+                return False, "Failed to save source dish after recording allocation.", None
+
+            if not data_manager.save_fish_dish(destination_dish.model_dump(mode='json', exclude_none=True)):
+                return False, "Failed to save destination dish after updating current count.", None
+
+            data_manager.data_cache['fish_dishes'][source_dish_id] = source_dish.model_dump(
+                mode='json',
+                exclude_none=True,
+            )
+            data_manager.data_cache['fish_dishes'][destination_dish_id] = destination_dish.model_dump(
+                mode='json',
+                exclude_none=True,
+            )
+            logger.info(
+                "Allocated %s fish from %s step %s to existing dish %s",
+                count,
+                source_dish_id,
+                screening_datetime,
+                destination_dish_id,
+            )
+            return True, "Screening fish allocated to existing dish.", allocation
+
+        except ValidationError as e:
+            logger.error(
+                "Validation failed allocating fish from dish %s step %s to %s: %s",
+                source_dish_id,
+                screening_datetime,
+                destination_dish_id,
+                e,
+            )
+            error_details = e.errors()
+            message = (
+                f"Validation Error: {error_details[0]['msg']} (field: {error_details[0]['loc'][0]})"
+                if error_details
+                else str(e)
+            )
+            return False, message, None
+        except Exception as e:
+            logger.error(
+                "Error allocating fish from dish %s step %s to %s: %s",
+                source_dish_id,
+                screening_datetime,
+                destination_dish_id,
+                e,
+                exc_info=True,
+            )
+            return False, f"An unexpected error occurred: {str(e)}", None
+
     def finalize_screening(self, dish_id: str, final_count: int, date_finalized: str) -> Tuple[bool, str]:
         """
         Updates the screening results with the final positive count and date.

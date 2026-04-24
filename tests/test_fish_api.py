@@ -367,6 +367,56 @@ class TestDishSplit:
         assert step["allocations"][0]["destination_dish_id"] == new_id
         assert step["allocations"][0]["derived_dish_id"] == new_id
 
+    def test_allocate_screening_step_to_existing_same_cross_dish(self, client, seed_full_dish):
+        client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 2, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        destination_id = f"{seed_full_dish}_pos1"
+
+        client.post(
+            f"/screening/{seed_full_dish}/steps",
+            data={
+                "screening_datetime": "20260406T09:00:00",
+                "dpf_screened": 5,
+                "indicators_screened": "GFP",
+                "count_screened_this_step": 10,
+            },
+        )
+
+        page = client.get(f"/screening/{seed_full_dish}")
+        assert page.status_code == 200
+        assert "Add To Existing Dish" in page.text
+        assert f'value="{destination_id}"' in page.text
+
+        resp = client.post(
+            f"/screening/{seed_full_dish}/steps/20260406T09:00:00/destination",
+            data={
+                "bucket": "positive_screened",
+                "count": 3,
+                "destination_dish_id": destination_id,
+                "notes": "top up positives",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 200
+        assert "Screening fish allocated to existing dish." in resp.text
+
+        parent = client.get(f"/dishes/{seed_full_dish}").json()["data"]
+        step = parent["screening_results"]["screenings"][0]
+        allocation = step["allocations"][0]
+        assert allocation["bucket"] == "positive_screened"
+        assert allocation["destination_dish_id"] == destination_id
+        assert allocation["derived_dish_id"] == destination_id
+        assert allocation["count"] == 3
+
+        destination = client.get(f"/dishes/{destination_id}").json()["data"]
+        assert destination["fish_count"] == 2
+        assert destination["incoming_fish_count"] == 3
+        assert destination["current_fish_count"] == 5
+
     def test_split_custom_container_type(self, client, seed_full_dish):
         resp = client.post(
             f"/screening/{seed_full_dish}/split",
