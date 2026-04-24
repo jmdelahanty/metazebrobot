@@ -49,6 +49,57 @@ The OME-TIFF files inspected were 16-bit, 2464 x 2056, and sometimes two-channel
 This reinforces keeping raw images on disk and storing only metadata, paths, and
 provenance in the database.
 
+## Manual Fiji OME-TIFF Review
+
+Until MetaZebrobot has an automated staging importer/preview generator, inspect
+raw OME-TIFF screening images manually in Fiji. On Apple Silicon Macs, use the
+macOS arm64 Fiji build.
+
+Recommended Fiji import path:
+
+```text
+Plugins -> Bio-Formats -> Bio-Formats Importer
+```
+
+Recommended import options:
+
+```text
+View stack with: Hyperstack
+Color mode: Colorized
+Autoscale: on
+Use virtual stack: on, for large files or network-mounted storage
+Display OME-XML metadata: optional, useful for debugging channel metadata
+```
+
+The Zeiss Axio Zoom OME-TIFF metadata observed so far includes explicit OME
+`Channel Color` values. Example:
+
+```xml
+<Channel Color="385810687" Fluor="Calcium Green-1" Name="CaGr1" ...>
+<Channel Color="-16187137" Fluor="mCherry" Name="mCher" ...>
+```
+
+Those packed RGBA values decode to green for Calcium Green/CaGr1 and red for
+mCherry/mCher. In Fiji, `Color mode: Composite` may still display the imported
+channels as grayscale, while `Color mode: Colorized` correctly applies the channel
+colors for these files.
+
+If Fiji still displays grayscale, manually assign channel lookup tables:
+
+```text
+Image -> Color -> Channels Tool...
+```
+
+Current manual fallback mapping:
+
+```text
+CaGr1 / Calcium Green-1 -> Green
+mCher / mCherry -> Red or Magenta
+```
+
+For curated MetaZebrobot genotype references, adjust the display in Fiji and export
+a display-ready PNG/JPEG. Do not upload raw OME-TIFFs as genotype reference images.
+
 ## Storage Model
 
 Keep three related but distinct concepts:

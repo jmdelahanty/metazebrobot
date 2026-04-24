@@ -38,6 +38,7 @@
 - [x] Genotype Reference panel reads curated exact-genotype PNG metadata
 - [x] Read-only References page lists curated exact-genotype references
 - [x] References page supports manual genotype reference PNG/JPEG upload
+- [x] Fiji OME-TIFF review workflow documented; Bio-Formats `Colorized` mode applies observed channel colors
 
 ### Daily care web form
 - [x] `/care/` dish list with red highlight for unchecked dishes
