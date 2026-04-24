@@ -5,7 +5,16 @@ from typing import Dict, Any, List, Optional, Tuple, Union, Callable
 from pydantic import BaseModel, Field, field_validator
 
 # Import the updated models
-from ..models.fish_dish import FishDish, QualityCheckData, ScreeningStep, ScreeningResults, DishPopulationType
+from ..models.fish_dish import (
+    FishDish,
+    QualityCheckData,
+    ScreeningStep,
+    ScreeningStepAllocation,
+    ScreeningResults,
+    DishPopulationType,
+    normalize_termination_reason,
+    termination_reason_options_text,
+)
 from ..data.data_manager import data_manager
 from pydantic import ValidationError
 
@@ -192,6 +201,8 @@ class FishDishController:
         fish_count: int,
         container_type: Optional[str] = None,
         notes: Optional[str] = None,
+        source_screening_datetime: Optional[str] = None,
+        source_screening_bucket: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[FishDish]]:
         """
         Creates a new dish derived from a parent dish.
@@ -217,10 +228,24 @@ class FishDishController:
             if fish_count <= 0:
                 return False, "Fish count must be greater than zero.", None
 
+            matched_step = None
+            if source_screening_datetime:
+                steps = parent_dish.screening_results.screenings if parent_dish.screening_results else []
+                matched_step = next(
+                    (step for step in steps if step.screening_datetime == source_screening_datetime),
+                    None,
+                )
+                if not matched_step:
+                    return False, (
+                        f"Screening step {source_screening_datetime} was not found on parent dish "
+                        f"{parent_dish_id}."
+                    ), None
+
             # Generate ID suffix from population type
             suffix_map = {
                 "positive_screened": "_pos",
                 "negative_screened": "_neg",
+                "pigmented_screened": "_pig",
                 "other": "_other",
                 "primary": "_split",
             }
@@ -238,6 +263,16 @@ class FishDishController:
                     return False, msg, None
             logger.debug(f"Generated new derived dish ID: {new_dish_id}")
 
+            default_notes = notes
+            if not default_notes:
+                note_parts = [f"Derived ({population_type}) from {parent_dish_id}"]
+                if matched_step:
+                    note_parts.append(f"screening step {matched_step.screening_datetime}")
+                    if source_screening_bucket:
+                        note_parts.append(f"bucket {source_screening_bucket}")
+                note_parts.append(f"on {datetime.now().strftime('%Y%m%d')}.")
+                default_notes = " ".join(note_parts)
+
             new_dish = FishDish.create_new(
                 dish_id=new_dish_id,
                 cross_id=parent_dish.cross_id,
@@ -249,6 +284,8 @@ class FishDishController:
                 fish_count=fish_count,
                 parent_dish_id=parent_dish_id,
                 dish_population_type=population_type,
+                source_screening_datetime=source_screening_datetime,
+                source_screening_bucket=source_screening_bucket or population_type,
                 species=parent_dish.species,
                 sex=parent_dish.sex,
                 parents=parent_dish.breeding.parents,
@@ -258,12 +295,50 @@ class FishDishController:
                 room=parent_dish.enclosure.room,
                 container_type=container_type or parent_dish.enclosure.container_type,
                 vol_water_total=parent_dish.enclosure.vol_water_total,
-                notes=notes or f"Derived ({population_type}) from {parent_dish_id} on {datetime.now().strftime('%Y%m%d')}.",
+                notes=default_notes,
                 dish_number=None,
             )
 
             # 5. Save the new dish
             if data_manager.save_fish_dish(new_dish.model_dump(mode='json', exclude_none=True)):
+                if matched_step:
+                    try:
+                        parent_dish.add_screening_step_allocation(
+                            matched_step.screening_datetime,
+                            ScreeningStepAllocation(
+                                bucket=source_screening_bucket or population_type,
+                                disposition="derived_dish",
+                                count=fish_count,
+                                destination_dish_id=new_dish_id,
+                                derived_dish_id=new_dish_id,
+                                notes=notes or None,
+                            ),
+                        )
+                        if not data_manager.save_fish_dish(parent_dish.model_dump(mode='json', exclude_none=True)):
+                            logger.error(
+                                "Derived dish %s created, but failed to persist parent allocation on %s",
+                                new_dish_id,
+                                parent_dish_id,
+                            )
+                            return False, (
+                                f"Derived dish {new_dish_id} was created, but recording its screening-step "
+                                f"allocation failed. Please review the parent dish."
+                            ), new_dish
+                        data_manager.data_cache['fish_dishes'][parent_dish_id] = parent_dish.model_dump(
+                            mode='json',
+                            exclude_none=True,
+                        )
+                    except Exception as allocation_error:
+                        logger.error(
+                            "Derived dish %s created, but allocation recording failed: %s",
+                            new_dish_id,
+                            allocation_error,
+                            exc_info=True,
+                        )
+                        return False, (
+                            f"Derived dish {new_dish_id} was created, but its screening-step allocation "
+                            f"could not be recorded: {allocation_error}"
+                        ), new_dish
                 logger.info(f"Successfully created and saved derived dish {new_dish_id}")
                 # Add to cache
                 data_manager.data_cache['fish_dishes'][new_dish_id] = new_dish.model_dump(mode='json', exclude_none=True)
@@ -377,6 +452,62 @@ class FishDishController:
             logger.error(f"Error adding screening step to dish {dish_id}: {str(e)}", exc_info=True)
             return False, f"An unexpected error occurred: {str(e)}", None
 
+    def add_screening_step_allocation(
+        self,
+        dish_id: str,
+        screening_datetime: str,
+        allocation_data: Dict[str, Any],
+    ) -> Tuple[bool, str, Optional[ScreeningStepAllocation]]:
+        """
+        Add an explicit disposition allocation to an existing screening step.
+        """
+        try:
+            dish = self.get_dish(dish_id)
+            if not dish:
+                return False, f"Dish {dish_id} not found", None
+
+            validated_allocation = ScreeningStepAllocation(**allocation_data)
+            dish.add_screening_step_allocation(screening_datetime, validated_allocation)
+
+            if data_manager.save_fish_dish(dish.model_dump(mode='json', exclude_none=True)):
+                data_manager.data_cache['fish_dishes'][dish_id] = dish.model_dump(mode='json', exclude_none=True)
+                logger.info(
+                    "Successfully added screening allocation to dish %s for step %s",
+                    dish_id,
+                    screening_datetime,
+                )
+                return True, "Screening allocation recorded successfully.", validated_allocation
+
+            logger.error(
+                "Failed to save dish %s after adding screening allocation for step %s",
+                dish_id,
+                screening_datetime,
+            )
+            return False, "Failed to save dish after recording screening allocation.", None
+        except ValidationError as e:
+            logger.error(
+                "Validation failed for screening allocation on dish %s step %s: %s",
+                dish_id,
+                screening_datetime,
+                e,
+            )
+            error_details = e.errors()
+            message = (
+                f"Validation Error: {error_details[0]['msg']} (field: {error_details[0]['loc'][0]})"
+                if error_details
+                else str(e)
+            )
+            return False, message, None
+        except Exception as e:
+            logger.error(
+                "Error adding screening allocation to dish %s step %s: %s",
+                dish_id,
+                screening_datetime,
+                e,
+                exc_info=True,
+            )
+            return False, f"An unexpected error occurred: {str(e)}", None
+
     def finalize_screening(self, dish_id: str, final_count: int, date_finalized: str) -> Tuple[bool, str]:
         """
         Updates the screening results with the final positive count and date.
@@ -437,6 +568,13 @@ class FishDishController:
             dish.status = status
 
             if status == "inactive":
+                normalized_reason = normalize_termination_reason(termination_reason)
+                if not normalized_reason:
+                    return False, (
+                        "Termination reason is required and must be one of: "
+                        f"{termination_reason_options_text()}."
+                    )
+
                 # Validate termination_date format if provided
                 if termination_date:
                     try:
@@ -452,7 +590,7 @@ class FishDishController:
                     # Default to today if terminating and no date provided
                     dish.termination_date = datetime.now().strftime("%Y%m%d")
 
-                dish.termination_reason = termination_reason
+                dish.termination_reason = normalized_reason
             else:
                 # Clear termination fields if setting back to active
                 dish.termination_date = None

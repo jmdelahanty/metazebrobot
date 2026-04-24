@@ -328,6 +328,45 @@ class TestDishSplit:
         assert body["dish_population_type"] == "positive_screened"
         assert body["fish_count"] == 10
 
+    def test_split_from_specific_screening_step_tracks_provenance(self, client, seed_full_dish):
+        client.post(
+            f"/screening/{seed_full_dish}/steps",
+            data={
+                "screening_datetime": "20260405T09:00:00",
+                "dpf_screened": 4,
+                "pigment_screened": "true",
+                "count_screened_this_step": 20,
+                "notes": "pigment step",
+            },
+        )
+
+        resp = client.post(
+            f"/screening/{seed_full_dish}/steps/20260405T09:00:00/split",
+            data={
+                "fish_count": 5,
+                "population_type": "pigmented_screened",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+        new_id = f"{seed_full_dish}_pig1"
+        resp2 = client.get(f"/dishes/{new_id}")
+        assert resp2.status_code == 200
+        body = resp2.json()
+        assert body["parent_dish_id"] == seed_full_dish
+        assert body["dish_population_type"] == "pigmented_screened"
+        assert body["source_screening_datetime"] == "20260405T09:00:00"
+        assert body["source_screening_bucket"] == "pigmented_screened"
+        assert body["fish_count"] == 5
+
+        parent = client.get(f"/dishes/{seed_full_dish}").json()["data"]
+        step = parent["screening_results"]["screenings"][0]
+        assert step["allocations"][0]["bucket"] == "pigmented_screened"
+        assert step["allocations"][0]["disposition"] == "derived_dish"
+        assert step["allocations"][0]["destination_dish_id"] == new_id
+        assert step["allocations"][0]["derived_dish_id"] == new_id
+
     def test_split_custom_container_type(self, client, seed_full_dish):
         resp = client.post(
             f"/screening/{seed_full_dish}/split",
@@ -530,6 +569,97 @@ class TestDailyCare:
         assert resp.status_code == 200
         assert "Log Unit Checks" in resp.text
         assert "A1" in resp.text
+
+
+# -------------------------------------------------------------------
+# Dish inventory
+# -------------------------------------------------------------------
+
+
+class TestDishInventory:
+    """Top-level dish inventory web page."""
+
+    def test_dishes_inventory_page(self, client, seed_dish):
+        resp = client.get("/dishes/")
+        assert resp.status_code == 200
+        assert "Dishes" in resp.text
+        assert seed_dish in resp.text
+        assert f'href="/screening/{seed_dish}"' in resp.text
+        assert f'href="/care/{seed_dish}"' in resp.text
+        assert f'href="/dishes/{seed_dish}/fish/"' in resp.text
+        assert f'href="/dishes/{seed_dish}/label"' in resp.text
+
+    def test_dishes_inventory_page_shows_terminate_for_active_dishes(self, client, seed_full_dish):
+        resp = client.get("/dishes/")
+
+        assert resp.status_code == 200
+        assert f'action="/dishes/{seed_full_dish}/terminate"' in resp.text
+        assert 'name="return_status" value="all"' in resp.text
+        assert 'name="termination_reason"' in resp.text
+        assert '<option value="euthanasia">Euthanasia</option>' in resp.text
+        assert '<option value="propagation">Propagation</option>' in resp.text
+        assert "Terminate" in resp.text
+
+    def test_terminate_dish_web_marks_inactive(self, client, seed_full_dish, tmp_db_path):
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/terminate",
+            data={
+                "termination_reason": "euthanasia",
+                "return_status": "active",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/dishes/?status=active&terminated={seed_full_dish}"
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            """
+            SELECT status, termination_date, termination_reason
+            FROM dishes
+            WHERE dish_id = ?
+            """,
+            (seed_full_dish,),
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row[0] == "inactive"
+        assert re.fullmatch(r"\d{8}", row[1])
+        assert row[2] == "euthanasia"
+
+    def test_terminate_dish_web_rejects_unrecognized_reason(self, client, seed_full_dish):
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/terminate",
+            data={
+                "termination_reason": "No embryos remaining",
+                "return_status": "all",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 400
+        assert "Termination reason is required" in resp.text
+
+    def test_inactive_dishes_page_shows_termination_metadata(self, client, seed_full_dish):
+        client.post(
+            f"/dishes/{seed_full_dish}/terminate",
+            data={
+                "termination_reason": "propagation",
+                "return_status": "all",
+            },
+            follow_redirects=False,
+        )
+
+        resp = client.get("/dishes/?status=inactive")
+
+        assert resp.status_code == 200
+        assert seed_full_dish in resp.text
+        assert "inactive" in resp.text
+        assert "Terminated" in resp.text
+        assert "Propagation" in resp.text
+        assert f'action="/dishes/{seed_full_dish}/terminate"' not in resp.text
 
 
 # -------------------------------------------------------------------
@@ -809,6 +939,29 @@ class TestCrossLevelFish:
         items = resp.json()["items"]
         assert "parent_dish_id" in items[0]
         assert "dish_population_type" in items[0]
+
+    def test_cross_fish_web_page_renders_deep_lineage(self, client, seed_full_dish):
+        parent = client.get(f"/dishes/{seed_full_dish}").json()
+        cross_id = parent["cross_id"]
+
+        client.post(
+            f"/screening/{seed_full_dish}/split",
+            data={"fish_count": 5, "population_type": "positive_screened"},
+            follow_redirects=False,
+        )
+        child_id = f"{seed_full_dish}_pos1"
+
+        client.post(
+            f"/screening/{child_id}/split",
+            data={"fish_count": 2, "population_type": "negative_screened"},
+            follow_redirects=False,
+        )
+        grandchild_id = f"{child_id}_neg1"
+
+        resp = client.get(f"/crosses/{cross_id}/fish/")
+        assert resp.status_code == 200
+        assert child_id in resp.text
+        assert grandchild_id in resp.text
 
 
 # -------------------------------------------------------------------

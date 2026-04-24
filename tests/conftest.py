@@ -40,6 +40,8 @@ def tmp_db_path(tmp_path_factory) -> Path:
             responsible TEXT,
             parent_dish_id TEXT,
             dish_population_type TEXT DEFAULT 'primary',
+            source_screening_datetime TEXT,
+            source_screening_bucket TEXT,
             container_type TEXT DEFAULT 'petri_dish',
             notes TEXT,
             room TEXT,
@@ -50,6 +52,7 @@ def tmp_db_path(tmp_path_factory) -> Path:
             breeding_parents TEXT,
             screening_final_positive_count INTEGER,
             screening_date_finalized TEXT,
+            current_fish_count INTEGER,
             termination_date TEXT,
             termination_reason TEXT
         )
@@ -64,6 +67,8 @@ def tmp_db_path(tmp_path_factory) -> Path:
             pigment_screened BOOLEAN DEFAULT FALSE,
             criteria TEXT,
             count_screened_this_step INTEGER,
+            count_before_step INTEGER,
+            count_after_step INTEGER,
             number_kept INTEGER,
             number_removed_pigmented INTEGER,
             number_removed_negative INTEGER,
@@ -78,6 +83,29 @@ def tmp_db_path(tmp_path_factory) -> Path:
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_screening_steps_dish_id
         ON screening_steps(dish_id)
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS screening_step_allocations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dish_id TEXT NOT NULL,
+            screening_datetime TEXT NOT NULL,
+            bucket TEXT NOT NULL,
+            disposition TEXT NOT NULL,
+            count INTEGER NOT NULL,
+            destination_dish_id TEXT,
+            derived_dish_id TEXT,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_screening_step_allocations_dish_step
+        ON screening_step_allocations(dish_id, screening_datetime)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_screening_step_allocations_destination_dish
+        ON screening_step_allocations(destination_dish_id)
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS dish_transgenes (

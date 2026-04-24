@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Dishes{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Dishes</h2>
+    <p>Browse local dish inventory and jump into screening, care, fish, or label workflows.</p>
+</hgroup>
+
+<div class="grid">
+    <input type="search"
+           id="dish-filter"
+           placeholder="Filter by dish ID, cross ID, genotype, or responsible...">
+    <a href="/dishes/new" role="button" class="outline" style="white-space:nowrap">New Dish</a>
+    <a href="/pyrat/crossings/" role="button" class="outline secondary" style="white-space:nowrap">PyRAT Crossings</a>
+</div>
+
+{% if flash_message is defined and flash_message %}
+<div class="flash flash-{{ flash_level or 'success' }}" role="alert">
+    {{ flash_message }}
+</div>
+{% endif %}
+
+<p>
+    <strong>{{ summary.total }}</strong> dish{{ "es" if summary.total != 1 }}
+    · <a href="/dishes/"{% if status_filter == "all" %}><strong>All</strong>{% else %}>All{% endif %}</a>
+    · <a href="/dishes/?status=active"{% if status_filter == "active" %}><strong>Active</strong>{% else %}>Active{% endif %}</a>
+    · <a href="/dishes/?status=inactive"{% if status_filter == "inactive" %}><strong>Inactive</strong>{% else %}>Inactive{% endif %}</a>
+    · <small>{{ summary.active }} active / {{ summary.inactive }} inactive</small>
+</p>
+
+{% if dishes %}
+<figure>
+<table role="grid" class="screening-steps-table">
+    <thead>
+        <tr>
+            <th class="sortable">Dish</th>
+            <th class="sortable">Cross</th>
+            <th class="sortable">Genotype</th>
+            <th class="sortable">DOF</th>
+            <th class="sortable">DPF</th>
+            <th class="sortable">Fish</th>
+            <th class="sortable">Responsible</th>
+            <th class="sortable">Screening</th>
+            <th class="sortable">Status</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in dishes %}
+        <tr data-dish-row="1"
+            data-search="{{ d.search_text }}"
+            {% if d.status != "active" %}style="opacity:0.72"{% endif %}>
+            <td>
+                <strong>{{ d.dish_id }}</strong>
+                <br>
+                <small>
+                    {{ d.population_label }}
+                    {% if d.parent_dish_id %}
+                        · from {{ d.parent_dish_id }}
+                    {% endif %}
+                </small>
+            </td>
+            <td>{{ d.cross_id or "-" }}</td>
+            <td>{{ d.genotype or "-" }}</td>
+            <td>{{ d.dof or "-" }}</td>
+            <td>{{ d.dpf if d.dpf is not none else "?" }}</td>
+            <td>
+                {{ d.current_fish_count if d.current_fish_count is not none else d.fish_count if d.fish_count is not none else "-" }}
+                {% if d.current_fish_count is not none and d.fish_count is not none and d.current_fish_count != d.fish_count %}
+                    <br><small>opened at {{ d.fish_count }}</small>
+                {% endif %}
+                {% if d.registered_fish_count %}
+                    <br><small>{{ d.registered_fish_count }} registered</small>
+                {% endif %}
+            </td>
+            <td>{{ d.responsible or "-" }}</td>
+            <td>
+                {{ d.screening_status }}
+                {% if d.step_count %}
+                    <br><small>{{ d.step_count }} step{{ "s" if d.step_count != 1 }}</small>
+                {% endif %}
+            </td>
+            <td>
+                {{ d.status or "-" }}
+                {% if d.termination_date_display %}
+                    <br><small>Terminated {{ d.termination_date_display }}</small>
+                {% endif %}
+                {% if d.termination_reason_display %}
+                    <br><small>{{ d.termination_reason_display }}</small>
+                {% endif %}
+                {% if d.last_check %}
+                    <br><small>Last check {{ d.last_check }}</small>
+                {% endif %}
+            </td>
+            <td style="white-space:nowrap">
+                <a href="/screening/{{ d.dish_id }}" role="button" class="outline">Screen</a>
+                <a href="/care/{{ d.dish_id }}" role="button" class="outline secondary" style="margin-left:0.25rem">Care</a>
+                <a href="/dishes/{{ d.dish_id }}/fish/" role="button" class="outline secondary" style="margin-left:0.25rem">Fish</a>
+                <a href="/dishes/{{ d.dish_id }}/label" target="_blank" role="button" class="outline secondary" style="margin-left:0.25rem">Label</a>
+                {% if d.status == "active" %}
+                <form method="post"
+                      action="/dishes/{{ d.dish_id }}/terminate"
+                      style="display:inline"
+                      onsubmit="return confirm('Terminate dish {{ d.dish_id }}?');">
+                    <input type="hidden" name="return_status" value="{{ status_filter }}">
+                    <select name="termination_reason"
+                            aria-label="Termination reason for {{ d.dish_id }}"
+                            style="display:inline-block; width:auto; margin-left:0.25rem; margin-bottom:0">
+                        {% for reason in termination_reason_options %}
+                        <option value="{{ reason.value }}">{{ reason.label }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="outline secondary" style="margin-left:0.25rem; margin-bottom:0; width:auto">Terminate</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p><em>No dishes found for this filter.</em></p>
+{% endif %}
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    var input = document.getElementById("dish-filter");
+    if (!input) {
+        return;
+    }
+    var rows = Array.from(document.querySelectorAll("[data-dish-row]"));
+    input.addEventListener("input", function() {
+        var query = input.value.trim().toLowerCase();
+        rows.forEach(function(row) {
+            var haystack = row.dataset.search || "";
+            row.style.display = !query || haystack.indexOf(query) !== -1 ? "" : "none";
+        });
+    });
+});
+</script>
+{% endblock %}

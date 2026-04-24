@@ -1,3 +1,117 @@
+{% macro bucket_label(bucket) -%}
+    {%- if bucket == "remaining_in_parent" -%}Remaining in Parent
+    {%- elif bucket == "positive_screened" -%}Positive
+    {%- elif bucket == "negative_screened" -%}Negative
+    {%- elif bucket == "pigmented_screened" -%}Pigmented
+    {%- elif bucket == "other" -%}Other
+    {%- else -%}{{ bucket }}
+    {%- endif -%}
+{%- endmacro %}
+
+{% macro disposition_label(disposition) -%}
+    {%- if disposition == "remain_parent" -%}Remain in Parent
+    {%- elif disposition == "derived_dish" -%}Derived Dish
+    {%- elif disposition == "discarded" -%}Discarded
+    {%- else -%}{{ disposition }}
+    {%- endif -%}
+{%- endmacro %}
+
+{% macro allocation_form(dish_id, screening_datetime, has_indicator_screen, pigment_screened) %}
+<form method="post"
+      hx-post="/screening/{{ dish_id }}/steps/{{ screening_datetime }}/allocations"
+      hx-target="#steps-table"
+      hx-swap="innerHTML"
+      style="margin:0.5rem 0 1rem">
+    <div class="grid">
+        <label>
+            Bucket
+            <select name="bucket" required>
+                <option value="remaining_in_parent">Remaining in Parent</option>
+                {% if pigment_screened %}
+                <option value="pigmented_screened">Pigmented</option>
+                {% endif %}
+                {% if has_indicator_screen %}
+                <option value="positive_screened">Positive</option>
+                <option value="negative_screened">Negative</option>
+                {% endif %}
+                <option value="other">Other</option>
+            </select>
+        </label>
+        <label>
+            Disposition
+            <select name="disposition" required>
+                <option value="remain_parent">Remain in Parent</option>
+                <option value="discarded">Discarded</option>
+            </select>
+        </label>
+        <label>
+            Count
+            <input type="number" name="count" min="1" required>
+        </label>
+    </div>
+    <label>
+        Notes
+        <input type="text" name="notes" placeholder="Optional disposition note">
+    </label>
+    <button type="submit" class="secondary">Record Allocation</button>
+</form>
+{% endmacro %}
+
+{% macro split_form(dish_id, screening_datetime, has_indicator_screen, pigment_screened) %}
+<form method="post"
+      action="/screening/{{ dish_id }}/steps/{{ screening_datetime }}/split"
+      style="margin:0.5rem 0 0.25rem">
+    <div class="grid">
+        <label>
+            Derived Dish Bucket
+            <select name="population_type" required>
+                {% if pigment_screened %}
+                <option value="pigmented_screened">Pigmented</option>
+                {% endif %}
+                {% if has_indicator_screen %}
+                <option value="positive_screened">Positive</option>
+                <option value="negative_screened">Negative</option>
+                {% endif %}
+                <option value="other">Other</option>
+            </select>
+        </label>
+        <label>
+            Count
+            <input type="number" name="fish_count" min="1" required>
+        </label>
+        <label>
+            Container Type
+            <select name="container_type">
+                <option value="">Same as parent</option>
+                <option value="petri_dish">Petri Dish</option>
+                <option value="beaker">Beaker</option>
+                <option value="well_plate">Well Plate</option>
+                <option value="tank">Tank</option>
+            </select>
+        </label>
+    </div>
+    <label>
+        Notes
+        <input type="text" name="notes" placeholder="Optional derived dish note">
+    </label>
+    <button type="submit" class="secondary">Create Derived Dish</button>
+</form>
+{% endmacro %}
+
+{% macro quick_remainder_form(dish_id, screening_datetime, remainder_count) %}
+<form method="post"
+      hx-post="/screening/{{ dish_id }}/steps/{{ screening_datetime }}/allocations"
+      hx-target="#steps-table"
+      hx-swap="innerHTML"
+      style="margin:0.75rem 0 1rem">
+    <input type="hidden" name="bucket" value="remaining_in_parent">
+    <input type="hidden" name="disposition" value="remain_parent">
+    <input type="hidden" name="count" value="{{ remainder_count }}">
+    <input type="hidden" name="notes" value="Recorded remaining fish in parent dish">
+    <button type="submit">Record {{ remainder_count }} Remaining In Parent</button>
+</form>
+{% endmacro %}
+
 {% if flash_message is defined and flash_message %}
 <div class="flash flash-{{ flash_level }}" role="alert">
     {{ flash_message }}
@@ -13,26 +127,86 @@
             <th>DPF</th>
             <th>Indicators</th>
             <th>Pigment?</th>
+            <th>Before</th>
             <th>Screened</th>
-            <th>Kept</th>
-            <th>Removed</th>
+            <th>After</th>
+            <th>Allocations</th>
+            <th>Unallocated</th>
             <th>Tricaine</th>
             <th>Notes</th>
         </tr>
     </thead>
     <tbody>
         {% for s in steps %}
-        {% set removed = (s.number_removed_pigmented or 0) + (s.number_removed_negative or 0) + (s.number_removed_other or 0) %}
-        <tr>
+        {% set has_indicator_screen = s.indicators_screened and (s.indicators_screened | length > 0) %}
+        <tr id="step-{{ loop.index }}">
             <td>{{ s.screening_datetime }}</td>
             <td>{{ s.dpf_screened }}</td>
             <td>{{ s.indicators_screened | join(", ") if s.indicators_screened else "-" }}</td>
             <td>{{ "Yes" if s.pigment_screened else "No" }}</td>
+            <td>{{ s.count_before_step if s.count_before_step is not none else "-" }}</td>
             <td>{{ s.count_screened_this_step }}</td>
-            <td>{{ s.number_kept }}</td>
-            <td>{{ removed if removed > 0 else "-" }}</td>
+            <td>{{ s.count_after_step if s.count_after_step is not none else "-" }}</td>
+            <td>
+                {% if s.allocations %}
+                <ul style="margin:0; padding-left:1rem">
+                    {% for allocation in s.allocations %}
+                    <li>
+                        <strong>{{ bucket_label(allocation.bucket) }}</strong>:
+                        {{ allocation.count }}
+                        <span style="opacity:0.8">({{ disposition_label(allocation.disposition) }})</span>
+                        {% set destination_dish_id = allocation.destination_dish_id or allocation.derived_dish_id %}
+                        {% if destination_dish_id %}
+                        <a href="/screening/{{ destination_dish_id }}">{{ destination_dish_id }}</a>
+                        {% endif %}
+                        {% if allocation.notes %}
+                        <br><small>{{ allocation.notes }}</small>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                -
+                {% endif %}
+            </td>
+            <td>
+                {% if s.unallocated_count > 0 %}
+                <strong>{{ s.unallocated_count }}</strong>
+                {% else %}
+                0
+                {% endif %}
+            </td>
             <td>{{ "Yes" if s.tricaine_used else "No" }}</td>
             <td>{{ s.notes or "-" }}</td>
+        </tr>
+        <tr class="screening-step-detail-row">
+            <td colspan="11">
+                <details {% if s.unallocated_count > 0 %}open{% endif %}>
+                    <summary><strong>Manage Step Outcomes</strong></summary>
+                    <div class="screening-step-action-grid">
+                        <section class="screening-step-action-panel">
+                            <h6>Allocate Outcomes</h6>
+                            <small style="display:block; margin-top:0.1rem">
+                                Use explicit allocations for fish that remain in the parent dish or are discarded.
+                            </small>
+                            {% if s.unallocated_count > 0 %}
+                            <small style="display:block; margin-top:0.6rem">
+                                This step still has <strong>{{ s.unallocated_count }}</strong> fish unallocated.
+                            </small>
+                            {{ quick_remainder_form(dish_id, s.screening_datetime, s.unallocated_count) }}
+                            {% endif %}
+                            {{ allocation_form(dish_id, s.screening_datetime, has_indicator_screen, s.pigment_screened) }}
+                        </section>
+                        <section class="screening-step-action-panel">
+                            <h6>Create Derived Dish</h6>
+                            <small style="display:block; margin-top:0.1rem">
+                                Create a derived dish when fish move into a new dish from this step.
+                            </small>
+                            {{ split_form(dish_id, s.screening_datetime, has_indicator_screen, s.pigment_screened) }}
+                        </section>
+                    </div>
+                </details>
+            </td>
         </tr>
         {% endfor %}
     </tbody>
@@ -40,45 +214,4 @@
 </figure>
 {% else %}
 <p><em>No screening steps recorded yet.</em></p>
-{% endif %}
-
-{% if steps and dish_id is defined %}
-<details>
-    <summary><strong>Create Derived Dish</strong></summary>
-    <p>Move fish from this dish into a new container after screening.</p>
-    <form method="post" action="/screening/{{ dish_id }}/split">
-        <div class="grid">
-            <label>
-                Fish Count
-                <input type="number" name="fish_count" min="1" required
-                       placeholder="How many fish go into the new dish">
-            </label>
-            <label>
-                Container Type
-                <select name="container_type">
-                    <option value="">Same as parent</option>
-                    <option value="petri_dish">Petri Dish</option>
-                    <option value="beaker">Beaker</option>
-                    <option value="well_plate">Well Plate</option>
-                    <option value="tank">Tank</option>
-                </select>
-            </label>
-        </div>
-        <div class="grid">
-            <label>
-                Population Type
-                <select name="population_type">
-                    <option value="positive_screened">Positive (screened)</option>
-                    <option value="negative_screened">Negative (screened)</option>
-                    <option value="other">Other</option>
-                </select>
-            </label>
-            <label>
-                Notes
-                <input type="text" name="notes" placeholder="(optional)">
-            </label>
-        </div>
-        <button type="submit" class="secondary">Create Derived Dish</button>
-    </form>
-</details>
 {% endif %}

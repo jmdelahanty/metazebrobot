@@ -30,7 +30,12 @@
             <td>{{ d.dish_id }}</td>
             <td>{{ d.genotype }}</td>
             <td>{{ d.dpf if d.dpf is not none else "?" }}</td>
-            <td>{{ d.fish_count }}</td>
+            <td>
+                {{ d.current_fish_count if d.current_fish_count is not none else d.fish_count }}
+                {% if d.current_fish_count is not none and d.current_fish_count != d.fish_count %}
+                    <br><small>opened at {{ d.fish_count }}</small>
+                {% endif %}
+            </td>
             <td>{{ d.responsible }}</td>
             <td>{{ d.step_count }}</td>
             <td>

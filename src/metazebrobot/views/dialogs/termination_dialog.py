@@ -10,9 +10,14 @@ from datetime import datetime
 from typing import List, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QComboBox, QDateEdit, QLineEdit, QPushButton
+    QLabel, QComboBox, QDateEdit, QPushButton
 )
 from PySide6.QtCore import QDate, Qt
+
+from ...models.fish_dish import (
+    TERMINATION_REASON_OPTIONS,
+    normalize_termination_reason,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +70,9 @@ class TerminationDialog(QDialog):
         form_layout.addRow("Termination Date:", self.termination_date)
 
         # Termination reason (only enabled if status is inactive)
-        self.termination_reason = QLineEdit()
-        self.termination_reason.setPlaceholderText("Enter reason for termination...")
+        self.termination_reason = QComboBox()
+        for reason in TERMINATION_REASON_OPTIONS:
+            self.termination_reason.addItem(reason["label"], reason["value"])
         self.termination_reason.setEnabled(False)
         form_layout.addRow("Termination Reason:", self.termination_reason)
 
@@ -112,7 +118,7 @@ class TerminationDialog(QDialog):
         return {
             "status": status,
             "termination_date": self.termination_date.date().toString("yyyyMMdd") if status == "inactive" else None,
-            "termination_reason": self.termination_reason.text() if status == "inactive" else None
+            "termination_reason": self.termination_reason.currentData() if status == "inactive" else None
         }
         
     def set_data(self, status, termination_date=None, termination_reason=None):
@@ -139,10 +145,12 @@ class TerminationDialog(QDialog):
         else:
             self.termination_date.setDate(QDate.currentDate())
             
-        if termination_reason:
-            self.termination_reason.setText(termination_reason)
+        canonical_reason = normalize_termination_reason(termination_reason)
+        if canonical_reason:
+            index = self.termination_reason.findData(canonical_reason)
+            self.termination_reason.setCurrentIndex(index if index >= 0 else 0)
         else:
-            self.termination_reason.clear()
+            self.termination_reason.setCurrentIndex(0)
             
         # Update UI state
         self.handle_status_change(status)

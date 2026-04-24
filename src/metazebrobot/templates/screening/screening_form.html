@@ -4,9 +4,29 @@
 {% block content %}
 <hgroup>
     <h2>{{ dish.dish_id }}</h2>
-    <p>{{ dish.genotype }} &mdash; {{ dish.fish_count }} fish &mdash; DPF {{ dpf if dpf is not none else "?" }}</p>
+    <p>
+        {{ dish.genotype }}
+        &mdash; {{ dish.current_fish_count if dish.current_fish_count is not none else dish.fish_count }} current fish
+        {% if dish.current_fish_count is not none and dish.current_fish_count != dish.fish_count %}
+            <small>(opened at {{ dish.fish_count }})</small>
+        {% endif %}
+        &mdash; DPF {{ dpf if dpf is not none else "?" }}
+    </p>
 </hgroup>
 {% include "_transgenes.html" %}
+
+<details
+    class="protocol-box"
+    hx-get="/screening/{{ dish.dish_id }}/atlas"
+    hx-trigger="toggle once"
+    hx-target="#atlas-reference"
+    hx-swap="innerHTML"
+>
+    <summary><strong>Atlas Reference</strong> <small>(mapzebrain, 6 dpf larval brain)</small></summary>
+    <div id="atlas-reference">
+        <p><em>Loading atlas matches...</em></p>
+    </div>
+</details>
 
 {# Protocol guidance #}
 {% if protocol %}
@@ -37,29 +57,9 @@
 </details>
 {% endif %}
 
-{# Atlas reference images from mapzebrain #}
-{% if atlas_lines %}
-<details class="protocol-box">
-    <summary><strong>Atlas Reference</strong> <small>(mapzebrain, 6 dpf larval brain)</small></summary>
-    <div class="indicator-images">
-        {% for line in atlas_lines %}
-        <figure class="atlas-thumb">
-            <img src="{{ line.url }}" alt="{{ line.display_name }}" loading="lazy">
-            <figcaption>{{ line.display_name }}</figcaption>
-        </figure>
-        {% endfor %}
-    </div>
-    <small><a href="https://mapzebrain.org" target="_blank" rel="noopener">Browse full atlas on mapzebrain.org</a></small>
-</details>
-{% elif not atlas_catalog_available %}
-<details class="protocol-box">
-    <summary><strong>Atlas Reference</strong> <small>(unavailable)</small></summary>
-    <p><em>Could not load the mapzebrain atlas catalog. Check your internet connection and restart the server to try again.</em></p>
-</details>
-{% endif %}
-
 {# Existing steps #}
 <h3>Screening Steps</h3>
+<p><small>Record the screening event first. Then use each step row to assign explicit outcomes, keep fish in the parent dish, discard them, or create derived dishes from that step.</small></p>
 <div id="steps-table">
     {% include "screening/_steps_table.html" %}
 </div>
@@ -160,28 +160,10 @@
                 <input type="number" name="count_screened_this_step" min="0" required>
             </label>
             <label>
-                Number Kept
-                <input type="number" name="number_kept" min="0" required>
+                <span>Outcome Allocation</span>
+                <small>This is recorded after the step is saved.</small>
             </label>
         </div>
-
-        <details>
-            <summary>Removal Details</summary>
-            <div class="grid">
-                <label>
-                    Removed (Pigmented)
-                    <input type="number" name="number_removed_pigmented" min="0">
-                </label>
-                <label>
-                    Removed (Negative)
-                    <input type="number" name="number_removed_negative" min="0">
-                </label>
-                <label>
-                    Removed (Other)
-                    <input type="number" name="number_removed_other" min="0">
-                </label>
-            </div>
-        </details>
 
         <label>
             <input type="checkbox" name="tricaine_used" value="true">

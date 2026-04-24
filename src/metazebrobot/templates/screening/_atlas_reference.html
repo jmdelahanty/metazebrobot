@@ -1,0 +1,15 @@
+{% if atlas_lines %}
+<div class="indicator-images">
+    {% for line in atlas_lines %}
+    <figure class="atlas-thumb">
+        <img src="{{ line.url }}" alt="{{ line.display_name }}" loading="lazy">
+        <figcaption>{{ line.display_name }}</figcaption>
+    </figure>
+    {% endfor %}
+</div>
+<small><a href="https://mapzebrain.org" target="_blank" rel="noopener">Browse full atlas on mapzebrain.org</a></small>
+{% elif atlas_catalog_available %}
+<p><em>No mapzebrain matches found for parsed constructs.</em></p>
+{% else %}
+<p><em>Could not load the mapzebrain atlas catalog. Check your internet connection and try again.</em></p>
+{% endif %}

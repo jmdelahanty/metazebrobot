@@ -12,6 +12,7 @@ from metazebrobot.models.fish_dish import (
     FishDish,
     QualityCheckData,
     ScreeningStep,
+    ScreeningStepAllocation,
 )
 from metazebrobot.models.pyrat_crossing import PyRATCrossing
 
@@ -46,13 +47,23 @@ class TestScreeningStep:
         pigment_screened=False,
         criteria="fluorescence",
         count_screened_this_step=20,
-        number_kept=12,
+        allocations=[
+            {
+                "bucket": "positive_screened",
+                "disposition": "derived_dish",
+                "count": 12,
+                "destination_dish_id": "C1_1_pos1",
+            }
+        ],
     )
 
     def test_valid_step(self):
         step = ScreeningStep(**self.VALID_STEP)
-        assert step.number_kept == 12
+        assert step.total_allocated_count == 12
         assert step.indicators_screened == ["GFP"]
+        assert step.unallocated_count == 8
+        assert step.allocations[0].destination_dish_id == "C1_1_pos1"
+        assert step.allocations[0].derived_dish_id == "C1_1_pos1"
 
     def test_pigment_only_step(self):
         data = {**self.VALID_STEP, "indicators_screened": [], "pigment_screened": True}
@@ -71,8 +82,8 @@ class TestScreeningStep:
         with pytest.raises(ValidationError):
             ScreeningStep(**data)
 
-    def test_negative_number_kept(self):
-        data = {**self.VALID_STEP, "number_kept": -5}
+    def test_over_allocated_step(self):
+        data = {**self.VALID_STEP, "allocations": [{"bucket": "other", "disposition": "discarded", "count": 25}]}
         with pytest.raises(ValidationError):
             ScreeningStep(**data)
 
@@ -86,10 +97,37 @@ class TestScreeningStep:
         with pytest.raises(ValidationError, match="screening_datetime is required"):
             ScreeningStep(**data)
 
-    def test_negative_removed_pigmented(self):
-        data = {**self.VALID_STEP, "number_removed_pigmented": -1}
+    def test_invalid_derived_dish_allocation(self):
+        data = {
+            **self.VALID_STEP,
+            "allocations": [{"bucket": "positive_screened", "disposition": "derived_dish", "count": 3}],
+        }
         with pytest.raises(ValidationError):
             ScreeningStep(**data)
+
+
+class TestScreeningStepAllocation:
+    """Validate ScreeningStepAllocation constraints."""
+
+    def test_non_derived_allocation_rejects_child_id(self):
+        with pytest.raises(ValidationError):
+            ScreeningStepAllocation(
+                bucket="remaining_in_parent",
+                disposition="remain_parent",
+                count=3,
+                destination_dish_id="should-not-exist",
+            )
+
+    def test_legacy_derived_dish_id_populates_destination(self):
+        allocation = ScreeningStepAllocation(
+            bucket="positive_screened",
+            disposition="derived_dish",
+            count=3,
+            derived_dish_id="legacy_child",
+        )
+
+        assert allocation.destination_dish_id == "legacy_child"
+        assert allocation.derived_dish_id == "legacy_child"
 
 
 class TestEnclosure:
@@ -135,7 +173,7 @@ class TestFishDish:
             )
 
     def test_valid_population_types(self):
-        for pt in ("primary", "negative_screened", "positive_screened", "other"):
+        for pt in ("primary", "negative_screened", "positive_screened", "pigmented_screened", "other"):
             dish = FishDish(
                 dish_id="X",
                 date_created="20260401",
@@ -149,6 +187,95 @@ class TestFishDish:
                 dish_population_type=pt,
             )
             assert dish.dish_population_type == pt
+
+    def test_screening_step_count_history_updates_current_fish_count(self):
+        dish = FishDish.create_new(
+            cross_id="C1",
+            dish_number=1,
+            genotype="Tg(elavl3:GRAB-5HT)",
+            responsible="jd",
+            fish_count=41,
+            dof="20260301",
+        )
+        dish.add_screening_step(ScreeningStep(
+            screening_datetime="20260401T09:00:00",
+            dpf_screened=6,
+            indicators_screened=["GRAB-5HT"],
+            pigment_screened=True,
+            criteria="pigment",
+            count_screened_this_step=41,
+        ))
+        dish.add_screening_step_allocation(
+            "20260401T09:00:00",
+            ScreeningStepAllocation(
+                bucket="pigmented_screened",
+                disposition="derived_dish",
+                count=11,
+                destination_dish_id="C1_1_pig1",
+            ),
+        )
+        step = dish.screening_results.screenings[0]
+        assert step.count_before_step == 41
+        assert step.count_after_step == 30
+        assert dish.current_fish_count == 30
+
+    def test_remain_parent_allocation_does_not_reduce_current_fish_count(self):
+        dish = FishDish.create_new(
+            cross_id="C1",
+            dish_number=1,
+            genotype="wt",
+            responsible="jd",
+            fish_count=20,
+            dof="20260301",
+        )
+        dish.add_screening_step(ScreeningStep(
+            screening_datetime="20260401T09:00:00",
+            dpf_screened=6,
+            indicators_screened=[],
+            pigment_screened=True,
+            criteria="pigment",
+            count_screened_this_step=20,
+        ))
+        dish.add_screening_step_allocation(
+            "20260401T09:00:00",
+            ScreeningStepAllocation(
+                bucket="remaining_in_parent",
+                disposition="remain_parent",
+                count=20,
+            ),
+        )
+        step = dish.screening_results.screenings[0]
+        assert step.count_before_step == 20
+        assert step.count_after_step == 20
+        assert dish.current_fish_count == 20
+
+    def test_terminate_uses_standard_reason_categories(self):
+        dish = FishDish.create_new(
+            cross_id="C1",
+            dish_number=1,
+            genotype="wt",
+            responsible="jd",
+            fish_count=20,
+            dof="20260301",
+        )
+
+        dish.terminate("aquatics_propagation_handoff")
+
+        assert dish.status == "inactive"
+        assert dish.termination_reason == "propagation"
+
+    def test_terminate_rejects_nonstandard_reason(self):
+        dish = FishDish.create_new(
+            cross_id="C1",
+            dish_number=1,
+            genotype="wt",
+            responsible="jd",
+            fish_count=20,
+            dof="20260301",
+        )
+
+        with pytest.raises(ValueError, match="Termination reason is required"):
+            dish.terminate("No embryos remaining")
 
     def test_invalid_dof_format(self):
         with pytest.raises(ValidationError, match="Invalid date format"):

@@ -7,10 +7,11 @@
     <p>{{ total_fish }} fish across {{ total_dishes }} dish{{ "es" if total_dishes != 1 }}</p>
 </hgroup>
 
-{# Macro: render a fish table for a single dish #}
-{% macro dish_fish_table(dish, fish_list, indent=false) %}
-<div{% if indent %} style="margin-left: 1.5rem; border-left: 3px solid var(--pico-muted-border-color); padding-left: 1rem;"{% endif %}>
-    <details{% if fish_list %} open{% endif %}>
+{% macro dish_fish_table(node, depth=0) %}
+{% set dish = node.dish %}
+{% set fish_list = node.fish %}
+<div{% if depth > 0 %} style="margin-left: {{ depth * 1.5 }}rem; border-left: 3px solid var(--pico-muted-border-color); padding-left: 1rem;"{% endif %}>
+    <details{% if fish_list or node.children %} open{% endif %}>
         <summary>
             <strong>{{ dish.dish_id }}</strong>
             {% if dish.dish_population_type and dish.dish_population_type != "primary" %}
@@ -18,6 +19,12 @@
             {% endif %}
             &mdash; {{ (fish_list | length) if fish_list else 0 }} fish
             {% if dish.status == "inactive" %}<small>[inactive]</small>{% endif %}
+            {% if dish.source_screening_bucket %}
+                <small>· from {{ dish.source_screening_bucket | replace("_", " ") }}</small>
+            {% endif %}
+            {% if dish.source_screening_datetime %}
+                <small>· step {{ dish.source_screening_datetime }}</small>
+            {% endif %}
         </summary>
         {% if fish_list %}
         <table role="grid" class="screening-steps-table">
@@ -47,31 +54,22 @@
         {% else %}
         <p><small>No fish registered on this dish.</small></p>
         {% endif %}
+        {% if node.cycle_detected %}
+        <p><small>Cycle detected in dish lineage. Child traversal stopped.</small></p>
+        {% endif %}
+        {% if node.children %}
+            {% for child in node.children %}
+                {{ dish_fish_table(child, depth + 1) }}
+            {% endfor %}
+        {% endif %}
         <p><a href="/dishes/{{ dish.dish_id }}/fish/">Manage fish for {{ dish.dish_id }} &rarr;</a></p>
     </details>
 </div>
 {% endmacro %}
 
-{% if primary_dishes or children_of %}
-    {% for dish in primary_dishes %}
-        {# Render the primary dish #}
-        {{ dish_fish_table(dish, fish_by_dish.get(dish.dish_id, [])) }}
-
-        {# Render any derived (child) dishes indented beneath their parent #}
-        {% if dish.dish_id in children_of %}
-            {% for child in children_of[dish.dish_id] %}
-                {{ dish_fish_table(child, fish_by_dish.get(child.dish_id, []), indent=true) }}
-            {% endfor %}
-        {% endif %}
-    {% endfor %}
-
-    {# Orphan derived dishes whose parent isn't in this cross (shouldn't happen, but be safe) #}
-    {% for parent_id, children in children_of.items() %}
-        {% if parent_id not in dish_info %}
-            {% for child in children %}
-                {{ dish_fish_table(child, fish_by_dish.get(child.dish_id, []), indent=true) }}
-            {% endfor %}
-        {% endif %}
+{% if dish_tree %}
+    {% for node in dish_tree %}
+        {{ dish_fish_table(node) }}
     {% endfor %}
 {% else %}
 <p>No dishes found for this cross.</p>

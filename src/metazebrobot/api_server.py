@@ -21,6 +21,7 @@ from fastapi.templating import Jinja2Templates
 
 from .controllers.fish_dish_controller import FishDishController
 from .data.data_manager import data_manager
+from .models.fish_dish import TERMINATION_REASON_OPTIONS, termination_reason_label
 from .utils.label_generator import generate_dish_label
 from .utils.pyrat_credentials import get_pyrat_api_credentials
 from .utils.pyrat_frontend_client import (
@@ -336,6 +337,33 @@ ORDER BY active_dishes DESC, c.cross_id DESC
 LIMIT 100"""
     ).fetchall()
     return [r["cross_id"] for r in rows]
+
+
+def _next_dish_number_for_cross(conn: sqlite3.Connection, cross_id: Optional[str]) -> int:
+    """Return the next primary dish number for a cross."""
+    if not cross_id:
+        return 1
+
+    try:
+        rows = conn.execute(
+            "SELECT dish_id FROM dishes WHERE cross_id = ?",
+            (cross_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return 1
+
+    prefix = f"{cross_id}_"
+    dish_numbers: List[int] = []
+    for row in rows:
+        dish_id = row["dish_id"] or ""
+        if not dish_id.startswith(prefix):
+            continue
+
+        suffix = dish_id[len(prefix):]
+        if suffix.isdigit():
+            dish_numbers.append(int(suffix))
+
+    return max(dish_numbers, default=0) + 1
 
 
 def _load_cross_dish_counts(conn: sqlite3.Connection) -> Dict[str, int]:
@@ -762,6 +790,13 @@ async def lifespan(app: FastAPI):
                     END
                     WHERE container_type IS NULL
                 """)
+            if 'current_fish_count' not in dish_cols:
+                conn.execute("ALTER TABLE dishes ADD COLUMN current_fish_count INTEGER")
+                conn.execute("""
+                    UPDATE dishes
+                    SET current_fish_count = fish_count
+                    WHERE current_fish_count IS NULL
+                """)
             # Migrate screening_steps: indicator_screened → indicators_screened, number_positive → number_kept
             ss_cols = [r[1] for r in conn.execute("PRAGMA table_info(screening_steps)").fetchall()]
             if ss_cols:  # Table exists
@@ -787,6 +822,46 @@ async def lifespan(app: FastAPI):
                             SET number_kept = number_positive
                             WHERE number_kept IS NULL AND number_positive IS NOT NULL
                         """)
+                if 'count_before_step' not in ss_cols:
+                    conn.execute("ALTER TABLE screening_steps ADD COLUMN count_before_step INTEGER")
+                if 'count_after_step' not in ss_cols:
+                    conn.execute("ALTER TABLE screening_steps ADD COLUMN count_after_step INTEGER")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS screening_step_allocations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dish_id TEXT NOT NULL,
+                    screening_datetime TEXT NOT NULL,
+                    bucket TEXT NOT NULL,
+                    disposition TEXT NOT NULL,
+                    count INTEGER NOT NULL,
+                    destination_dish_id TEXT,
+                    derived_dish_id TEXT,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_screening_step_allocations_dish_step
+                ON screening_step_allocations(dish_id, screening_datetime)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_screening_step_allocations_derived_dish
+                ON screening_step_allocations(derived_dish_id)
+            """)
+            allocation_cols = [r[1] for r in conn.execute("PRAGMA table_info(screening_step_allocations)").fetchall()]
+            if 'destination_dish_id' not in allocation_cols:
+                conn.execute("ALTER TABLE screening_step_allocations ADD COLUMN destination_dish_id TEXT")
+            conn.execute("""
+                UPDATE screening_step_allocations
+                SET destination_dish_id = derived_dish_id
+                WHERE destination_dish_id IS NULL
+                  AND derived_dish_id IS NOT NULL
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_screening_step_allocations_destination_dish
+                ON screening_step_allocations(destination_dish_id)
+            """)
             # Normalized transgenes table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS dish_transgenes (
@@ -896,8 +971,6 @@ async def lifespan(app: FastAPI):
         app.state.dish_images_dir = dish_images_dir
         logger.info(f"Dish images directory: {dish_images_dir}")
 
-        # Pre-fetch mapzebrain atlas catalog (non-blocking — logs warning on failure)
-        data_manager.fetch_mapzebrain_catalog()
     yield
 
 
@@ -1066,10 +1139,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """Dish creation form with optional PyRAT cross auto-fill."""
         # Try to load cross IDs for the datalist
         crosses = []
+        next_dish_number = 1
         try:
             db_path = _require_db_path()
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
                 crosses = _load_new_dish_crosses(conn)
+                next_dish_number = _next_dish_number_for_cross(conn, cross_id)
         except Exception:
             pass
 
@@ -1088,6 +1163,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "today": today,
             "form": {
                 "cross_id": cross_id or "",
+                "dish_number": next_dish_number,
                 "cross_setup_date": prefill["cross_setup_date"] or "",
                 "dof": prefill["dof"] or "",
                 "dof_source": prefill["dof_source"] or "",
@@ -1106,8 +1182,16 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     def cross_info_partial(request: Request, cross_id: str = Query(...)):
         """HTMX partial: auto-fill genotype/responsible/parents from PyRAT cross."""
         prefill = _load_cross_prefill(cross_id, _require_db_path(), app.state.busy_timeout_ms)
+        next_dish_number = 1
+        try:
+            db_path = _require_db_path()
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                next_dish_number = _next_dish_number_for_cross(conn, cross_id)
+        except Exception:
+            pass
 
         return templates.TemplateResponse(request, "dishes/_cross_info.html", {
+            "dish_number": next_dish_number,
             "genotype": prefill["genotype"],
             "responsible": prefill["responsible"],
             "parents": prefill["parents"],
@@ -1274,6 +1358,151 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "flash_message": message,
             "flash_level": "error",
         })
+
+    @app.get("/dishes/", response_class=HTMLResponse)
+    def dishes_inventory_page(
+        request: Request,
+        status: str = Query(default="all"),
+        terminated: Optional[str] = Query(default=None),
+    ):
+        """Inventory-style dish index for local MetaZebrobot dishes."""
+        db_path = _require_db_path()
+        normalized_status = (status or "all").strip().lower()
+        if normalized_status not in {"all", "active", "inactive"}:
+            normalized_status = "all"
+
+        query = """
+            SELECT
+                d.dish_id,
+                d.cross_id,
+                d.genotype,
+                d.dof,
+                d.fish_count,
+                d.current_fish_count,
+                d.responsible,
+                d.status,
+                d.termination_date,
+                d.termination_reason,
+                d.date_created,
+                d.parent_dish_id,
+                d.dish_population_type,
+                d.screening_final_positive_count,
+                COALESCE(ss.step_count, 0) AS step_count,
+                qc.last_check,
+                COALESCE(fs.registered_fish_count, 0) AS registered_fish_count
+            FROM dishes d
+            LEFT JOIN (
+                SELECT dish_id, COUNT(*) AS step_count
+                FROM screening_steps
+                GROUP BY dish_id
+            ) ss ON ss.dish_id = d.dish_id
+            LEFT JOIN (
+                SELECT dish_id, MAX(check_time) AS last_check
+                FROM quality_checks
+                GROUP BY dish_id
+            ) qc ON qc.dish_id = d.dish_id
+            LEFT JOIN (
+                SELECT dish_id, COUNT(*) AS registered_fish_count
+                FROM fish_subjects
+                GROUP BY dish_id
+            ) fs ON fs.dish_id = d.dish_id
+            WHERE (? = 'all' OR d.status = ?)
+            ORDER BY
+                CASE WHEN d.status = 'active' THEN 0 ELSE 1 END,
+                d.date_created DESC,
+                d.dish_id DESC
+        """
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            rows = conn.execute(query, (normalized_status, normalized_status)).fetchall()
+
+        dishes = []
+        for row in rows:
+            d = _row_to_dict(row)
+            dpf = _dpf_from_dof(d.get("dof") or "", None)
+            step_count = int(d.get("step_count") or 0)
+            if d.get("screening_final_positive_count") is not None:
+                screening_status = "Done"
+            elif step_count > 0:
+                screening_status = "In progress"
+            else:
+                screening_status = "Not started"
+
+            population_label = (d.get("dish_population_type") or "primary").replace("_", " ")
+            search_text = " ".join(
+                str(value)
+                for value in (
+                    d.get("dish_id") or "",
+                    d.get("cross_id") or "",
+                    d.get("genotype") or "",
+                    d.get("responsible") or "",
+                    d.get("status") or "",
+                    d.get("termination_reason") or "",
+                    d.get("dish_population_type") or "",
+                    d.get("parent_dish_id") or "",
+                )
+            ).lower()
+            dishes.append({
+                "dish_id": d.get("dish_id"),
+                "cross_id": d.get("cross_id"),
+                "genotype": d.get("genotype"),
+                "dof": d.get("dof"),
+                "dpf": dpf,
+                "fish_count": d.get("fish_count"),
+                "current_fish_count": d.get("current_fish_count"),
+                "registered_fish_count": d.get("registered_fish_count"),
+                "responsible": d.get("responsible"),
+                "status": d.get("status"),
+                "termination_date": d.get("termination_date"),
+                "termination_date_display": _normalize_html_date(d.get("termination_date")),
+                "termination_reason": d.get("termination_reason"),
+                "termination_reason_display": termination_reason_label(d.get("termination_reason")),
+                "date_created": d.get("date_created"),
+                "last_check": d.get("last_check"),
+                "parent_dish_id": d.get("parent_dish_id"),
+                "population_label": population_label,
+                "screening_status": screening_status,
+                "step_count": step_count,
+                "search_text": search_text,
+            })
+
+        summary = {
+            "total": len(dishes),
+            "active": sum(1 for d in dishes if d["status"] == "active"),
+            "inactive": sum(1 for d in dishes if d["status"] == "inactive"),
+        }
+        return templates.TemplateResponse(request, "dishes/dish_list.html", {
+            "dishes": dishes,
+            "summary": summary,
+            "status_filter": normalized_status,
+            "termination_reason_options": TERMINATION_REASON_OPTIONS,
+            "flash_message": f"Terminated dish {terminated}." if terminated else None,
+            "flash_level": "success",
+        })
+
+    @app.post("/dishes/{dish_id}/terminate", response_class=HTMLResponse)
+    def terminate_dish_web(
+        dish_id: str,
+        termination_reason: Optional[str] = Form(default=None),
+        return_status: str = Form(default="all"),
+    ):
+        """Terminate an active dish from the inventory page."""
+        _require_db_path()
+        normalized_status = (return_status or "all").strip().lower()
+        if normalized_status not in {"all", "active", "inactive"}:
+            normalized_status = "all"
+
+        success, message = fish_dish_ctrl.update_dish_status(
+            dish_id=dish_id,
+            status="inactive",
+            termination_reason=termination_reason,
+        )
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+
+        return RedirectResponse(
+            url=f"/dishes/?status={normalized_status}&terminated={dish_id}",
+            status_code=303,
+        )
 
     # ------------------------------------------------------------------
     # JSON API — health + dishes
@@ -1463,7 +1692,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         db_path = _require_db_path()
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             rows = conn.execute("""
-                SELECT d.dish_id, d.genotype, d.dof, d.fish_count, d.responsible,
+                SELECT d.dish_id, d.genotype, d.dof, d.fish_count, d.current_fish_count, d.responsible,
                        d.screening_final_positive_count,
                        COUNT(s.id) AS step_count
                 FROM dishes d
@@ -1482,6 +1711,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "dof": d.get("dof"),
                 "dpf": dpf,
                 "fish_count": d.get("fish_count"),
+                "current_fish_count": d.get("current_fish_count"),
                 "responsible": d.get("responsible"),
                 "step_count": d.get("step_count", 0),
                 "finalized": d.get("screening_final_positive_count") is not None,
@@ -1518,12 +1748,6 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             if imgs:
                 step_images[s.screening_datetime] = imgs
 
-        # mapzebrain atlas expression pattern images
-        atlas_catalog_available = bool(data_manager.fetch_mapzebrain_catalog())
-        atlas_lines = data_manager.lookup_mapzebrain_lines(
-            dish_id=dish_id, genotype=dish.genotype
-        )
-
         transgenes = data_manager.get_dish_transgenes(dish_id)
         indicator_suggestions, default_indicator_value = _screening_indicator_suggestions(
             transgenes, current_step
@@ -1539,11 +1763,28 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "final_count": final_count,
             "indicator_images": indicator_images,
             "step_images": step_images,
-            "atlas_lines": atlas_lines,
-            "atlas_catalog_available": atlas_catalog_available,
             "transgenes": transgenes,
             "indicator_suggestions": indicator_suggestions,
             "default_indicator_value": default_indicator_value,
+        })
+
+    @app.get("/screening/{dish_id}/atlas", response_class=HTMLResponse)
+    def screening_atlas_reference(request: Request, dish_id: str):
+        """HTMX partial: mapzebrain atlas matches for a dish."""
+        dish = fish_dish_ctrl.get_dish(dish_id)
+        if not dish:
+            raise HTTPException(status_code=404, detail="Dish not found")
+
+        atlas_catalog_available = bool(data_manager.fetch_mapzebrain_catalog())
+        atlas_lines = (
+            data_manager.lookup_mapzebrain_lines(dish_id=dish_id, genotype=dish.genotype)
+            if atlas_catalog_available
+            else []
+        )
+
+        return templates.TemplateResponse(request, "screening/_atlas_reference.html", {
+            "atlas_lines": atlas_lines,
+            "atlas_catalog_available": atlas_catalog_available,
         })
 
     @app.get("/screening/{dish_id}/steps-table", response_class=HTMLResponse)
@@ -1568,10 +1809,6 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         pigment_screened: bool = Form(default=False),
         criteria: Optional[str] = Form(default=None),
         count_screened_this_step: int = Form(...),
-        number_kept: int = Form(...),
-        number_removed_pigmented: Optional[int] = Form(default=None),
-        number_removed_negative: Optional[int] = Form(default=None),
-        number_removed_other: Optional[int] = Form(default=None),
         tricaine_used: bool = Form(default=False),
         notes: Optional[str] = Form(default=None),
     ):
@@ -1587,10 +1824,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "pigment_screened": pigment_screened,
             "criteria": criteria or None,
             "count_screened_this_step": count_screened_this_step,
-            "number_kept": number_kept,
-            "number_removed_pigmented": number_removed_pigmented,
-            "number_removed_negative": number_removed_negative,
-            "number_removed_other": number_removed_other,
+            "allocations": [],
             "tricaine_used": tricaine_used,
             "notes": notes or None,
         }
@@ -1604,6 +1838,45 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             })
 
         # Return updated steps table + success flash
+        dish = fish_dish_ctrl.get_dish(dish_id)
+        steps = dish.screening_results.screenings if dish and dish.screening_results else []
+        return templates.TemplateResponse(request, "screening/_steps_table.html", {
+            "steps": steps,
+            "dish_id": dish_id,
+            "flash_message": message,
+            "flash_level": "success",
+        })
+
+    @app.post("/screening/{dish_id}/steps/{screening_datetime}/allocations", response_class=HTMLResponse)
+    def add_screening_step_allocation(
+        request: Request,
+        dish_id: str,
+        screening_datetime: str,
+        bucket: str = Form(...),
+        disposition: str = Form(...),
+        count: int = Form(...),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Record a non-derived disposition allocation for a screening step."""
+        allocation_data = {
+            "bucket": bucket,
+            "disposition": disposition,
+            "count": count,
+            "notes": notes or None,
+        }
+
+        success, message, _ = fish_dish_ctrl.add_screening_step_allocation(
+            dish_id,
+            screening_datetime,
+            allocation_data,
+        )
+
+        if not success:
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": message,
+                "level": "error",
+            })
+
         dish = fish_dish_ctrl.get_dish(dish_id)
         steps = dish.screening_results.screenings if dish and dish.screening_results else []
         return templates.TemplateResponse(request, "screening/_steps_table.html", {
@@ -1662,6 +1935,38 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             })
 
         # Redirect back to screening page with success
+        return RedirectResponse(
+            url=f"/screening/{dish_id}",
+            status_code=303,
+        )
+
+    @app.post("/screening/{dish_id}/steps/{screening_datetime}/split", response_class=HTMLResponse)
+    def split_dish_from_screening_step(
+        request: Request,
+        dish_id: str,
+        screening_datetime: str,
+        fish_count: int = Form(...),
+        population_type: str = Form(...),
+        container_type: Optional[str] = Form(default=None),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Create a derived dish linked to a specific screening step."""
+        success, message, new_dish = fish_dish_ctrl.create_derived_dish(
+            parent_dish_id=dish_id,
+            population_type=population_type,
+            fish_count=fish_count,
+            container_type=container_type or None,
+            notes=notes or None,
+            source_screening_datetime=screening_datetime,
+            source_screening_bucket=population_type,
+        )
+
+        if not success:
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": message,
+                "level": "error",
+            })
+
         return RedirectResponse(
             url=f"/screening/{dish_id}",
             status_code=303,
@@ -2113,29 +2418,66 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         subjects = data_manager.get_fish_subjects_for_cross(cross_id)
 
         # Build dish info lookup and group fish by dish
-        dish_info: Dict[str, Dict[str, Any]] = {}
-        for d in dish_meta:
-            dish_info[d["dish_id"]] = d
-
+        dish_info: Dict[str, Dict[str, Any]] = {d["dish_id"]: d for d in dish_meta}
         fish_by_dish: Dict[str, List[Dict[str, Any]]] = {}
         for fish in subjects:
             fish_by_dish.setdefault(fish["dish_id"], []).append(fish)
 
-        # Separate primary dishes (no parent) from derived dishes
-        primary_dishes = [d for d in dish_meta if not d.get("parent_dish_id")]
-        derived_dishes = [d for d in dish_meta if d.get("parent_dish_id")]
-
-        # Map parent_dish_id → list of child dishes
         children_of: Dict[str, List[Dict[str, Any]]] = {}
-        for d in derived_dishes:
-            children_of.setdefault(d["parent_dish_id"], []).append(d)
+        root_dishes: List[Dict[str, Any]] = []
+
+        for dish in dish_meta:
+            parent_id = dish.get("parent_dish_id")
+            if parent_id and parent_id in dish_info:
+                children_of.setdefault(parent_id, []).append(dish)
+            else:
+                root_dishes.append(dish)
+
+        def _dish_sort_key(dish: Dict[str, Any]) -> Tuple[int, str, str, str]:
+            population = dish.get("dish_population_type") or "primary"
+            source_dt = dish.get("source_screening_datetime") or ""
+            return (
+                0 if population == "primary" else 1,
+                source_dt,
+                population,
+                dish.get("dish_id") or "",
+            )
+
+        def _build_dish_node(
+            dish_id: str,
+            seen: Optional[set[str]] = None,
+        ) -> Dict[str, Any]:
+            seen = set(seen or set())
+            dish = dish_info[dish_id]
+            cycle_detected = dish_id in seen
+            if cycle_detected:
+                return {
+                    "dish": dish,
+                    "fish": fish_by_dish.get(dish_id, []),
+                    "children": [],
+                    "cycle_detected": True,
+                }
+
+            seen.add(dish_id)
+            child_nodes = [
+                _build_dish_node(child["dish_id"], seen)
+                for child in sorted(children_of.get(dish_id, []), key=_dish_sort_key)
+            ]
+            return {
+                "dish": dish,
+                "fish": fish_by_dish.get(dish_id, []),
+                "children": child_nodes,
+                "cycle_detected": False,
+            }
+
+        dish_tree = [
+            _build_dish_node(d["dish_id"])
+            for d in sorted(root_dishes, key=_dish_sort_key)
+        ]
 
         return templates.TemplateResponse(request, "fish/fish_cross.html", {
             "cross_id": cross_id,
-            "primary_dishes": primary_dishes,
-            "children_of": children_of,
-            "fish_by_dish": fish_by_dish,
-            "dish_info": dish_info,
+            "dish_tree": dish_tree,
             "total_fish": len(subjects),
             "total_dishes": len(dish_meta),
         })
@@ -2397,8 +2739,20 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "pigment_screened": False,
             "criteria": "Check pan-glial expression",
             "count_screened_this_step": 20,
-            "number_kept": 12,
-            "number_removed_negative": 8,
+            "allocations": [
+                {
+                    "bucket": "remaining_in_parent",
+                    "disposition": "remain_parent",
+                    "count": 12,
+                    "notes": "Tour: fish retained for follow-up",
+                },
+                {
+                    "bucket": "negative_screened",
+                    "disposition": "discarded",
+                    "count": 8,
+                    "notes": "Tour: negative fish removed",
+                },
+            ],
             "tricaine_used": True,
             "notes": "Tour: DPF 5 gfap screen",
         }

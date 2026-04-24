@@ -1,9 +1,11 @@
+import sqlite3
 from types import SimpleNamespace
 
 from metazebrobot.api_server import (
     _cross_prefill_complete,
     _cross_prefill_from_payload,
     _merge_cross_payload,
+    _next_dish_number_for_cross,
     _prepare_crossings_for_display,
     _screening_indicator_suggestions,
 )
@@ -77,6 +79,27 @@ class TestScreeningIndicatorSuggestions:
 
 
 class TestCrossPrefillHelpers:
+    def test_next_dish_number_for_cross_uses_primary_numeric_suffixes(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE dishes (dish_id TEXT, cross_id TEXT)")
+        cross_id = "CROSS_AUTO"
+        for dish_id, row_cross_id in (
+            ("CROSS_AUTO_1", cross_id),
+            ("CROSS_AUTO_2", cross_id),
+            ("CROSS_AUTO_5", cross_id),
+            ("CROSS_AUTO_5_pos1", cross_id),
+            ("OTHER_CROSS_20", "OTHER_CROSS"),
+        ):
+            conn.execute(
+                "INSERT INTO dishes (dish_id, cross_id) VALUES (?, ?)",
+                (dish_id, row_cross_id),
+            )
+
+        assert _next_dish_number_for_cross(conn, cross_id) == 6
+        assert _next_dish_number_for_cross(conn, "NEW_CROSS") == 1
+        assert _next_dish_number_for_cross(conn, None) == 1
+
     def test_cross_prefill_complete_requires_core_fields(self):
         assert not _cross_prefill_complete({
             "genotype": "Tg(elavl3:GRAB-5HT)",

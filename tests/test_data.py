@@ -374,6 +374,46 @@ class TestMapzebrainLookup:
 
         assert data_manager._find_best_catalog_match(catalog, "elavl3", "grab-5ht") is None
 
+    def test_best_catalog_match_allows_exact_gene_expression_promoter_match(self):
+        catalog = [
+            {
+                "name": "her4.1",
+                "category": "Gene expression",
+                "types": ["HCR in situ"],
+                "synonyms": None,
+                "stack": "https://api.mapzebrain.org/media/Lines/her41/average_data/T_AVG_her4.1.zip",
+            }
+        ]
+
+        result = data_manager._find_best_catalog_match(catalog, "her4.1", "pmca-mcherry")
+
+        assert result is not None
+        assert result["name"] == "her4.1"
+        assert result["folder"] == "her41"
+
+    def test_best_catalog_match_prefers_reporter_hit_over_gene_expression_fallback(self):
+        catalog = [
+            {
+                "name": "her4.1",
+                "category": "Gene expression",
+                "types": ["HCR in situ"],
+                "synonyms": None,
+                "stack": "https://api.mapzebrain.org/media/Lines/her41/average_data/T_AVG_her4.1.zip",
+            },
+            {
+                "name": "hypotheticalHer41Tg",
+                "category": "Transgenic line",
+                "synonyms": "her4.1:PMCA-mCherry",
+                "stack": "https://api.mapzebrain.org/media/Lines/her41PMCA/average_data/T_AVG_hypothetical.zip",
+            },
+        ]
+
+        result = data_manager._find_best_catalog_match(catalog, "her4.1", "pmca-mcherry")
+
+        assert result is not None
+        assert result["name"] == "hypotheticalHer41Tg"
+        assert result["folder"] == "her41PMCA"
+
     def test_best_catalog_match_prefers_positive_reporter_hit(self):
         catalog = [
             {

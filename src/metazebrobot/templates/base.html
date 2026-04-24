@@ -43,6 +43,10 @@
         .transgene-block { margin: 0.5rem 0 1rem; }
         .transgene-table { margin-top: 0.35rem; }
         .transgene-table td, .transgene-table th { font-size: 0.8rem; white-space: nowrap; }
+        .screening-step-detail-row td { background: var(--pico-card-background-color); }
+        .screening-step-action-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 0.75rem; }
+        .screening-step-action-panel { padding: 0.9rem; border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius); background: var(--pico-background-color); }
+        .screening-step-action-panel h6 { margin-bottom: 0.35rem; }
         /* PyRAT age status */
         .age-urgent { background: #ffc8c8 !important; }
         .age-warning { background: #ffffc8 !important; }
@@ -67,6 +71,7 @@
             <li><a href="/"><strong>MetaZebrobot</strong></a></li>
         </ul>
         <ul>
+            <li><a href="/dishes/">Dishes</a></li>
             <li><a href="/screening/">Screening</a></li>
             <li><a href="/care/">Care</a></li>
             <li><a href="/fish/">Fish</a></li>

@@ -139,6 +139,8 @@ class DataManager:
                         pigment_screened BOOLEAN DEFAULT FALSE,
                         criteria TEXT,
                         count_screened_this_step INTEGER,
+                        count_before_step INTEGER,
+                        count_after_step INTEGER,
                         number_kept INTEGER,
                         number_removed_pigmented INTEGER,
                         number_removed_negative INTEGER,
@@ -154,6 +156,43 @@ class DataManager:
                     CREATE INDEX IF NOT EXISTS idx_screening_steps_dish_id
                     ON screening_steps(dish_id)
                 """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS screening_step_allocations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        dish_id TEXT NOT NULL,
+                        screening_datetime TEXT NOT NULL,
+                        bucket TEXT NOT NULL,
+                        disposition TEXT NOT NULL,
+                        count INTEGER NOT NULL,
+                        destination_dish_id TEXT,
+                        derived_dish_id TEXT,
+                        notes TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (dish_id) REFERENCES dishes(dish_id)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_screening_step_allocations_dish_step
+                    ON screening_step_allocations(dish_id, screening_datetime)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_screening_step_allocations_derived_dish
+                    ON screening_step_allocations(derived_dish_id)
+                """)
+                cursor.execute("PRAGMA table_info(screening_step_allocations)")
+                allocation_cols = {row[1] for row in cursor.fetchall()}
+                if 'destination_dish_id' not in allocation_cols:
+                    cursor.execute("ALTER TABLE screening_step_allocations ADD COLUMN destination_dish_id TEXT")
+                cursor.execute("""
+                    UPDATE screening_step_allocations
+                    SET destination_dish_id = derived_dish_id
+                    WHERE destination_dish_id IS NULL
+                      AND derived_dish_id IS NOT NULL
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_screening_step_allocations_destination_dish
+                    ON screening_step_allocations(destination_dish_id)
+                """)
 
                 # Migrate screening_steps columns for new screening model
                 cursor.execute("PRAGMA table_info(screening_steps)")
@@ -164,6 +203,10 @@ class DataManager:
                     cursor.execute("ALTER TABLE screening_steps ADD COLUMN number_removed_negative INTEGER")
                 if 'number_removed_other' not in screening_cols:
                     cursor.execute("ALTER TABLE screening_steps ADD COLUMN number_removed_other INTEGER")
+                if 'count_before_step' not in screening_cols:
+                    cursor.execute("ALTER TABLE screening_steps ADD COLUMN count_before_step INTEGER")
+                if 'count_after_step' not in screening_cols:
+                    cursor.execute("ALTER TABLE screening_steps ADD COLUMN count_after_step INTEGER")
                 # New columns: indicators_screened (JSON list), pigment_screened, number_kept
                 if 'indicators_screened' not in screening_cols:
                     cursor.execute("ALTER TABLE screening_steps ADD COLUMN indicators_screened TEXT")
@@ -199,6 +242,13 @@ class DataManager:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN screening_final_positive_count INTEGER")
                 if 'screening_date_finalized' not in existing_columns:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN screening_date_finalized TEXT")
+                if 'current_fish_count' not in existing_columns:
+                    cursor.execute("ALTER TABLE dishes ADD COLUMN current_fish_count INTEGER")
+                cursor.execute("""
+                    UPDATE dishes
+                    SET current_fish_count = fish_count
+                    WHERE current_fish_count IS NULL
+                """)
 
                 # Canonical construct/reporter registry
                 cursor.execute("""
@@ -375,6 +425,10 @@ class DataManager:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN parent_dish_id TEXT")
                 if 'dish_population_type' not in existing_columns:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN dish_population_type TEXT")
+                if 'source_screening_datetime' not in existing_columns:
+                    cursor.execute("ALTER TABLE dishes ADD COLUMN source_screening_datetime TEXT")
+                if 'source_screening_bucket' not in existing_columns:
+                    cursor.execute("ALTER TABLE dishes ADD COLUMN source_screening_bucket TEXT")
                 if 'cross_setup_date' not in existing_columns:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN cross_setup_date TEXT")
                 if 'dof_source' not in existing_columns:
@@ -416,6 +470,23 @@ class DataManager:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN termination_date TEXT")
                 if 'termination_reason' not in existing_columns:
                     cursor.execute("ALTER TABLE dishes ADD COLUMN termination_reason TEXT")
+                cursor.execute("""
+                    UPDATE dishes
+                    SET termination_reason = 'euthanasia'
+                    WHERE lower(trim(termination_reason)) = 'euthanasia'
+                """)
+                cursor.execute("""
+                    UPDATE dishes
+                    SET termination_reason = 'propagation'
+                    WHERE lower(trim(termination_reason)) IN (
+                        'propagation',
+                        'aquatics propagation handoff',
+                        'aquatics_propagation_handoff',
+                        'handoff_to_aquatics_for_propagation',
+                        'handed_off_to_aquatics_for_propagation',
+                        'handed off to aquatics for propagation'
+                    )
+                """)
 
                 # Phase 5: Add additional indexes for common query patterns
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_dishes_genotype ON dishes(genotype)")
@@ -770,11 +841,12 @@ class DataManager:
             cursor.execute("""
             INSERT OR REPLACE INTO dishes
             (dish_id, cross_id, date_created, dof, cross_setup_date, dof_source, genotype, responsible,
-             status, fish_count, species, sex, parent_dish_id, dish_population_type,
+             status, fish_count, current_fish_count, species, sex, parent_dish_id, dish_population_type,
+             source_screening_datetime, source_screening_bucket,
              notes, room, enclosure_temperature, container_type,
              enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
              breeding_parents, termination_date, termination_reason, data, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, (
                 dish_id,
                 dish_data.get('cross_id'),
@@ -786,10 +858,13 @@ class DataManager:
                 dish_data.get('responsible'),
                 dish_data.get('status', 'active'),
                 dish_data.get('fish_count'),
+                dish_data.get('current_fish_count', dish_data.get('fish_count')),
                 dish_data.get('species', 'Danio rerio'),
                 dish_data.get('sex', 'unknown'),
                 dish_data.get('parent_dish_id'),
                 dish_data.get('dish_population_type'),
+                dish_data.get('source_screening_datetime'),
+                dish_data.get('source_screening_bucket'),
                 dish_data.get('notes'),
                 enclosure.get('room') if enclosure else None,
                 enclosure.get('temperature') if enclosure else None,
@@ -855,6 +930,7 @@ class DataManager:
         """Save screening steps for a dish to the normalized table."""
         # Delete existing screening steps for this dish
         cursor.execute("DELETE FROM screening_steps WHERE dish_id = ?", (dish_id,))
+        cursor.execute("DELETE FROM screening_step_allocations WHERE dish_id = ?", (dish_id,))
 
         if not screening_results:
             return
@@ -868,10 +944,10 @@ class DataManager:
             cursor.execute("""
             INSERT INTO screening_steps
             (dish_id, screening_datetime, dpf_screened, indicators_screened,
-             pigment_screened, criteria, count_screened_this_step, number_kept,
+             pigment_screened, criteria, count_screened_this_step, count_before_step, count_after_step, number_kept,
              number_removed_pigmented, number_removed_negative, number_removed_other,
              tricaine_used, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 dish_id,
                 step.get('screening_datetime'),
@@ -880,6 +956,8 @@ class DataManager:
                 step.get('pigment_screened', False),
                 step.get('criteria'),
                 step.get('count_screened_this_step'),
+                step.get('count_before_step'),
+                step.get('count_after_step'),
                 step.get('number_kept'),
                 step.get('number_removed_pigmented'),
                 step.get('number_removed_negative'),
@@ -887,6 +965,22 @@ class DataManager:
                 step.get('tricaine_used', False),
                 step.get('notes')
             ))
+
+            for allocation in step.get('allocations', []) or []:
+                cursor.execute("""
+                INSERT INTO screening_step_allocations
+                (dish_id, screening_datetime, bucket, disposition, count, destination_dish_id, derived_dish_id, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    dish_id,
+                    step.get('screening_datetime'),
+                    allocation.get('bucket'),
+                    allocation.get('disposition'),
+                    allocation.get('count'),
+                    allocation.get('destination_dish_id') or allocation.get('derived_dish_id'),
+                    allocation.get('derived_dish_id') or allocation.get('destination_dish_id'),
+                    allocation.get('notes'),
+                ))
 
         # Update the dish's screening result columns
         cursor.execute("""
@@ -899,6 +993,67 @@ class DataManager:
             screening_results.get('date_finalized'),
             dish_id
         ))
+
+    @staticmethod
+    def _legacy_screening_step_allocations(step: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Derive fallback allocations from legacy kept/removed summary counts."""
+        allocations: List[Dict[str, Any]] = []
+
+        legacy_counts = [
+            ("remaining_in_parent", "remain_parent", step.get("number_kept")),
+            ("pigmented_screened", "discarded", step.get("number_removed_pigmented")),
+            ("negative_screened", "discarded", step.get("number_removed_negative")),
+            ("other", "discarded", step.get("number_removed_other")),
+        ]
+
+        for bucket, disposition, count in legacy_counts:
+            if isinstance(count, int) and count > 0:
+                allocations.append({
+                    "bucket": bucket,
+                    "disposition": disposition,
+                    "count": count,
+                    "destination_dish_id": None,
+                    "derived_dish_id": None,
+                    "notes": "Legacy summary migration",
+                })
+
+        return allocations
+
+    def get_screening_step_allocations(self, dish_id: str) -> Dict[str, List[Dict[str, Any]]]:
+        """Get explicit outcome allocations grouped by screening step datetime."""
+        if not self.is_initialized:
+            return {}
+
+        try:
+            with self.get_connection() as conn:
+                rows = conn.execute("""
+                    SELECT
+                        screening_datetime,
+                        bucket,
+                        disposition,
+                        count,
+                        destination_dish_id,
+                        derived_dish_id,
+                        notes
+                    FROM screening_step_allocations
+                    WHERE dish_id = ?
+                    ORDER BY screening_datetime ASC, id ASC
+                """, (dish_id,)).fetchall()
+
+            grouped: Dict[str, List[Dict[str, Any]]] = {}
+            for row in rows:
+                grouped.setdefault(row["screening_datetime"], []).append({
+                    "bucket": row["bucket"],
+                    "disposition": row["disposition"],
+                    "count": row["count"],
+                    "destination_dish_id": row["destination_dish_id"] or row["derived_dish_id"],
+                    "derived_dish_id": row["derived_dish_id"],
+                    "notes": row["notes"],
+                })
+            return grouped
+        except Exception as e:
+            logger.error(f"Error loading screening step allocations for dish {dish_id}: {e}")
+            return {}
 
     @staticmethod
     def _dish_transgene_source(dish_data: Dict[str, Any]) -> Tuple[str, Optional[str]]:
@@ -1128,11 +1283,13 @@ class DataManager:
             return []
 
         try:
+            allocations_by_step = self.get_screening_step_allocations(dish_id)
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT screening_datetime, dpf_screened, indicators_screened,
-                           pigment_screened, criteria, count_screened_this_step, number_kept,
+                           pigment_screened, criteria, count_screened_this_step,
+                           count_before_step, count_after_step, number_kept,
                            number_removed_pigmented, number_removed_negative, number_removed_other,
                            tricaine_used, notes
                     FROM screening_steps
@@ -1147,20 +1304,25 @@ class DataManager:
                         indicators = json.loads(indicators_raw) if indicators_raw else []
                     except (json.JSONDecodeError, TypeError):
                         indicators = [indicators_raw] if indicators_raw else []
-                    steps.append({
+                    step = {
                         'screening_datetime': row['screening_datetime'],
                         'dpf_screened': row['dpf_screened'],
                         'indicators_screened': indicators,
                         'pigment_screened': bool(row['pigment_screened']),
                         'criteria': row['criteria'],
                         'count_screened_this_step': row['count_screened_this_step'],
+                        'count_before_step': row['count_before_step'],
+                        'count_after_step': row['count_after_step'],
                         'number_kept': row['number_kept'],
                         'number_removed_pigmented': row['number_removed_pigmented'],
                         'number_removed_negative': row['number_removed_negative'],
                         'number_removed_other': row['number_removed_other'],
                         'tricaine_used': bool(row['tricaine_used']),
                         'notes': row['notes']
-                    })
+                    }
+                    step_allocations = allocations_by_step.get(row['screening_datetime'], [])
+                    step['allocations'] = step_allocations or self._legacy_screening_step_allocations(step)
+                    steps.append(step)
                 return steps
 
         except Exception as e:
@@ -1329,7 +1491,8 @@ class DataManager:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT dish_id, cross_id, date_created, dof, cross_setup_date, dof_source, genotype, responsible,
-                           status, fish_count, species, sex, parent_dish_id, dish_population_type,
+                           status, fish_count, current_fish_count, species, sex, parent_dish_id, dish_population_type,
+                           source_screening_datetime, source_screening_bucket,
                            notes, room, enclosure_temperature, container_type,
                            enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
                            breeding_parents, screening_final_positive_count, screening_date_finalized,
@@ -1353,10 +1516,13 @@ class DataManager:
                     dish_data['responsible'] = row['responsible']
                     dish_data['status'] = row['status']
                     dish_data['fish_count'] = row['fish_count']
+                    dish_data['current_fish_count'] = row['current_fish_count']
                     dish_data['species'] = row['species'] or 'Danio rerio'
                     dish_data['sex'] = row['sex'] or 'unknown'
                     dish_data['parent_dish_id'] = row['parent_dish_id']
                     dish_data['dish_population_type'] = row['dish_population_type']
+                    dish_data['source_screening_datetime'] = row['source_screening_datetime']
+                    dish_data['source_screening_bucket'] = row['source_screening_bucket']
                     dish_data['notes'] = row['notes']
                     dish_data['termination_date'] = row['termination_date']
                     dish_data['termination_reason'] = row['termination_reason']
@@ -1501,7 +1667,8 @@ class DataManager:
                 # Single bulk query for all dishes
                 cursor.execute("""
                     SELECT dish_id, cross_id, date_created, dof, cross_setup_date, dof_source, genotype, responsible,
-                           status, fish_count, species, sex, parent_dish_id, dish_population_type,
+                           status, fish_count, current_fish_count, species, sex, parent_dish_id, dish_population_type,
+                           source_screening_datetime, source_screening_bucket,
                            notes, room, enclosure_temperature, container_type,
                            enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
                            breeding_parents, screening_final_positive_count, screening_date_finalized,
@@ -1525,10 +1692,13 @@ class DataManager:
                         'responsible': row['responsible'],
                         'status': row['status'],
                         'fish_count': row['fish_count'],
+                        'current_fish_count': row['current_fish_count'],
                         'species': row['species'] or 'Danio rerio',
                         'sex': row['sex'] or 'unknown',
                         'parent_dish_id': row['parent_dish_id'],
                         'dish_population_type': row['dish_population_type'],
+                        'source_screening_datetime': row['source_screening_datetime'],
+                        'source_screening_bucket': row['source_screening_bucket'],
                         'notes': row['notes'],
                         'termination_date': row['termination_date'],
                         'termination_reason': row['termination_reason'],
@@ -2076,19 +2246,36 @@ class DataManager:
     ) -> Optional[Dict[str, str]]:
         """Find the best catalog entry for a promoter+reporter pair."""
         candidates = []
+        gene_expression_candidates = []
+        normalized_promoter = self._normalize_construct_name(promoter)
         for entry in catalog:
             synonyms = (entry.get("synonyms") or "").lower()
             name = (entry.get("name") or "").lower()
             search_text = f"{name} {synonyms}"
-
-            if promoter not in search_text:
-                continue
 
             # Extract folder from stack URL
             stack_url = entry.get("stack", "")
             if "/Lines/" not in stack_url:
                 continue
             folder = stack_url.split("/Lines/")[1].split("/")[0]
+
+            category = (entry.get("category") or "").lower()
+            normalized_name = self._normalize_construct_name(entry.get("name"))
+            if (
+                category == "gene expression"
+                and normalized_promoter
+                and normalized_name == normalized_promoter
+            ):
+                gene_expression_candidates.append({
+                    "name": entry.get("name", ""),
+                    "display_name": entry.get("name", "") or promoter,
+                    "folder": folder,
+                    "url": f"{self._MAPZEBRAIN_IMAGE_BASE}/{folder}/average_data/orthogonal_views/dorsal/180.jpg",
+                })
+                continue
+
+            if promoter not in search_text:
+                continue
 
             # Require a reporter hit for reporter-bearing genotypes.
             score = 0
@@ -2114,7 +2301,7 @@ class DataManager:
             })
 
         if not candidates:
-            return None
+            return gene_expression_candidates[0] if gene_expression_candidates else None
 
         # Return highest-scoring match
         candidates.sort(key=lambda c: c["_score"], reverse=True)
@@ -2283,6 +2470,7 @@ class DataManager:
                     """
                     SELECT d.dish_id, d.cross_id, d.genotype, d.status,
                            d.parent_dish_id, d.dish_population_type,
+                           d.source_screening_datetime, d.source_screening_bucket,
                            COUNT(f.fish_id) AS fish_count
                     FROM dishes d
                     LEFT JOIN fish_subjects f ON f.dish_id = d.dish_id
@@ -2982,10 +3170,10 @@ class DataManager:
                                     cursor.execute("""
                                         INSERT OR IGNORE INTO screening_steps
                                         (dish_id, screening_datetime, dpf_screened, indicators_screened,
-                                         pigment_screened, criteria, count_screened_this_step, number_kept,
+                                         pigment_screened, criteria, count_screened_this_step, count_before_step, count_after_step, number_kept,
                                          number_removed_pigmented, number_removed_negative, number_removed_other,
                                          tricaine_used, notes)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                     """, (
                                         dish_id,
                                         step.get('screening_datetime'),
@@ -2994,6 +3182,8 @@ class DataManager:
                                         step.get('pigment_screened', False),
                                         step.get('criteria'),
                                         step.get('count_screened_this_step'),
+                                        step.get('count_before_step'),
+                                        step.get('count_after_step'),
                                         number_kept,
                                         step.get('number_removed_pigmented'),
                                         step.get('number_removed_negative'),
@@ -3001,6 +3191,22 @@ class DataManager:
                                         step.get('tricaine_used', False),
                                         step.get('notes')
                                     ))
+                                    allocations = step.get('allocations') or self._legacy_screening_step_allocations(step)
+                                    for allocation in allocations:
+                                        cursor.execute("""
+                                            INSERT INTO screening_step_allocations
+                                            (dish_id, screening_datetime, bucket, disposition, count, destination_dish_id, derived_dish_id, notes)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                        """, (
+                                            dish_id,
+                                            step.get('screening_datetime'),
+                                            allocation.get('bucket'),
+                                            allocation.get('disposition'),
+                                            allocation.get('count'),
+                                            allocation.get('destination_dish_id') or allocation.get('derived_dish_id'),
+                                            allocation.get('derived_dish_id') or allocation.get('destination_dish_id'),
+                                            allocation.get('notes'),
+                                        ))
                                     steps_migrated += 1
 
                                 # Update dish columns
@@ -3073,6 +3279,8 @@ class DataManager:
                                 sex = COALESCE(sex, ?),
                                 parent_dish_id = COALESCE(parent_dish_id, ?),
                                 dish_population_type = COALESCE(dish_population_type, ?),
+                                source_screening_datetime = COALESCE(source_screening_datetime, ?),
+                                source_screening_bucket = COALESCE(source_screening_bucket, ?),
                                 notes = COALESCE(notes, ?),
                                 room = COALESCE(room, ?),
                                 enclosure_temperature = COALESCE(enclosure_temperature, ?),
@@ -3087,6 +3295,8 @@ class DataManager:
                             dish_data.get('sex', 'unknown'),
                             dish_data.get('parent_dish_id'),
                             dish_data.get('dish_population_type'),
+                            dish_data.get('source_screening_datetime'),
+                            dish_data.get('source_screening_bucket'),
                             dish_data.get('notes'),
                             enclosure.get('room'),
                             enclosure.get('temperature'),
