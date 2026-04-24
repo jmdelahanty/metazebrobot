@@ -1933,6 +1933,18 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "atlas_catalog_available": atlas_catalog_available,
         })
 
+    @app.get("/screening/{dish_id}/genotype-reference", response_class=HTMLResponse)
+    def screening_genotype_reference(request: Request, dish_id: str):
+        """HTMX partial: curated exact-genotype reference image for a dish."""
+        dish = fish_dish_ctrl.get_dish(dish_id)
+        if not dish:
+            raise HTTPException(status_code=404, detail="Dish not found")
+
+        return templates.TemplateResponse(request, "screening/_genotype_reference.html", {
+            "display_genotype": dish.genotype,
+            "reference": None,
+        })
+
     @app.get("/screening/{dish_id}/steps-table", response_class=HTMLResponse)
     def screening_steps_table(request: Request, dish_id: str):
         """HTMX partial — just the screening steps table rows."""

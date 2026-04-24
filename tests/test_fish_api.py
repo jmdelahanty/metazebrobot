@@ -481,6 +481,30 @@ class TestDishSplit:
 
 
 # -------------------------------------------------------------------
+# Screening reference panels
+# -------------------------------------------------------------------
+
+
+class TestScreeningReferencePanels:
+    """Reference panels on the screening page."""
+
+    def test_screening_page_shows_genotype_reference_panel(self, client, seed_full_dish):
+        resp = client.get(f"/screening/{seed_full_dish}")
+
+        assert resp.status_code == 200
+        assert "Genotype Reference" in resp.text
+        assert f'hx-get="/screening/{seed_full_dish}/genotype-reference"' in resp.text
+        assert "Atlas Reference" in resp.text
+
+    def test_genotype_reference_partial_placeholder(self, client, seed_full_dish):
+        resp = client.get(f"/screening/{seed_full_dish}/genotype-reference")
+
+        assert resp.status_code == 200
+        assert "No curated genotype reference image for this exact genotype yet." in resp.text
+        assert "Tg(elavl3:GCaMP6s)" in resp.text
+
+
+# -------------------------------------------------------------------
 # Plate map visualization
 # -------------------------------------------------------------------
 

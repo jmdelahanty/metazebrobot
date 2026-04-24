@@ -28,6 +28,19 @@
     </div>
 </details>
 
+<details
+    class="protocol-box"
+    hx-get="/screening/{{ dish.dish_id }}/genotype-reference"
+    hx-trigger="toggle once"
+    hx-target="#genotype-reference"
+    hx-swap="innerHTML"
+>
+    <summary><strong>Genotype Reference</strong> <small>(curated exact genotype)</small></summary>
+    <div id="genotype-reference">
+        <p><em>Loading curated genotype reference...</em></p>
+    </div>
+</details>
+
 {# Protocol guidance #}
 {% if protocol %}
 <details class="protocol-box" open>

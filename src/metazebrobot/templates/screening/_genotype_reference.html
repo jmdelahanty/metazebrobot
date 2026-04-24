@@ -1,0 +1,14 @@
+{% if reference %}
+<figure class="atlas-thumb">
+    <img src="{{ reference.image_url }}" alt="{{ reference.caption or reference.display_genotype }}" loading="lazy">
+    <figcaption>{{ reference.caption or reference.display_genotype }}</figcaption>
+</figure>
+{% else %}
+<p><em>No curated genotype reference image for this exact genotype yet.</em></p>
+<p>
+    <small>
+        Exact genotype:
+        <code>{{ display_genotype }}</code>
+    </small>
+</p>
+{% endif %}
