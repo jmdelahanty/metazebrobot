@@ -3,11 +3,15 @@
 *.csv
 *.db
 *.db.*
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 config.json
 genotype_reference_images/
 genotype_reference_ome_uploads/
+.codex
+.metazebrobot-server.pid
 
 # Ignore ipynb checkpoints
 .ipynb_checkpoints/
