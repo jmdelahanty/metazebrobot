@@ -14,12 +14,29 @@
 {% endif %}
 
 <div id="pyrat-sync-status"></div>
+<details open>
+    <summary><strong>Find Cross by ID</strong></summary>
+    <form method="get" action="/dishes/new">
+        <div class="grid">
+            <label>
+                Cross ID
+                <input type="text" name="cross_id" value="{{ form.cross_id or '' }}" inputmode="numeric" placeholder="17907" required>
+            </label>
+            <label>
+                &nbsp;
+                <button type="submit" class="outline">Load Cross</button>
+            </label>
+        </div>
+    </form>
+    <small>Loads that exact PyRAT crossing and caches it locally if PyRAT allows access, even when it is not in your responsible-cross list.</small>
+</details>
+
 <details>
     <summary><strong>Refresh Crosses from PyRAT</strong></summary>
     <form hx-post="/dishes/new/refresh-crosses" hx-target="#pyrat-sync-status" hx-swap="innerHTML">
         <label>
             <input type="checkbox" name="all_crosses" value="true">
-            Fetch all crosses (not just last 30 days)
+            Fetch all visible crosses (not just my last 30 days)
         </label>
         <button type="submit" class="outline secondary">Sync from PyRAT</button>
     </form>
@@ -31,12 +48,12 @@
     <div class="grid">
         <label>
             Cross ID
-            <input type="text" name="cross_id" list="cross-list"
+            <input id="dish-cross-id-input" type="text" name="cross_id" list="cross-list"
                    value="{{ form.cross_id or '' }}" required
                    hx-get="/dishes/new/cross-info"
                    hx-trigger="change"
                    hx-target="#cross-info"
-                   hx-include="[name='cross_id']">
+                   hx-include="#dish-cross-id-input">
             <datalist id="cross-list">
                 {% for c in crosses %}
                 <option value="{{ c }}">

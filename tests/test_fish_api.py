@@ -1055,6 +1055,21 @@ class TestDailyCare:
 class TestDishInventory:
     """Top-level dish inventory web page."""
 
+    def test_health_reports_db_and_pyrat_separately(self, client, monkeypatch):
+        import metazebrobot.api_server as api_server
+
+        monkeypatch.setattr(api_server, "get_pyrat_api_credentials", lambda: None)
+
+        resp = client.get("/health?check_db=true&check_pyrat=true")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["status"] == "degraded"
+        assert payload["db"] == "ok"
+        assert payload["pyrat"] == "not_configured"
+        assert payload["components"]["db"]["status"] == "ok"
+        assert payload["components"]["pyrat"]["status"] == "not_configured"
+
     def test_dishes_inventory_page(self, client, seed_dish):
         resp = client.get("/dishes/")
         assert resp.status_code == 200
@@ -1073,6 +1088,171 @@ class TestDishInventory:
 
         assert resp.status_code == 200
         assert f'href="/crosses/{cross_id}/lineage/"' in resp.text
+
+    def test_acquisition_dishes_defaults_to_active_with_context(self, client, seed_cross_dishes):
+        cross_id, dish_a, dish_b = seed_cross_dishes
+        conn = sqlite3.connect(str(data_manager.database_path))
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS crosses (
+                cross_id TEXT PRIMARY KEY,
+                cross_status TEXT,
+                line_strain TEXT,
+                data TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO crosses (cross_id, cross_status, line_strain, data)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                cross_id,
+                "set-up",
+                "Tg(elavl3:GCaMP7ff)",
+                json.dumps({"crossing_id": cross_id}),
+            ),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO cross_background_summaries (
+                cross_id, background_summary, background_strains,
+                line_labels, mutant_backgrounds, transgenes,
+                has_mixed_background
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cross_id,
+                "WIK + Casper_HHMI + casper",
+                json.dumps(["WIK"]),
+                json.dumps(["Casper_HHMI"]),
+                json.dumps(["casper"]),
+                json.dumps([]),
+                1,
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE dishes
+            SET current_fish_count = 12,
+                fish_count = 15,
+                dof = '20260407',
+                breeding_parents = ?,
+                container_type = 'well_plate'
+            WHERE dish_id = ?
+            """,
+            (json.dumps(["#6507_M12>E4", "#5724_M17>F8"]), dish_a),
+        )
+        conn.execute("UPDATE dishes SET status = 'inactive' WHERE dish_id = ?", (dish_b,))
+        conn.execute(
+            """
+            INSERT INTO fish_subjects (fish_id, dish_id, subject_label, species)
+            VALUES (?, ?, ?, ?)
+            """,
+            (str(uuid.uuid4()), dish_a, "A1", "Danio rerio"),
+        )
+        conn.execute(
+            """
+            INSERT INTO housing_units (unit_id, dish_id, position_label, unit_kind)
+            VALUES (?, ?, ?, ?)
+            """,
+            (f"{dish_a}:A1", dish_a, "A1", "well"),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.get("/acquisition/dishes")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["schema_version"] == 1
+        assert payload["purpose"] == "citrus_acquisition_dish_picker"
+        ids = {item["dish_id"] for item in payload["items"]}
+        assert dish_a in ids
+        assert dish_b not in ids
+        item = next(item for item in payload["items"] if item["dish_id"] == dish_a)
+        assert item["current_fish_count"] == 12
+        assert item["registered_fish_count"] == 1
+        assert item["housing_unit_count"] == 1
+        assert item["container_type"] == "well_plate"
+        assert item["parents_display"] == "#6507_M12>E4, #5724_M17>F8"
+        assert item["cross"]["background_summary"] == "WIK + Casper_HHMI + casper"
+        assert item["cross"]["background_strains"] == ["WIK"]
+        assert item["links"]["fish"] == f"/dishes/{dish_a}/fish"
+        assert item["links"]["cross_provenance"] == f"/crosses/{cross_id}/provenance"
+
+    def test_citrus_snapshot_is_no_pii_and_cache_tolerant(self, client, seed_cross_dishes):
+        cross_id, dish_a, _ = seed_cross_dishes
+        conn = sqlite3.connect(str(data_manager.database_path))
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS crosses (
+                cross_id TEXT PRIMARY KEY,
+                cross_status TEXT,
+                line_strain TEXT,
+                parents TEXT,
+                data TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO crosses (cross_id, cross_status, line_strain, data)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                cross_id,
+                "set-up",
+                "Casper_HHMI",
+                json.dumps({
+                    "crossing_id": cross_id,
+                    "strain_name": "Casper_HHMI",
+                    "tanks": {
+                        "parents": [
+                            {
+                                "tank_id": 6311,
+                                "location_rack_name": "M10",
+                                "tank_position": "D1",
+                            }
+                        ]
+                    },
+                }),
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE dishes
+            SET current_fish_count = 9, fish_count = 10, dof = '20260407',
+                species = 'Danio rerio', sex = 'unknown', responsible = 'private-user'
+            WHERE dish_id = ?
+            """,
+            (dish_a,),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.get(f"/dishes/{dish_a}/citrus-snapshot")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["schema_version"] == 1
+        assert payload["dish_id"] == dish_a
+        assert payload["cross_id"] == cross_id
+        assert payload["fish_count"] == 9
+        assert payload["line_strain"] == "Casper_HHMI"
+        assert payload["parents"] == [{"identifier": "6311_M10_D1", "sex": "unknown"}]
+        assert "responsible" not in payload
+
+    def test_citrus_snapshot_works_without_cached_cross(self, client, seed_cross_dishes):
+        _, dish_a, _ = seed_cross_dishes
+
+        resp = client.get(f"/dishes/{dish_a}/citrus-snapshot")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["dish_id"] == dish_a
+        assert payload["line_strain"] is None
+        assert payload["parents"] == []
 
     def test_dishes_inventory_page_shows_count_editor_for_active_dishes(self, client, seed_full_dish):
         resp = client.get("/dishes/")
@@ -1346,6 +1526,7 @@ class TestDishInventory:
         resp = client.post(
             f"/dishes/{seed_full_dish}/terminate",
             data={
+                "termination_date": "2026-04-05",
                 "termination_reason": "euthanasia",
                 "return_status": "active",
             },
@@ -1368,8 +1549,45 @@ class TestDishInventory:
 
         assert row is not None
         assert row[0] == "inactive"
-        assert re.fullmatch(r"\d{8}", row[1])
+        assert row[1] == "20260405"
         assert row[2] == "euthanasia"
+
+    def test_update_inactive_dish_termination_date_web(self, client, seed_full_dish, tmp_db_path):
+        client.post(
+            f"/dishes/{seed_full_dish}/terminate",
+            data={
+                "termination_date": "2026-04-05",
+                "termination_reason": "euthanasia",
+                "return_status": "all",
+            },
+            follow_redirects=False,
+        )
+
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/terminate",
+            data={
+                "termination_date": "2026-04-08",
+                "termination_reason": "propagation",
+                "return_status": "inactive",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == f"/dishes/?status=inactive&terminated={seed_full_dish}"
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            """
+            SELECT status, termination_date, termination_reason
+            FROM dishes
+            WHERE dish_id = ?
+            """,
+            (seed_full_dish,),
+        ).fetchone()
+        conn.close()
+
+        assert row == ("inactive", "20260408", "propagation")
 
     def test_terminate_dish_web_rejects_unrecognized_reason(self, client, seed_full_dish):
         resp = client.post(
@@ -1401,7 +1619,120 @@ class TestDishInventory:
         assert "inactive" in resp.text
         assert "Terminated" in resp.text
         assert "Propagation" in resp.text
-        assert f'action="/dishes/{seed_full_dish}/terminate"' not in resp.text
+        assert f'action="/dishes/{seed_full_dish}/terminate"' in resp.text
+        assert "Edit Termination" in resp.text
+        assert 'name="termination_date"' in resp.text
+
+    def test_inactive_dish_dpf_uses_termination_date(self, client, seed_full_dish, tmp_db_path):
+        conn = sqlite3.connect(str(tmp_db_path))
+        conn.execute(
+            """
+            UPDATE dishes
+            SET status = 'inactive',
+                termination_date = '20260405',
+                termination_reason = 'euthanasia'
+            WHERE dish_id = ?
+            """,
+            (seed_full_dish,),
+        )
+        conn.commit()
+        conn.close()
+
+        dish_resp = client.get(f"/dishes/{seed_full_dish}")
+        assert dish_resp.status_code == 200
+        dish = dish_resp.json()["data"]
+        assert dish["dof"] == "20260401"
+        assert dish["dpf"] == 4
+
+        list_resp = client.get("/dishes", params={"status": "inactive"})
+        assert list_resp.status_code == 200
+        listed = [
+            item for item in list_resp.json()["items"]
+            if item["dish_id"] == seed_full_dish
+        ]
+        assert listed[0]["dpf"] == 4
+
+        page_resp = client.get("/dishes/?status=inactive")
+        assert page_resp.status_code == 200
+        assert re.search(
+            rf"{re.escape(seed_full_dish)}.*?<td>20260401</td>\s*<td>4</td>",
+            page_resp.text,
+            flags=re.DOTALL,
+        )
+
+        cross_id = dish["cross_id"]
+        lineage_resp = client.get(f"/crosses/{cross_id}/lineage")
+        assert lineage_resp.status_code == 200
+        node = next(
+            item for item in lineage_resp.json()["nodes"]
+            if item["dish_id"] == seed_full_dish
+        )
+        assert node["dpf"] == 4
+
+    def test_inactive_dish_without_end_date_has_unknown_dpf(self, client, seed_full_dish, tmp_db_path):
+        conn = sqlite3.connect(str(tmp_db_path))
+        conn.execute(
+            """
+            UPDATE dishes
+            SET status = 'inactive',
+                termination_date = NULL,
+                screening_date_finalized = NULL,
+                termination_reason = 'euthanasia'
+            WHERE dish_id = ?
+            """,
+            (seed_full_dish,),
+        )
+        conn.execute("DELETE FROM screening_steps WHERE dish_id = ?", (seed_full_dish,))
+        conn.execute("DELETE FROM quality_checks WHERE dish_id = ?", (seed_full_dish,))
+        conn.commit()
+        conn.close()
+
+        dish = client.get(f"/dishes/{seed_full_dish}").json()["data"]
+        assert dish["dpf"] is None
+
+        page_resp = client.get("/dishes/?status=inactive")
+        assert page_resp.status_code == 200
+        assert re.search(
+            rf"{re.escape(seed_full_dish)}.*?<td>20260401</td>\s*<td>\?</td>",
+            page_resp.text,
+            flags=re.DOTALL,
+        )
+
+    def test_inactive_dish_dpf_falls_back_to_latest_screening_date(self, client, seed_full_dish, tmp_db_path):
+        conn = sqlite3.connect(str(tmp_db_path))
+        conn.execute(
+            """
+            UPDATE dishes
+            SET status = 'inactive',
+                termination_date = NULL,
+                screening_date_finalized = NULL,
+                termination_reason = 'euthanasia'
+            WHERE dish_id = ?
+            """,
+            (seed_full_dish,),
+        )
+        conn.execute(
+            """
+            INSERT INTO screening_steps (
+                dish_id, screening_datetime, dpf_screened, indicators_screened,
+                count_screened_this_step
+            )
+            VALUES (?, '20260406T09:00:00', 5, '[]', 10)
+            """,
+            (seed_full_dish,),
+        )
+        conn.commit()
+        conn.close()
+
+        dish = client.get(f"/dishes/{seed_full_dish}").json()["data"]
+        assert dish["dpf"] == 5
+
+        list_resp = client.get("/dishes", params={"status": "inactive"})
+        listed = [
+            item for item in list_resp.json()["items"]
+            if item["dish_id"] == seed_full_dish
+        ]
+        assert listed[0]["dpf"] == 5
 
 
 # -------------------------------------------------------------------
@@ -1416,7 +1747,10 @@ class TestDishCreation:
         resp = client.get("/dishes/new")
         assert resp.status_code == 200
         assert "Create New Dish" in resp.text
+        assert "Find Cross by ID" in resp.text
+        assert "not in your responsible-cross list" in resp.text
         assert resp.text.count('id="dof-input"') == 1
+        assert 'hx-include="#dish-cross-id-input"' in resp.text
 
     def test_new_dish_form_prefills_selected_cross(self, client, monkeypatch):
         import metazebrobot.api_server as api_server
@@ -1424,6 +1758,7 @@ class TestDishCreation:
         def fake_fetch_pyrat(endpoint, params=None):
             assert endpoint == "tanks/crossings"
             assert params["crossing_id"] == "17907"
+            assert "responsible_id" not in params
             return [{
                 "crossing_id": "17907",
                 "strain_name": "Tg(elavl3:GRAB-5HT)",
@@ -1456,6 +1791,77 @@ class TestDishCreation:
         assert 'value="2026-04-07"' in resp.text
         assert 'name="dof_source"' in resp.text
         assert 'value="pyrat_setup_plus_1"' in resp.text
+
+    def test_refresh_all_crosses_does_not_filter_by_current_user(self, client, monkeypatch):
+        import requests
+        import metazebrobot.api_server as api_server
+
+        seen_params = {}
+
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return [{
+                    "crossing_id": 18123,
+                    "status": "set-up",
+                    "date_of_record": "2026-05-01T00:00:00",
+                    "strain_name": "Other lab cross",
+                    "responsible_fullname": "Other User",
+                }]
+
+        def fake_get(*args, **kwargs):
+            seen_params.update(kwargs["params"])
+            return FakeResponse()
+
+        monkeypatch.setattr(api_server, "get_pyrat_api_credentials", lambda: {
+            "base_url": "https://example.invalid/aquatic/",
+            "client_token": "client-token",
+            "user_token": "user-token",
+        })
+        monkeypatch.setattr(api_server, "_current_user", lambda request: "delahantyj")
+        monkeypatch.setattr(api_server, "_pyrat_user_id", lambda username: 115)
+        monkeypatch.setattr(requests, "get", fake_get)
+
+        resp = client.post("/dishes/new/refresh-crosses", data={"all_crosses": "true"})
+
+        assert resp.status_code == 200
+        assert "Synced 1 crosses" in resp.text
+        assert seen_params["l"] == 200
+        assert "responsible_id" not in seen_params
+        assert "date_of_record_from" not in seen_params
+
+    def test_refresh_recent_crosses_filters_by_current_user(self, client, monkeypatch):
+        import requests
+        import metazebrobot.api_server as api_server
+
+        seen_params = {}
+
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return []
+
+        def fake_get(*args, **kwargs):
+            seen_params.update(kwargs["params"])
+            return FakeResponse()
+
+        monkeypatch.setattr(api_server, "get_pyrat_api_credentials", lambda: {
+            "base_url": "https://example.invalid/aquatic/",
+            "client_token": "client-token",
+            "user_token": "user-token",
+        })
+        monkeypatch.setattr(api_server, "_current_user", lambda request: "delahantyj")
+        monkeypatch.setattr(api_server, "_pyrat_user_id", lambda username: 115)
+        monkeypatch.setattr(requests, "get", fake_get)
+
+        resp = client.post("/dishes/new/refresh-crosses", data={})
+
+        assert resp.status_code == 200
+        assert seen_params["l"] == 50
+        assert seen_params["responsible_id"] == 115
+        assert "date_of_record_from" in seen_params
 
     def test_create_dish_success(self, client):
         resp = client.post(
@@ -1545,6 +1951,7 @@ class TestDishCreation:
         def fake_fetch_pyrat(endpoint, params=None):
             assert endpoint == "tanks/crossings"
             assert params["crossing_id"] == "17907"
+            assert "responsible_id" not in params
             return [{
                 "crossing_id": "17907",
                 "strain_name": "Tg(elavl3:GRAB-5HT)",
@@ -1554,11 +1961,17 @@ class TestDishCreation:
                     "parents": [
                         {
                             "tank_id": 123,
+                            "strain_name": "WIK Casper_HHMI",
+                            "number_of_female": 1,
+                            "generation": "F1",
                             "location_rack_name": "M11",
                             "tank_position": "E1",
                         },
                         {
                             "tank_id": 456,
+                            "strain_name": "Tg(elavl3:GRAB-5HT)",
+                            "number_of_male": 1,
+                            "generation": "F1",
                             "location_rack_name": "M11",
                             "tank_position": "E2",
                         },
@@ -1578,6 +1991,9 @@ class TestDishCreation:
         assert 'value="2026-04-06"' in resp.text
         assert 'value="2026-04-07"' in resp.text
         assert 'value="pyrat_setup_plus_1"' in resp.text
+        assert "Parent Provenance" in resp.text
+        assert "WIK Casper_HHMI" in resp.text
+        assert "F1" in resp.text
 
     def test_cross_info_partial_prefills_from_existing_dish(self, client, tmp_db_path):
         cross_id = f"CROSS_{uuid.uuid4().hex[:6]}"
@@ -1669,6 +2085,7 @@ class TestCrossLevelFish:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert f'href="/crosses/{cross_id}/lineage/"' in resp.text
+        assert f'href="/crosses/{cross_id}/provenance/"' in resp.text
 
     def test_nonexistent_cross_returns_empty(self, client):
         resp = client.get("/crosses/NO_SUCH_CROSS/fish")
@@ -1790,10 +2207,153 @@ class TestCrossLevelFish:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert f"Lineage - Cross {cross_id}" in resp.text
+        assert f'href="/crosses/{cross_id}/provenance/"' in resp.text
         assert "Lineage Graph" in resp.text
         assert "Count Adjustments" in resp.text
         assert '<svg class="lineage-graph"' in resp.text
         assert seed_full_dish in resp.text
+
+    def test_cross_provenance_api_and_page(self, client, seed_cross_dishes):
+        cross_id, dish_a, dish_b = seed_cross_dishes
+        conn = sqlite3.connect(str(data_manager.database_path))
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS crosses (
+                cross_id TEXT PRIMARY KEY,
+                cross_status TEXT,
+                line_strain TEXT,
+                data TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO crosses (cross_id, cross_status, line_strain, data)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                cross_id,
+                "set-up",
+                "Tg(elavl3:GCaMP7ff)",
+                json.dumps({
+                    "crossing_id": cross_id,
+                    "responsible_fullname": "How Javier",
+                    "date_of_set_up": "2026-05-05T09:42:29",
+                    "strain_name": "Tg(elavl3:GCaMP7ff)",
+                    "tanks": {
+                        "parents": [
+                            {
+                                "tank_id": 6507,
+                                "strain_name": "WIK Casper_HHMI",
+                                "number_of_female": 1,
+                                "generation": "F1",
+                            },
+                            {
+                                "tank_id": 5724,
+                                "strain_name": "Tg(elavl3:GCaMP7ff)",
+                                "number_of_male": 1,
+                                "generation": "F1",
+                            },
+                        ],
+                    },
+                }),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        api_resp = client.get(f"/crosses/{cross_id}/provenance")
+        assert api_resp.status_code == 200
+        payload = api_resp.json()
+        assert payload["summary"]["parent_count"] == 2
+        assert payload["summary"]["dish_count"] == 2
+        assert payload["background_summary"]["background_summary"] == "WIK + Casper_HHMI + casper"
+        assert payload["parents"][0]["generation"] == "F1"
+        assert payload["dishes"][0]["dish_id"] in {dish_a, dish_b}
+
+        page_resp = client.get(f"/crosses/{cross_id}/provenance/")
+        assert page_resp.status_code == 200
+        assert "Provenance - Cross" in page_resp.text
+        assert "WIK Casper_HHMI" in page_resp.text
+        assert "Casper_HHMI" in page_resp.text
+        assert f'href="/crosses/{cross_id}/lineage/"' in page_resp.text
+
+    def test_cross_api_serves_cached_cross_without_pyrat(self, client, seed_cross_dishes, monkeypatch):
+        import metazebrobot.api_server as api_server
+
+        cross_id, _, _ = seed_cross_dishes
+        conn = sqlite3.connect(str(data_manager.database_path))
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS crosses (
+                cross_id TEXT PRIMARY KEY,
+                cross_status TEXT,
+                line_strain TEXT,
+                parents TEXT,
+                data TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO crosses (cross_id, cross_status, line_strain, data)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                cross_id,
+                "set-up",
+                "Casper_HHMI",
+                json.dumps({
+                    "crossing_id": cross_id,
+                    "strain_name": "Casper_HHMI",
+                    "tanks": {
+                        "parents": [
+                            {
+                                "tank_id": 6311,
+                                "location_rack_name": "M10",
+                                "tank_position": "D1",
+                            }
+                        ]
+                    },
+                }),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setattr(api_server, "get_pyrat_api_credentials", lambda: None)
+        resp = client.get(f"/crosses/{cross_id}")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "cross_id": cross_id,
+            "line_strain": "Casper_HHMI",
+            "parents": [{"identifier": "6311_M10_D1", "sex": "unknown"}],
+            "source": "cache",
+            "dishes": None,
+        }
+
+    def test_cross_api_missing_uncached_cross_returns_structured_error(self, client, monkeypatch):
+        import metazebrobot.api_server as api_server
+
+        monkeypatch.setattr(api_server, "get_pyrat_api_credentials", lambda: None)
+
+        resp = client.get("/crosses/NO_SUCH_CROSS")
+
+        assert resp.status_code == 503
+        assert resp.json()["detail"]["error"] == "pyrat_not_configured"
+        assert resp.json()["detail"]["cross_id"] == "NO_SUCH_CROSS"
+
+    def test_acquisition_openapi_has_explicit_response_schemas(self, client):
+        resp = client.get("/openapi.json")
+
+        assert resp.status_code == 200
+        paths = resp.json()["paths"]
+        acquisition_schema = paths["/acquisition/dishes"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+        snapshot_schema = paths["/dishes/{dish_id}/citrus-snapshot"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+        cross_schema = paths["/crosses/{cross_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+
+        assert acquisition_schema["$ref"].endswith("/AcquisitionDishesResponse")
+        assert snapshot_schema["$ref"].endswith("/CitrusSnapshotResponse")
+        assert cross_schema["$ref"].endswith("/CrossSnapshotResponse")
 
     def test_screening_page_links_to_cross_lineage(self, client, seed_full_dish):
         dish = client.get(f"/dishes/{seed_full_dish}").json()

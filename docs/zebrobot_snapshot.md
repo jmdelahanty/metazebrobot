@@ -42,15 +42,32 @@ the DB host.
 
 ## Endpoints used
 
-- List active dishes for dropdown:
+- List active dishes for the acquisition dropdown, with DPF, current fish count,
+  registered fish/unit counts, cross background summary, and follow-up links:
+  - `GET /acquisition/dishes?status=active&limit=300&offset=0`
+- Legacy/general active-dish list:
   - `GET /dishes?status=active&limit=200&offset=0`
 - Fetch a specific dish:
   - `GET /dishes/{dish_id}`
+- Fetch the no-PII H5 snapshot payload for a selected dish:
+  - `GET /dishes/{dish_id}/citrus-snapshot`
+- Fetch registered fish or housing units for a selected dish:
+  - `GET /dishes/{dish_id}/fish`
+  - `GET /dishes/{dish_id}/units`
 - Fetch its cross:
   - `GET /crosses/{cross_id}`
+- Fetch cached parent/background provenance:
+  - `GET /crosses/{cross_id}/provenance`
+- Health check with local DB and PyRAT status split apart:
+  - `GET /health?check_db=true&check_pyrat=true`
 
-Note: `GET /crosses/{cross_id}` returns `parents` as a JSON-encoded string.
-Parse it before storing.
+Note: `GET /crosses/{cross_id}` returns `parents` as a JSON array. Older
+snapshots may have stored this field as a JSON-encoded string.
+
+If `GET /acquisition/dishes?status=active...` returns an empty `items` list,
+MetaZebrobot has no currently active dishes matching the filter. Create or
+reactivate an acquisition-ready dish in MetaZebrobot rather than changing the
+status value in Citrus.
 
 ## Snapshot JSON schema (required fields)
 

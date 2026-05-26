@@ -391,6 +391,14 @@ class TestGenotypeParser:
         assert result[1]["sensor_family"] == "GRAB"
         assert result[1]["sensor_target"] == "serotonin"
 
+    def test_grabatp_sensor_target_classification(self):
+        result = data_manager.parse_genotype("Tg(elavl3:GRABATP1.0)")
+
+        assert len(result) == 1
+        assert result[0]["construct_role"] == "sensor"
+        assert result[0]["sensor_family"] == "GRAB"
+        assert result[0]["sensor_target"] == "ATP"
+
     def test_promoter_only_construct_is_driver(self):
         result = data_manager.parse_genotype("Tg(elavl3)")
         assert result[0]["construct_role"] == "driver"
@@ -456,6 +464,34 @@ class TestDishTransgenes:
         assert tgs[0]["spectra"]["ex"] == 488
         assert tgs[0]["spectra"]["em"] == 509
 
+    def test_grabatp_catalog_match_enriches_dish_transgenes(self, client):
+        dish_data = {
+            "dish_id": f"DISH_{uuid.uuid4().hex[:8]}",
+            "cross_id": "18178",
+            "date_created": "20260518",
+            "dof": "20260512",
+            "genotype": "Tg(elavl3:GRABATP1.0)",
+            "responsible": "test-user",
+            "fish_count": 10,
+            "species": "Danio rerio",
+            "sex": "unknown",
+            "status": "active",
+        }
+
+        assert data_manager.save_fish_dish(dish_data)
+        tgs = data_manager.get_dish_transgenes(dish_data["dish_id"])
+
+        assert len(tgs) == 1
+        assert tgs[0]["catalog_id"] is not None
+        assert tgs[0]["catalog_name"] == "GRABATP1.0"
+        assert tgs[0]["match_method"] == "alias_exact"
+        assert tgs[0]["construct_role"] == "sensor"
+        assert tgs[0]["sensor_family"] == "GRAB"
+        assert tgs[0]["sensor_target"] == "ATP"
+        assert tgs[0]["fluorophore"] == "cpEGFP"
+        assert tgs[0]["spectra"]["ex"] == 500
+        assert tgs[0]["spectra"]["em"] == 520
+
 
 class TestCrossingIndicatorNormalization:
     """crossing indicator rows should persist normalized construct metadata."""
@@ -495,6 +531,13 @@ class TestConstructCatalog:
 
         assert catalog_id is not None
         assert match_method == "alias_exact"
+
+    def test_grabatp_alias_resolution_uses_seed_catalog(self, client):
+        for alias in ("GRABATP1.0", "GRAB_ATP1.0", "GRAB-ATP"):
+            catalog_id, match_method = data_manager.resolve_construct_catalog_match(alias)
+
+            assert catalog_id is not None
+            assert match_method == "alias_exact"
 
 
 class TestMapzebrainLookup:

@@ -4,11 +4,15 @@ from types import SimpleNamespace
 from metazebrobot.api_server import (
     _cross_prefill_complete,
     _cross_prefill_from_payload,
+    _ensure_cross_parent_provenance_schema,
+    _load_cross_parent_provenance,
     _merge_cross_payload,
     _next_dish_number_for_cross,
     _prepare_crossings_for_display,
     _screening_indicator_suggestions,
+    _upsert_cross_parent_provenance,
 )
+from metazebrobot.utils.cross_provenance import parse_parent_background
 
 
 class TestScreeningIndicatorSuggestions:
@@ -163,6 +167,96 @@ class TestCrossPrefillHelpers:
         prefill = _cross_prefill_from_payload(payload)
 
         assert prefill["parents"] == "#6489_M12>D9"
+
+    def test_cross_prefill_includes_parent_provenance(self):
+        payload = {
+            "strain_name": "Tg(elavl3:GCaMP7ff)",
+            "responsible_fullname": "How Javier",
+            "date_of_set_up": "2026-05-05T09:42:29",
+            "tanks": {
+                "parents": [
+                    {
+                        "tank_id": 6507,
+                        "strain_name": "WIK Casper_HHMI",
+                        "number_of_female": 1,
+                        "generation": "F1",
+                        "location_rack_name": "M12",
+                        "tank_position": "E4",
+                    },
+                    {
+                        "tank_id": 5724,
+                        "strain_name": "Tg(elavl3:GCaMP7ff)",
+                        "number_of_male": 1,
+                        "generation": "F1",
+                    },
+                ],
+            },
+        }
+
+        prefill = _cross_prefill_from_payload(payload)
+
+        provenance = prefill["parent_provenance"]
+        assert provenance["summary"]["background_summary"] == "WIK + Casper_HHMI + casper"
+        assert provenance["parents"][0]["role"] == "female"
+        assert provenance["parents"][0]["background_strains"] == ["WIK"]
+        assert provenance["parents"][0]["line_labels"] == ["Casper_HHMI"]
+        assert provenance["parents"][0]["mutant_backgrounds"] == ["casper"]
+        assert provenance["parents"][1]["role"] == "male"
+
+
+class TestCrossParentProvenance:
+    def test_parse_parent_background_keeps_backgrounds_separate_from_transgenes(self):
+        wik = parse_parent_background("WIK Casper_HHMI")
+        assert wik["background_strains"] == ["WIK"]
+        assert wik["line_labels"] == ["Casper_HHMI"]
+        assert wik["mutant_backgrounds"] == ["casper"]
+        assert wik["transgenes"] == []
+
+        transgene = parse_parent_background("Tg(elavl3:jRGECO1b)")
+        assert transgene["background_strains"] == []
+        assert transgene["line_labels"] == []
+        assert transgene["transgenes"][0]["promoter"] == "elavl3"
+
+    def test_upsert_cross_parent_provenance_is_idempotent(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE crosses (cross_id TEXT PRIMARY KEY, data TEXT)")
+        _ensure_cross_parent_provenance_schema(conn)
+
+        payload = {
+            "crossing_id": 18055,
+            "tanks": {
+                "parents": [
+                    {
+                        "tank_id": 6507,
+                        "strain_name": "WIK Casper_HHMI",
+                        "number_of_female": 1,
+                        "generation": "F1",
+                    },
+                    {
+                        "tank_id": 5724,
+                        "strain_name": "Tg(elavl3:GCaMP7ff)",
+                        "number_of_male": 1,
+                        "generation": "F1",
+                    },
+                ],
+            },
+        }
+
+        _upsert_cross_parent_provenance(conn, "18055", payload)
+        _upsert_cross_parent_provenance(conn, "18055", payload)
+
+        count = conn.execute("SELECT COUNT(*) FROM cross_parents WHERE cross_id = '18055'").fetchone()[0]
+        summary = conn.execute(
+            "SELECT background_summary, has_mixed_background FROM cross_background_summaries WHERE cross_id = '18055'"
+        ).fetchone()
+        display = _load_cross_parent_provenance(conn, "18055")
+
+        assert count == 2
+        assert summary["background_summary"] == "WIK + Casper_HHMI + casper"
+        assert summary["has_mixed_background"] == 1
+        assert display["parents"][0]["generation"] == "F1"
+        assert display["summary"]["background_strains"] == ["WIK"]
 
 
 class TestCrossingDisplayHelpers:

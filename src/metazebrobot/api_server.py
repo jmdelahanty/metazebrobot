@@ -20,6 +20,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFi
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
 from .controllers.fish_dish_controller import FishDishController
 from .data.data_manager import data_manager
@@ -41,6 +42,7 @@ from .utils.pyrat_frontend_client import (
     enrich_crossings_with_frontend_details,
     get_pyrat_frontend_credentials,
 )
+from .utils.cross_provenance import normalize_cross_parents, summarize_cross_background
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,124 @@ _REFERENCE_DISPLAY_ROLE_LABELS = {
     "other": "Other",
     "reference": "Reference",
 }
+
+
+class HealthResponse(BaseModel):
+    status: str
+    db: Optional[str] = None
+    pyrat: Optional[str] = None
+    components: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CrossParentSnapshot(BaseModel):
+    identifier: str
+    sex: str = "unknown"
+
+
+class CrossSnapshotResponse(BaseModel):
+    cross_id: str
+    line_strain: str = ""
+    parents: List[CrossParentSnapshot] = Field(default_factory=list)
+    source: Optional[str] = None
+    dishes: Optional[List[Dict[str, Any]]] = None
+
+
+class DishListItem(BaseModel):
+    dish_id: str
+    cross_id: Optional[str] = None
+    genotype: Optional[str] = None
+    responsible: Optional[str] = None
+    fish_count: Optional[int] = None
+    dof: Optional[str] = None
+    dpf: Optional[int] = None
+    status: Optional[str] = None
+    date_created: Optional[str] = None
+    termination_date: Optional[str] = None
+    screening_date_finalized: Optional[str] = None
+    latest_screening_datetime: Optional[str] = None
+    last_check: Optional[str] = None
+    parent_dish_id: Optional[str] = None
+    dish_population_type: Optional[str] = None
+
+
+class DishListResponse(BaseModel):
+    items: List[DishListItem] = Field(default_factory=list)
+
+
+class AcquisitionCrossSummary(BaseModel):
+    cross_id: Optional[str] = None
+    line_strain: Optional[str] = None
+    status: Optional[str] = None
+    cache_updated_at: Optional[str] = None
+    background_summary: Optional[str] = None
+    background_strains: List[str] = Field(default_factory=list)
+    line_labels: List[str] = Field(default_factory=list)
+    mutant_backgrounds: List[str] = Field(default_factory=list)
+    has_mixed_background: bool = False
+
+
+class AcquisitionLinks(BaseModel):
+    dish: str
+    fish: str
+    units: str
+    cross_provenance: Optional[str] = None
+
+
+class AcquisitionDishItem(BaseModel):
+    dish_id: str
+    cross_id: Optional[str] = None
+    genotype: Optional[str] = None
+    species: str = "Danio rerio"
+    sex: str = "unknown"
+    responsible: Optional[str] = None
+    status: Optional[str] = None
+    date_created: Optional[str] = None
+    dof: Optional[str] = None
+    dpf: Optional[int] = None
+    cross_setup_date: Optional[str] = None
+    dof_source: Optional[str] = None
+    fish_count: Optional[int] = None
+    current_fish_count: Optional[int] = None
+    registered_fish_count: int = 0
+    housing_unit_count: int = 0
+    container_type: Optional[str] = None
+    room: Optional[str] = None
+    parent_dish_id: Optional[str] = None
+    dish_population_type: str = "primary"
+    source_screening_datetime: Optional[str] = None
+    source_screening_bucket: Optional[str] = None
+    latest_screening_datetime: Optional[str] = None
+    last_check: Optional[str] = None
+    termination_date: Optional[str] = None
+    termination_reason: Optional[str] = None
+    screening_date_finalized: Optional[str] = None
+    parents_display: str = ""
+    cross: Optional[AcquisitionCrossSummary] = None
+    links: AcquisitionLinks
+
+
+class AcquisitionDishesResponse(BaseModel):
+    schema_version: int = 1
+    purpose: str = "citrus_acquisition_dish_picker"
+    status_filter: str
+    limit: int
+    offset: int
+    count: int
+    items: List[AcquisitionDishItem] = Field(default_factory=list)
+
+
+class CitrusSnapshotResponse(BaseModel):
+    schema_version: int = 1
+    dish_id: str
+    cross_id: Optional[str] = None
+    genotype: Optional[str] = None
+    dof: Optional[str] = None
+    dpf: Optional[int] = None
+    fish_count: Optional[int] = None
+    species: str = "Danio rerio"
+    sex: str = "unknown"
+    line_strain: Optional[str] = None
+    parents: List[CrossParentSnapshot] = Field(default_factory=list)
 
 
 def _clean_optional(value: Optional[str]) -> Optional[str]:
@@ -509,6 +629,14 @@ def _html_date_plus_days(date_value: Optional[str], days: int) -> Optional[str]:
     return (datetime.strptime(normalized, "%Y-%m-%d") + timedelta(days=days)).strftime("%Y-%m-%d")
 
 
+def _yyyymmdd_from_html_date(date_value: Optional[str]) -> Optional[str]:
+    """Convert a browser date input value to ``YYYYMMDD`` for storage."""
+    normalized = _normalize_html_date(date_value)
+    if not normalized:
+        return None
+    return normalized.replace("-", "")
+
+
 def _format_parent_locations(parent_tanks: Optional[List[Dict[str, Any]]]) -> str:
     """Build a readable comma-separated parent tank list from PyRAT-like data."""
     if not parent_tanks:
@@ -534,7 +662,7 @@ def _format_parent_locations(parent_tanks: Optional[List[Dict[str, Any]]]) -> st
     return ", ".join(labels)
 
 
-def _cross_prefill_from_payload(cross: Dict[str, Any]) -> Dict[str, str]:
+def _cross_prefill_from_payload(cross: Dict[str, Any]) -> Dict[str, Any]:
     """Extract dish-form defaults from a PyRAT or locally cached cross payload."""
     parent_tanks = cross.get("parent_tanks")
     if not parent_tanks:
@@ -555,10 +683,33 @@ def _cross_prefill_from_payload(cross: Dict[str, Any]) -> Dict[str, str]:
         "cross_setup_date": setup_date or "",
         "dof": dof,
         "dof_source": dof_source,
+        "parent_provenance": _parent_provenance_from_payload(cross),
     }
 
 
-def _cross_prefill_complete(prefill: Dict[str, str]) -> bool:
+def _parent_provenance_from_payload(cross: Dict[str, Any]) -> Dict[str, Any]:
+    """Return display-ready parent provenance directly from a PyRAT payload."""
+    parent_rows = normalize_cross_parents(cross)
+    summary = summarize_cross_background(parent_rows) if parent_rows else None
+    parents = []
+    for row in parent_rows:
+        parents.append({
+            "parent_index": row["parent_index"],
+            "role": row["role"],
+            "tank_id": str(row["tank_id"]) if row.get("tank_id") is not None else None,
+            "tank_label": row.get("tank_label"),
+            "location_display": row.get("location_display"),
+            "raw_strain_name": row.get("raw_strain_name"),
+            "generation": row.get("generation"),
+            "background_strains": row.get("parsed_background_strains") or [],
+            "line_labels": row.get("parsed_line_labels") or [],
+            "mutant_backgrounds": row.get("parsed_mutant_alleles") or [],
+            "confidence": row.get("confidence") or "raw",
+        })
+    return {"parents": parents, "summary": summary}
+
+
+def _cross_prefill_complete(prefill: Dict[str, Any]) -> bool:
     """Return True when local cross data is sufficient to render the new-dish form."""
     return all([
         prefill.get("genotype"),
@@ -568,7 +719,7 @@ def _cross_prefill_complete(prefill: Dict[str, str]) -> bool:
     ])
 
 
-def _load_local_cross_prefill(conn: sqlite3.Connection, cross_id: str) -> Dict[str, str]:
+def _load_local_cross_prefill(conn: sqlite3.Connection, cross_id: str) -> Dict[str, Any]:
     """Load cross defaults from locally cached crosses and prior dishes."""
     prefill = {
         "genotype": "",
@@ -577,6 +728,7 @@ def _load_local_cross_prefill(conn: sqlite3.Connection, cross_id: str) -> Dict[s
         "cross_setup_date": "",
         "dof": "",
         "dof_source": "",
+        "parent_provenance": {"parents": [], "summary": None},
     }
 
     try:
@@ -596,6 +748,10 @@ def _load_local_cross_prefill(conn: sqlite3.Connection, cross_id: str) -> Dict[s
         if not cached["genotype"]:
             cached["genotype"] = cross_row["line_strain"] or ""
         prefill.update({k: v for k, v in cached.items() if v})
+
+    provenance = _load_cross_parent_provenance(conn, cross_id)
+    if provenance["parents"]:
+        prefill["parent_provenance"] = provenance
 
     dish_row = conn.execute(
         """
@@ -900,6 +1056,7 @@ def _cache_cross_rows(crossings: List[Dict[str, Any]]) -> None:
 
     try:
         with data_manager.get_connection() as conn:
+            _ensure_cross_cache_schema(conn)
             for cross in crossings:
                 cross_id = cross.get("crossing_id")
                 if not cross_id:
@@ -928,9 +1085,363 @@ def _cache_cross_rows(crossings: List[Dict[str, Any]]) -> None:
                         json.dumps(merged),
                     ),
                 )
+                _upsert_cross_parent_provenance(conn, str(cross_id), merged)
             conn.commit()
     except Exception as exc:
         logger.warning("Unable to cache %s crossing row(s): %s", len(crossings), exc)
+
+
+def _ensure_cross_cache_schema(conn: sqlite3.Connection) -> None:
+    """Create the local PyRAT crossing cache table when missing."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS crosses (
+            cross_id TEXT PRIMARY KEY,
+            cross_status TEXT,
+            line_strain TEXT,
+            parents TEXT,
+            data TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+def _ensure_cross_parent_provenance_schema(conn: sqlite3.Connection) -> None:
+    """Create cross-parent provenance tables when running through API startup."""
+    _ensure_cross_cache_schema(conn)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cross_parents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cross_id TEXT NOT NULL,
+            parent_index INTEGER NOT NULL,
+            role TEXT,
+            tank_id TEXT,
+            tank_label TEXT,
+            location_display TEXT,
+            raw_strain_name TEXT,
+            generation TEXT,
+            parsed_background_strains TEXT,
+            parsed_line_labels TEXT,
+            parsed_transgenes TEXT,
+            parsed_mutant_alleles TEXT,
+            source TEXT DEFAULT 'pyrat',
+            confidence TEXT DEFAULT 'raw',
+            raw_payload TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (cross_id) REFERENCES crosses(cross_id),
+            UNIQUE(cross_id, parent_index)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_cross_parents_cross_id
+        ON cross_parents(cross_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_cross_parents_tank_id
+        ON cross_parents(tank_id)
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cross_background_summaries (
+            cross_id TEXT PRIMARY KEY,
+            background_summary TEXT,
+            background_strains TEXT,
+            line_labels TEXT,
+            mutant_backgrounds TEXT,
+            transgenes TEXT,
+            has_mixed_background INTEGER DEFAULT 0,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (cross_id) REFERENCES crosses(cross_id)
+        )
+    """)
+
+
+def _upsert_cross_parent_provenance(
+    conn: sqlite3.Connection,
+    cross_id: str,
+    cross_payload: Dict[str, Any],
+) -> None:
+    """Normalize and persist PyRAT parent/background provenance for one cross."""
+    _ensure_cross_parent_provenance_schema(conn)
+    parent_rows = normalize_cross_parents(cross_payload)
+    if not parent_rows:
+        return
+
+    conn.execute("DELETE FROM cross_parents WHERE cross_id = ?", (cross_id,))
+    for row in parent_rows:
+        conn.execute(
+            """
+            INSERT INTO cross_parents (
+                cross_id, parent_index, role, tank_id, tank_label,
+                location_display, raw_strain_name, generation,
+                parsed_background_strains, parsed_line_labels,
+                parsed_transgenes, parsed_mutant_alleles,
+                source, confidence, raw_payload, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pyrat', ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                cross_id,
+                row["parent_index"],
+                row["role"],
+                str(row["tank_id"]) if row.get("tank_id") is not None else None,
+                row.get("tank_label"),
+                row.get("location_display"),
+                row.get("raw_strain_name"),
+                row.get("generation"),
+                json.dumps(row.get("parsed_background_strains") or []),
+                json.dumps(row.get("parsed_line_labels") or []),
+                json.dumps(row.get("parsed_transgenes") or []),
+                json.dumps(row.get("parsed_mutant_alleles") or []),
+                row.get("confidence") or "raw",
+                json.dumps(row.get("raw_payload") or {}),
+            ),
+        )
+
+    summary = summarize_cross_background(parent_rows)
+    conn.execute(
+        """
+        INSERT INTO cross_background_summaries (
+            cross_id, background_summary, background_strains, line_labels,
+            mutant_backgrounds, transgenes, has_mixed_background, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(cross_id) DO UPDATE SET
+            background_summary = excluded.background_summary,
+            background_strains = excluded.background_strains,
+            line_labels = excluded.line_labels,
+            mutant_backgrounds = excluded.mutant_backgrounds,
+            transgenes = excluded.transgenes,
+            has_mixed_background = excluded.has_mixed_background,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (
+            cross_id,
+            summary["background_summary"],
+            json.dumps(summary["background_strains"]),
+            json.dumps(summary["line_labels"]),
+            json.dumps(summary["mutant_backgrounds"]),
+            json.dumps(summary["transgenes"]),
+            1 if summary["has_mixed_background"] else 0,
+        ),
+    )
+
+
+def _backfill_cross_parent_provenance(conn: sqlite3.Connection) -> Tuple[int, int]:
+    """Populate parent provenance tables from already-cached crosses.data."""
+    _ensure_cross_parent_provenance_schema(conn)
+    try:
+        rows = conn.execute("SELECT cross_id, data FROM crosses").fetchall()
+    except sqlite3.OperationalError:
+        return (0, 0)
+
+    processed = 0
+    updated = 0
+    for row in rows:
+        processed += 1
+        existing = conn.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM cross_parents WHERE cross_id = ?) AS parent_count,
+                (SELECT COUNT(*) FROM cross_background_summaries WHERE cross_id = ?) AS summary_count
+            """,
+            (str(row["cross_id"]), str(row["cross_id"])),
+        ).fetchone()
+        if existing and existing[0] and existing[1]:
+            continue
+        try:
+            payload = json.loads(row["data"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        before = conn.total_changes
+        _upsert_cross_parent_provenance(conn, str(row["cross_id"]), payload)
+        if conn.total_changes != before:
+            updated += 1
+    return processed, updated
+
+
+def _json_list(value: Optional[str]) -> List[Any]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _clean_parent_identifier(value: Optional[Any]) -> str:
+    text = str(value or "").strip()
+    if text.startswith("#"):
+        text = text[1:]
+    return text.replace(">", "_").replace(":", "_").replace(" ", "_")
+
+
+def _parent_sex_from_counts_or_role(parent: Dict[str, Any]) -> str:
+    role = (parent.get("role") or "").lower()
+    if role == "male":
+        return "M"
+    if role == "female":
+        return "F"
+    males = int(parent.get("number_of_male") or 0)
+    females = int(parent.get("number_of_female") or 0)
+    if males and not females:
+        return "M"
+    if females and not males:
+        return "F"
+    return "unknown"
+
+
+def _parent_snapshot_from_raw(parent: Dict[str, Any]) -> Dict[str, str]:
+    tank_id = parent.get("tank_id")
+    rack = parent.get("location_rack_name")
+    position = parent.get("tank_position")
+    if tank_id and rack and position:
+        identifier = f"{tank_id}_{rack}_{position}"
+    elif parent.get("location_display"):
+        identifier = _clean_parent_identifier(parent.get("location_display"))
+    elif parent.get("tank_label"):
+        identifier = _clean_parent_identifier(parent.get("tank_label"))
+    elif tank_id:
+        identifier = str(tank_id)
+    else:
+        identifier = "unknown"
+    return {"identifier": identifier, "sex": _parent_sex_from_counts_or_role(parent)}
+
+
+def _parent_snapshots_from_payload(payload: Dict[str, Any]) -> List[Dict[str, str]]:
+    parent_tanks = payload.get("parent_tanks") or (payload.get("tanks") or {}).get("parents") or []
+    return [
+        _parent_snapshot_from_raw(parent)
+        for parent in parent_tanks
+        if isinstance(parent, dict)
+    ]
+
+
+def _parent_snapshots_from_provenance(conn: sqlite3.Connection, cross_id: str) -> List[Dict[str, str]]:
+    try:
+        rows = conn.execute(
+            """
+            SELECT role, tank_id, tank_label, location_display
+            FROM cross_parents
+            WHERE cross_id = ?
+            ORDER BY parent_index
+            """,
+            (cross_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [
+        _parent_snapshot_from_raw(_row_to_dict(row))
+        for row in rows
+    ]
+
+
+def _line_strain_from_cross_payload(payload: Dict[str, Any], fallback: Optional[str] = None) -> str:
+    return payload.get("strain_name") or payload.get("strain_name_with_id") or fallback or ""
+
+
+def _cross_snapshot_from_cache_row(
+    conn: sqlite3.Connection,
+    cross_id: str,
+    row: sqlite3.Row,
+) -> Dict[str, Any]:
+    try:
+        payload = json.loads(row["data"] or "{}")
+    except (TypeError, ValueError):
+        payload = {}
+    parents = _parent_snapshots_from_provenance(conn, cross_id) or _parent_snapshots_from_payload(payload)
+    return {
+        "cross_id": str(cross_id),
+        "line_strain": _line_strain_from_cross_payload(payload, row["line_strain"]),
+        "parents": parents,
+        "source": "cache",
+    }
+
+
+def _load_cached_cross_snapshot(
+    conn: sqlite3.Connection,
+    cross_id: str,
+) -> Optional[Dict[str, Any]]:
+    try:
+        row = conn.execute(
+            """
+            SELECT cross_id, line_strain, data
+            FROM crosses
+            WHERE cross_id = ?
+            LIMIT 1
+            """,
+            (cross_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    if not row:
+        return None
+    return _cross_snapshot_from_cache_row(conn, cross_id, row)
+
+
+def _cross_snapshot_from_payload(cross_id: str, payload: Dict[str, Any], source: str) -> Dict[str, Any]:
+    return {
+        "cross_id": str(payload.get("crossing_id") or cross_id),
+        "line_strain": _line_strain_from_cross_payload(payload),
+        "parents": _parent_snapshots_from_payload(payload),
+        "source": source,
+    }
+
+
+def _load_cross_parent_provenance(conn: sqlite3.Connection, cross_id: str) -> Dict[str, Any]:
+    """Load display-ready parent provenance for the new-dish form."""
+    try:
+        parent_rows = conn.execute(
+            """
+            SELECT parent_index, role, tank_id, tank_label, location_display,
+                   raw_strain_name, generation, parsed_background_strains,
+                   parsed_line_labels, parsed_transgenes, parsed_mutant_alleles,
+                   confidence
+            FROM cross_parents
+            WHERE cross_id = ?
+            ORDER BY parent_index
+            """,
+            (cross_id,),
+        ).fetchall()
+        summary_row = conn.execute(
+            """
+            SELECT background_summary, background_strains, line_labels,
+                   mutant_backgrounds, has_mixed_background
+            FROM cross_background_summaries
+            WHERE cross_id = ?
+            """,
+            (cross_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return {"parents": [], "summary": None}
+
+    parents = []
+    for row in parent_rows:
+        parents.append({
+            "parent_index": row["parent_index"],
+            "role": row["role"],
+            "tank_id": row["tank_id"],
+            "tank_label": row["tank_label"],
+            "location_display": row["location_display"],
+            "raw_strain_name": row["raw_strain_name"],
+            "generation": row["generation"],
+            "background_strains": _json_list(row["parsed_background_strains"]),
+            "line_labels": _json_list(row["parsed_line_labels"]),
+            "mutant_backgrounds": _json_list(row["parsed_mutant_alleles"]),
+            "confidence": row["confidence"],
+        })
+
+    summary = None
+    if summary_row:
+        summary = {
+            "background_summary": summary_row["background_summary"],
+            "background_strains": _json_list(summary_row["background_strains"]),
+            "line_labels": _json_list(summary_row["line_labels"]),
+            "mutant_backgrounds": _json_list(summary_row["mutant_backgrounds"]),
+            "has_mixed_background": bool(summary_row["has_mixed_background"]),
+        }
+
+    return {"parents": parents, "summary": summary}
 
 
 def _load_cross_prefill(
@@ -947,6 +1458,7 @@ def _load_cross_prefill(
         "cross_setup_date": "",
         "dof": "",
         "dof_source": "",
+        "parent_provenance": {"parents": [], "summary": None},
         "error": None,
     }
 
@@ -956,6 +1468,8 @@ def _load_cross_prefill(
                 local_prefill = _load_local_cross_prefill(conn, cross_id)
             for key in ("genotype", "responsible", "parents", "cross_setup_date", "dof", "dof_source"):
                 prefill[key] = prefill[key] or local_prefill[key]
+            if local_prefill.get("parent_provenance", {}).get("parents"):
+                prefill["parent_provenance"] = local_prefill["parent_provenance"]
 
             if _cross_prefill_complete(prefill):
                 logger.info("Cross prefill %s served from local cache in %.2fs", cross_id, perf_counter() - started)
@@ -974,7 +1488,7 @@ def _load_cross_prefill(
                     "tk": [
                         "tank_id", "tank_label", "status", "strain_name",
                         "number_of_male", "number_of_female", "number_of_unknown",
-                        "alive_count", "date_of_birth",
+                        "alive_count", "date_of_birth", "generation",
                         "location_rack_name", "location_room_name", "tank_position",
                     ],
                 },
@@ -989,6 +1503,8 @@ def _load_cross_prefill(
                 live_prefill = _cross_prefill_from_payload(cross)
                 for key in ("genotype", "responsible", "parents", "cross_setup_date", "dof", "dof_source"):
                     prefill[key] = prefill[key] or live_prefill[key]
+                if live_prefill.get("parent_provenance", {}).get("parents"):
+                    prefill["parent_provenance"] = live_prefill["parent_provenance"]
     except Exception as exc:
         prefill["error"] = f"Could not fetch cross info: {exc}"
 
@@ -1031,6 +1547,7 @@ async def lifespan(app: FastAPI):
 
         # Apply remaining API-server-specific schema updates.
         with data_manager.get_connection() as conn:
+            _ensure_cross_parent_provenance_schema(conn)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS screening_step_images (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1435,6 +1952,13 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_genotype_reference_images_transgene
                 ON genotype_reference_images(transgene_key, is_active)
             """)
+            processed_crosses, updated_crosses = _backfill_cross_parent_provenance(conn)
+            if updated_crosses:
+                logger.info(
+                    "Backfilled PyRAT parent provenance for %s/%s cached crosses",
+                    updated_crosses,
+                    processed_crosses,
+                )
             conn.commit()
 
         data_manager.load_all_data()
@@ -1554,6 +2078,43 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         except (ValueError, TypeError):
             return None
 
+    def _dish_dpf_reference_date(dish: Dict[str, Any]) -> Optional[datetime]:
+        """Return the date a dish's displayed DPF should be calculated against.
+
+        Active dishes are aged against today. Inactive dishes are aged against
+        the best available end-of-use date, in descending confidence:
+        explicit termination date, finalized screening date, latest screening
+        step datetime, then latest care/check datetime. Older inactive rows may
+        predate termination_date tracking; returning None for those avoids
+        showing a misleading "current age" for an animal population that is no
+        longer active.
+        """
+        if (dish.get("status") or "").lower() == "active":
+            return None
+
+        for key in (
+            "termination_date",
+            "screening_date_finalized",
+            "latest_screening_datetime",
+            "last_check",
+        ):
+            value = dish.get(key)
+            if not value:
+                continue
+            date_text = str(value).split("T", 1)[0]
+            try:
+                return datetime.strptime(date_text, "%Y%m%d")
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    def _dpf_for_dish(dish: Dict[str, Any]) -> Optional[int]:
+        """Calculate dish DPF using today for active dishes and termination date otherwise."""
+        ref_date = _dish_dpf_reference_date(dish)
+        if (dish.get("status") or "").lower() != "active" and ref_date is None:
+            return None
+        return _dpf_from_dof(dish.get("dof") or "", ref_date)
+
     def _label_from_token(value: Optional[str]) -> str:
         """Convert stored enum-like values into compact display labels."""
         return (value or "").replace("_", " ").strip().title()
@@ -1580,8 +2141,21 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     d.source_screening_bucket,
                     d.termination_date,
                     d.termination_reason,
+                    d.screening_date_finalized,
+                    ss.latest_screening_datetime,
+                    qc.last_check,
                     COALESCE(fs.registered_fish_count, 0) AS registered_fish_count
                 FROM dishes d
+                LEFT JOIN (
+                    SELECT dish_id, MAX(screening_datetime) AS latest_screening_datetime
+                    FROM screening_steps
+                    GROUP BY dish_id
+                ) ss ON ss.dish_id = d.dish_id
+                LEFT JOIN (
+                    SELECT dish_id, MAX(check_time) AS last_check
+                    FROM quality_checks
+                    GROUP BY dish_id
+                ) qc ON qc.dish_id = d.dish_id
                 LEFT JOIN (
                     SELECT dish_id, COUNT(*) AS registered_fish_count
                     FROM fish_subjects
@@ -1675,7 +2249,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "status": d.get("status"),
                 "date_created": d.get("date_created"),
                 "dof": d.get("dof"),
-                "dpf": _dpf_from_dof(d.get("dof") or ""),
+                "dpf": _dpf_for_dish(d),
                 "fish_count": d.get("fish_count"),
                 "current_fish_count": current_count,
                 "registered_fish_count": d.get("registered_fish_count") or 0,
@@ -1686,6 +2260,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "termination_date_display": _normalize_html_date(d.get("termination_date")),
                 "termination_reason": d.get("termination_reason"),
                 "termination_reason_display": termination_reason_label(d.get("termination_reason")),
+                "screening_date_finalized": d.get("screening_date_finalized"),
+                "latest_screening_datetime": d.get("latest_screening_datetime"),
+                "last_check": d.get("last_check"),
             })
 
         edges: List[Dict[str, Any]] = []
@@ -1827,6 +2404,72 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "root_count": sum(1 for node in nodes if node["incoming_edge_count"] == 0),
                 "active_count": sum(1 for node in nodes if node.get("status") == "active"),
                 "inactive_count": sum(1 for node in nodes if node.get("status") == "inactive"),
+            },
+        }
+
+    def _load_cross_provenance(cross_id: str) -> Dict[str, Any]:
+        """Load read-only PyRAT parent/background provenance for a cross."""
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            try:
+                cross_row = conn.execute(
+                    """
+                    SELECT cross_id, cross_status, line_strain, data, updated_at
+                    FROM crosses
+                    WHERE cross_id = ?
+                    LIMIT 1
+                    """,
+                    (cross_id,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                cross_row = None
+
+            cross_payload: Dict[str, Any] = {}
+            cross_metadata: Dict[str, Any] = {}
+            if cross_row:
+                try:
+                    cross_payload = json.loads(cross_row["data"] or "{}")
+                except (TypeError, ValueError):
+                    cross_payload = {}
+                cross_metadata = {
+                    "cross_id": cross_id,
+                    "cross_status": cross_row["cross_status"],
+                    "line_strain": cross_row["line_strain"],
+                    "updated_at": cross_row["updated_at"],
+                    "responsible_fullname": cross_payload.get("responsible_fullname"),
+                    "date_of_record": cross_payload.get("date_of_record"),
+                    "date_of_set_up": cross_payload.get("date_of_set_up"),
+                    "strain_name": cross_payload.get("strain_name") or cross_payload.get("strain_name_with_id"),
+                }
+
+            parent_provenance = _load_cross_parent_provenance(conn, cross_id)
+            if not parent_provenance["parents"] and cross_payload:
+                parent_provenance = _parent_provenance_from_payload(cross_payload)
+
+            dish_rows = conn.execute(
+                """
+                SELECT dish_id, genotype, responsible, status, dof, termination_date,
+                       current_fish_count, fish_count, dish_population_type
+                FROM dishes
+                WHERE cross_id = ?
+                ORDER BY date_created ASC, dish_id ASC
+                """,
+                (cross_id,),
+            ).fetchall()
+            dishes = [_row_to_dict(row) for row in dish_rows]
+
+        return {
+            "cross_id": cross_id,
+            "cross": cross_metadata,
+            "has_cached_cross": bool(cross_metadata),
+            "parent_provenance": parent_provenance,
+            "parents": parent_provenance.get("parents", []),
+            "background_summary": parent_provenance.get("summary"),
+            "dishes": dishes,
+            "summary": {
+                "parent_count": len(parent_provenance.get("parents", [])),
+                "dish_count": len(dishes),
+                "has_background_summary": bool(parent_provenance.get("summary")),
             },
         }
 
@@ -2352,6 +2995,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "cross_setup_date": "",
             "dof": "",
             "dof_source": "",
+            "parent_provenance": {"parents": [], "summary": None},
             "error": None,
         }
         return templates.TemplateResponse(request, "dishes/new_dish.html", {
@@ -2370,6 +3014,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "cross_setup_date": prefill["cross_setup_date"],
             "dof": prefill["dof"],
             "dof_source": prefill["dof_source"],
+            "parent_provenance": prefill["parent_provenance"],
             "error": prefill["error"],
             "include_dof_oob": False,
         })
@@ -2394,6 +3039,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "cross_setup_date": prefill["cross_setup_date"],
             "dof": prefill["dof"],
             "dof_source": prefill["dof_source"],
+            "parent_provenance": prefill["parent_provenance"],
             "error": prefill["error"],
             "include_dof_oob": True,
         })
@@ -2423,12 +3069,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "responsible_fullname", "strain_name", "strain_name_with_id",
             ],
         }
-        # Filter by responsible user (from cookie)
+        # Default sync is scoped to the current user. "All crosses" intentionally
+        # drops the responsible_id filter so an exact or broad PyRAT query can
+        # discover crosses owned by another person when PyRAT permissions allow it.
         responsible_id = _pyrat_user_id(_current_user(request))
-        if responsible_id:
+        if responsible_id and not all_crosses:
             params["responsible_id"] = responsible_id
 
-        # Only fetch recent crosses unless "all" is requested
+        # Only fetch recent crosses unless "all visible crosses" is requested.
         if not all_crosses:
             cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
             params["date_of_record_from"] = cutoff
@@ -2585,12 +3233,17 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 d.parent_dish_id,
                 d.dish_population_type,
                 d.screening_final_positive_count,
+                d.screening_date_finalized,
                 COALESCE(ss.step_count, 0) AS step_count,
+                ss.latest_screening_datetime,
                 qc.last_check,
                 COALESCE(fs.registered_fish_count, 0) AS registered_fish_count
             FROM dishes d
             LEFT JOIN (
-                SELECT dish_id, COUNT(*) AS step_count
+                SELECT
+                    dish_id,
+                    COUNT(*) AS step_count,
+                    MAX(screening_datetime) AS latest_screening_datetime
                 FROM screening_steps
                 GROUP BY dish_id
             ) ss ON ss.dish_id = d.dish_id
@@ -2616,7 +3269,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         dishes = []
         for row in rows:
             d = _row_to_dict(row)
-            dpf = _dpf_from_dof(d.get("dof") or "", None)
+            dpf = _dpf_for_dish(d)
             step_count = int(d.get("step_count") or 0)
             if d.get("screening_final_positive_count") is not None:
                 screening_status = "Done"
@@ -2652,8 +3305,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "status": d.get("status"),
                 "termination_date": d.get("termination_date"),
                 "termination_date_display": _normalize_html_date(d.get("termination_date")),
+                "termination_date_input": _normalize_html_date(d.get("termination_date")),
                 "termination_reason": d.get("termination_reason"),
                 "termination_reason_display": termination_reason_label(d.get("termination_reason")),
+                "screening_date_finalized": d.get("screening_date_finalized"),
+                "latest_screening_datetime": d.get("latest_screening_datetime"),
                 "date_created": d.get("date_created"),
                 "last_check": d.get("last_check"),
                 "parent_dish_id": d.get("parent_dish_id"),
@@ -2696,6 +3352,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "dishes": dishes,
             "summary": summary,
             "status_filter": normalized_status,
+            "today": datetime.now().strftime("%Y-%m-%d"),
             "termination_reason_options": TERMINATION_REASON_OPTIONS,
             "transfer_reason_options": DISH_TRANSFER_REASON_OPTIONS,
             "count_reason_options": DISH_COUNT_REASON_OPTIONS,
@@ -2706,6 +3363,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     @app.post("/dishes/{dish_id}/terminate", response_class=HTMLResponse)
     def terminate_dish_web(
         dish_id: str,
+        termination_date: Optional[str] = Form(default=None),
         termination_reason: Optional[str] = Form(default=None),
         return_status: str = Form(default="all"),
     ):
@@ -2715,9 +3373,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if normalized_status not in {"all", "active", "inactive"}:
             normalized_status = "all"
 
+        stored_termination_date = _yyyymmdd_from_html_date(termination_date)
+        if termination_date and not stored_termination_date:
+            raise HTTPException(status_code=400, detail="Termination date must be a valid date.")
+
         success, message = fish_dish_ctrl.update_dish_status(
             dish_id=dish_id,
             status="inactive",
+            termination_date=stored_termination_date,
             termination_reason=termination_reason,
         )
         if not success:
@@ -2790,19 +3453,71 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     # JSON API — health + dishes
     # ------------------------------------------------------------------
 
-    @app.get("/health")
-    def health(check_db: bool = Query(default=False)) -> Dict[str, Any]:
-        if not check_db:
+    @app.get("/health", response_model=HealthResponse)
+    def health(
+        check_db: bool = Query(default=False),
+        check_pyrat: bool = Query(default=False),
+    ) -> Dict[str, Any]:
+        if not check_db and not check_pyrat:
             return {"status": "ok"}
-        db_path = _require_db_path()
-        try:
-            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
-                conn.execute("SELECT 1").fetchone()
-            return {"status": "ok", "db": "ok"}
-        except sqlite3.Error as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        components: Dict[str, Any] = {}
+        response: Dict[str, Any] = {"status": "ok", "components": components}
+        db_ok = True
+        pyrat_ok = True
 
-    @app.get("/dishes")
+        db_path = _require_db_path()
+        if check_db:
+            try:
+                with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                    conn.execute("SELECT 1").fetchone()
+                response["db"] = "ok"
+                components["db"] = {"status": "ok"}
+            except sqlite3.Error as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={"error": "database_unreachable", "message": str(exc)},
+                ) from exc
+
+        if check_pyrat:
+            import requests
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+            credentials = get_pyrat_api_credentials()
+            if not credentials:
+                pyrat_ok = False
+                response["pyrat"] = "not_configured"
+                components["pyrat"] = {"status": "not_configured"}
+            else:
+                try:
+                    pyrat_response = requests.get(
+                        f"{credentials['base_url']}api/v3/tanks/crossings",
+                        auth=(credentials["client_token"], credentials["user_token"]),
+                        headers={"Accept": "application/json"},
+                        params={"l": 1, "k": ["crossing_id"]},
+                        verify=False,
+                        timeout=5,
+                    )
+                    if pyrat_response.status_code == 200:
+                        response["pyrat"] = "ok"
+                        components["pyrat"] = {"status": "ok"}
+                    else:
+                        pyrat_ok = False
+                        response["pyrat"] = "upstream_error"
+                        components["pyrat"] = {
+                            "status": "upstream_error",
+                            "status_code": pyrat_response.status_code,
+                        }
+                except requests.RequestException as exc:
+                    pyrat_ok = False
+                    response["pyrat"] = "unreachable"
+                    components["pyrat"] = {"status": "unreachable", "message": str(exc)}
+
+        if not (db_ok and pyrat_ok):
+            response["status"] = "degraded"
+        return response
+
+    @app.get("/dishes", response_model=DishListResponse)
     def list_dishes_api(
         status: Optional[str] = Query(default=None),
         cross_id: Optional[str] = Query(default=None),
@@ -2812,29 +3527,281 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     ) -> Dict[str, Any]:
         db_path = _require_db_path()
         query = """
-            SELECT dish_id, cross_id, genotype, responsible, fish_count, dof,
-                   status, date_created, parent_dish_id, dish_population_type
-            FROM dishes
+            SELECT
+                d.dish_id,
+                d.cross_id,
+                d.genotype,
+                d.responsible,
+                d.fish_count,
+                d.dof,
+                d.status,
+                d.date_created,
+                d.termination_date,
+                d.screening_date_finalized,
+                ss.latest_screening_datetime,
+                qc.last_check,
+                d.parent_dish_id,
+                d.dish_population_type
+            FROM dishes d
+            LEFT JOIN (
+                SELECT dish_id, MAX(screening_datetime) AS latest_screening_datetime
+                FROM screening_steps
+                GROUP BY dish_id
+            ) ss ON ss.dish_id = d.dish_id
+            LEFT JOIN (
+                SELECT dish_id, MAX(check_time) AS last_check
+                FROM quality_checks
+                GROUP BY dish_id
+            ) qc ON qc.dish_id = d.dish_id
             WHERE 1=1
         """
         params: List[Any] = []
         if status:
-            query += " AND status = ?"
+            query += " AND d.status = ?"
             params.append(status)
         if cross_id:
-            query += " AND cross_id = ?"
+            query += " AND d.cross_id = ?"
             params.append(cross_id)
         if promoter:
-            query += " AND dish_id IN (SELECT dish_id FROM dish_transgenes WHERE promoter = ?)"
+            query += " AND d.dish_id IN (SELECT dish_id FROM dish_transgenes WHERE promoter = ?)"
             params.append(promoter.lower())
-        query += " ORDER BY date_created DESC LIMIT ? OFFSET ?"
+        query += " ORDER BY d.date_created DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         try:
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
                 rows = conn.execute(query, params).fetchall()
-            return {"items": [_row_to_dict(row) for row in rows]}
+            items = []
+            for row in rows:
+                dish = _row_to_dict(row)
+                dish["dpf"] = _dpf_for_dish(dish)
+                items.append(dish)
+            return {"items": items}
         except sqlite3.Error as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/acquisition/dishes", response_model=AcquisitionDishesResponse)
+    def list_acquisition_dishes(
+        status: str = Query(default="active", pattern="^(active|inactive|all)$"),
+        cross_id: Optional[str] = Query(default=None),
+        responsible: Optional[str] = Query(default=None),
+        limit: int = Query(default=300, ge=1, le=1000),
+        offset: int = Query(default=0, ge=0),
+    ) -> Dict[str, Any]:
+        """Return a Citrus-focused dish list with acquisition context."""
+        db_path = _require_db_path()
+        status_filter = "" if status == "all" else "AND d.status = ?"
+        params: List[Any] = []
+        if status != "all":
+            params.append(status)
+        if cross_id:
+            status_filter += " AND d.cross_id = ?"
+            params.append(cross_id)
+        if responsible:
+            status_filter += " AND d.responsible = ?"
+            params.append(responsible)
+        params.extend([limit, offset])
+
+        query = f"""
+            SELECT
+                d.dish_id,
+                d.cross_id,
+                d.genotype,
+                d.species,
+                d.sex,
+                d.responsible,
+                d.fish_count,
+                d.current_fish_count,
+                d.dof,
+                d.cross_setup_date,
+                d.dof_source,
+                d.status,
+                d.date_created,
+                d.termination_date,
+                d.termination_reason,
+                d.screening_date_finalized,
+                d.parent_dish_id,
+                d.dish_population_type,
+                d.source_screening_datetime,
+                d.source_screening_bucket,
+                d.container_type,
+                d.room,
+                d.breeding_parents,
+                ss.latest_screening_datetime,
+                qc.last_check,
+                COALESCE(fs.registered_fish_count, 0) AS registered_fish_count,
+                COALESCE(hu.housing_unit_count, 0) AS housing_unit_count,
+                c.line_strain AS cross_line_strain,
+                c.cross_status AS cross_status,
+                c.updated_at AS cross_cache_updated_at,
+                cb.background_summary,
+                cb.background_strains,
+                cb.line_labels,
+                cb.mutant_backgrounds,
+                cb.has_mixed_background
+            FROM dishes d
+            LEFT JOIN (
+                SELECT dish_id, MAX(screening_datetime) AS latest_screening_datetime
+                FROM screening_steps
+                GROUP BY dish_id
+            ) ss ON ss.dish_id = d.dish_id
+            LEFT JOIN (
+                SELECT dish_id, MAX(check_time) AS last_check
+                FROM quality_checks
+                GROUP BY dish_id
+            ) qc ON qc.dish_id = d.dish_id
+            LEFT JOIN (
+                SELECT dish_id, COUNT(*) AS registered_fish_count
+                FROM fish_subjects
+                GROUP BY dish_id
+            ) fs ON fs.dish_id = d.dish_id
+            LEFT JOIN (
+                SELECT dish_id, COUNT(*) AS housing_unit_count
+                FROM housing_units
+                GROUP BY dish_id
+            ) hu ON hu.dish_id = d.dish_id
+            LEFT JOIN crosses c ON c.cross_id = d.cross_id
+            LEFT JOIN cross_background_summaries cb ON cb.cross_id = d.cross_id
+            WHERE 1=1
+            {status_filter}
+            ORDER BY
+                CASE WHEN d.status = 'active' THEN 0 ELSE 1 END,
+                d.date_created DESC,
+                d.dish_id ASC
+            LIMIT ? OFFSET ?
+        """
+        try:
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                rows = conn.execute(query, params).fetchall()
+        except sqlite3.Error as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        items = []
+        for row in rows:
+            dish = _row_to_dict(row)
+            dpf = _dpf_for_dish(dish)
+            current_fish_count = dish.get("current_fish_count")
+            if current_fish_count is None:
+                current_fish_count = dish.get("fish_count")
+
+            items.append({
+                "dish_id": dish.get("dish_id"),
+                "cross_id": dish.get("cross_id"),
+                "genotype": dish.get("genotype"),
+                "species": dish.get("species") or "Danio rerio",
+                "sex": dish.get("sex") or "unknown",
+                "responsible": dish.get("responsible"),
+                "status": dish.get("status"),
+                "date_created": dish.get("date_created"),
+                "dof": dish.get("dof"),
+                "dpf": dpf,
+                "cross_setup_date": dish.get("cross_setup_date"),
+                "dof_source": dish.get("dof_source"),
+                "fish_count": dish.get("fish_count"),
+                "current_fish_count": current_fish_count,
+                "registered_fish_count": dish.get("registered_fish_count") or 0,
+                "housing_unit_count": dish.get("housing_unit_count") or 0,
+                "container_type": dish.get("container_type"),
+                "room": dish.get("room"),
+                "parent_dish_id": dish.get("parent_dish_id"),
+                "dish_population_type": dish.get("dish_population_type") or "primary",
+                "source_screening_datetime": dish.get("source_screening_datetime"),
+                "source_screening_bucket": dish.get("source_screening_bucket"),
+                "latest_screening_datetime": dish.get("latest_screening_datetime"),
+                "last_check": dish.get("last_check"),
+                "termination_date": dish.get("termination_date"),
+                "termination_reason": dish.get("termination_reason"),
+                "screening_date_finalized": dish.get("screening_date_finalized"),
+                "parents_display": ", ".join(_json_list(dish.get("breeding_parents"))),
+                "cross": {
+                    "cross_id": dish.get("cross_id"),
+                    "line_strain": dish.get("cross_line_strain"),
+                    "status": dish.get("cross_status"),
+                    "cache_updated_at": dish.get("cross_cache_updated_at"),
+                    "background_summary": dish.get("background_summary"),
+                    "background_strains": _json_list(dish.get("background_strains")),
+                    "line_labels": _json_list(dish.get("line_labels")),
+                    "mutant_backgrounds": _json_list(dish.get("mutant_backgrounds")),
+                    "has_mixed_background": bool(dish.get("has_mixed_background")),
+                } if dish.get("cross_id") else None,
+                "links": {
+                    "dish": f"/dishes/{dish.get('dish_id')}",
+                    "fish": f"/dishes/{dish.get('dish_id')}/fish",
+                    "units": f"/dishes/{dish.get('dish_id')}/units",
+                    "cross_provenance": (
+                        f"/crosses/{dish.get('cross_id')}/provenance"
+                        if dish.get("cross_id") else None
+                    ),
+                },
+            })
+
+        return {
+            "schema_version": 1,
+            "purpose": "citrus_acquisition_dish_picker",
+            "status_filter": status,
+            "limit": limit,
+            "offset": offset,
+            "count": len(items),
+            "items": items,
+        }
+
+    @app.get("/dishes/{dish_id}/citrus-snapshot", response_model=CitrusSnapshotResponse)
+    def get_dish_citrus_snapshot(dish_id: str) -> Dict[str, Any]:
+        """Return a no-PII dish/cross snapshot for Citrus H5 metadata."""
+        db_path = _require_db_path()
+        try:
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                row = conn.execute(
+                    """
+                    SELECT dish_id, cross_id, genotype, dof, fish_count,
+                           current_fish_count, species, sex, breeding_parents,
+                           status, termination_date
+                    FROM dishes
+                    WHERE dish_id = ?
+                    """,
+                    (dish_id,),
+                ).fetchone()
+                if not row:
+                    raise HTTPException(
+                        status_code=404,
+                        detail={"error": "dish_not_found", "dish_id": dish_id},
+                    )
+                dish = _row_to_dict(row)
+                cross_id = dish.get("cross_id")
+                cross_snapshot = _load_cached_cross_snapshot(conn, str(cross_id)) if cross_id else None
+        except sqlite3.Error as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "database_error", "message": str(exc)},
+            ) from exc
+
+        parents = []
+        line_strain = None
+        if cross_snapshot:
+            parents = cross_snapshot.get("parents") or []
+            line_strain = cross_snapshot.get("line_strain") or None
+        if not parents:
+            parents = [
+                {"identifier": str(parent), "sex": "unknown"}
+                for parent in _json_list(dish.get("breeding_parents"))
+                if parent
+            ]
+
+        fish_count = dish.get("current_fish_count")
+        if fish_count is None:
+            fish_count = dish.get("fish_count")
+        return {
+            "schema_version": 1,
+            "dish_id": dish["dish_id"],
+            "cross_id": cross_id,
+            "genotype": dish.get("genotype"),
+            "dof": dish.get("dof"),
+            "dpf": _dpf_for_dish(dish),
+            "fish_count": fish_count,
+            "species": dish.get("species") or "Danio rerio",
+            "sex": dish.get("sex") or "unknown",
+            "line_strain": line_strain,
+            "parents": parents,
+        }
 
     @app.get("/dishes/{dish_id}")
     def get_dish_api(
@@ -2856,6 +3823,27 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                         dish["data"] = json.loads(dish["data"])
                     except json.JSONDecodeError:
                         dish["data"] = dish["data"]
+                latest_screening = conn.execute(
+                    """
+                    SELECT MAX(screening_datetime)
+                    FROM screening_steps
+                    WHERE dish_id = ?
+                    """,
+                    (dish_id,),
+                ).fetchone()
+                latest_check = conn.execute(
+                    """
+                    SELECT MAX(check_time)
+                    FROM quality_checks
+                    WHERE dish_id = ?
+                    """,
+                    (dish_id,),
+                ).fetchone()
+                dish["latest_screening_datetime"] = latest_screening[0] if latest_screening else None
+                dish["last_check"] = latest_check[0] if latest_check else None
+                dish["dpf"] = _dpf_for_dish(dish)
+                if isinstance(dish.get("data"), dict):
+                    dish["data"]["dpf"] = dish["dpf"]
                 if include_checks:
                     checks = conn.execute(
                         """
@@ -2870,12 +3858,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         except sqlite3.Error as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @app.get("/crosses/{cross_id}")
+    @app.get("/crosses/{cross_id}", response_model=CrossSnapshotResponse)
     def get_cross_api(
         cross_id: str,
         include_dishes: bool = Query(default=False),
     ) -> Dict[str, Any]:
-        """Fetch crossing info from PyRAT API.
+        """Fetch crossing info from local cache, with PyRAT as fallback.
 
         Returns a response compatible with the palette zebrobot_snapshot contract:
         cross_id, line_strain, parents, and optionally dishes from the local DB.
@@ -2884,70 +3872,91 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        credentials = get_pyrat_api_credentials()
-        if not credentials:
-            raise HTTPException(status_code=503, detail="PyRAT API credentials not configured")
-
-        # Fetch crossing from PyRAT (list endpoint with crossing_id filter)
-        url = f"{credentials['base_url']}api/v3/tanks/crossings"
+        db_path = _require_db_path()
+        result: Optional[Dict[str, Any]] = None
         try:
-            resp = requests.get(
-                url,
-                auth=(credentials["client_token"], credentials["user_token"]),
-                headers={"Accept": "application/json"},
-                params={
-                    "crossing_id": cross_id,
-                    "l": 1,
-                    "k": [
-                        "crossing_id", "status", "strain_name", "strain_name_with_id",
-                        "responsible_fullname", "tanks",
-                    ],
-                    "tk": [
-                        "tank_id", "tank_label", "strain_name",
-                        "number_of_male", "number_of_female",
-                        "location_rack_name", "tank_position",
-                    ],
-                },
-                verify=False,
-                timeout=10,
-            )
-        except requests.RequestException as exc:
-            raise HTTPException(status_code=503, detail=f"PyRAT API error: {exc}") from exc
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                result = _load_cached_cross_snapshot(conn, cross_id)
+        except sqlite3.Error as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "database_error", "message": str(exc)},
+            ) from exc
 
-        if resp.status_code != 200:
-            raise HTTPException(status_code=503, detail=f"PyRAT API returned {resp.status_code}")
+        if result is None:
+            credentials = get_pyrat_api_credentials()
+            if not credentials:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "pyrat_not_configured",
+                        "message": "Cross is not cached locally and PyRAT credentials are not configured.",
+                        "cross_id": cross_id,
+                    },
+                )
 
-        results = resp.json()
-        if not results:
-            raise HTTPException(status_code=404, detail="Cross not found in PyRAT")
+            url = f"{credentials['base_url']}api/v3/tanks/crossings"
+            try:
+                resp = requests.get(
+                    url,
+                    auth=(credentials["client_token"], credentials["user_token"]),
+                    headers={"Accept": "application/json"},
+                    params={
+                        "crossing_id": cross_id,
+                        "l": 1,
+                        "k": [
+                            "crossing_id", "status", "strain_name", "strain_name_with_id",
+                            "responsible_fullname", "date_of_record", "date_of_set_up", "tanks",
+                        ],
+                        "tk": [
+                            "tank_id", "tank_label", "strain_name", "generation",
+                            "number_of_male", "number_of_female",
+                            "location_rack_name", "tank_position",
+                        ],
+                    },
+                    verify=False,
+                    timeout=10,
+                )
+            except requests.RequestException as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={"error": "pyrat_unreachable", "message": str(exc), "cross_id": cross_id},
+                ) from exc
 
-        data = results[0]
+            if resp.status_code != 200:
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "error": "pyrat_upstream_error",
+                        "status_code": resp.status_code,
+                        "cross_id": cross_id,
+                    },
+                )
 
-        # Build parents list in the format palette expects
-        parents = []
-        for tank in (data.get("tanks") or {}).get("parents", []) or []:
-            rack = tank.get("location_rack_name", "")
-            pos = tank.get("tank_position", "")
-            tid = tank.get("tank_id", "")
-            identifier = f"{rack}:{pos} ({tid})" if rack and pos else f"#{tid}"
-            n_male = tank.get("number_of_male", 0) or 0
-            n_female = tank.get("number_of_female", 0) or 0
-            if n_male > 0 and n_female == 0:
-                sex = "M"
-            elif n_female > 0 and n_male == 0:
-                sex = "F"
-            else:
-                sex = "unknown"
-            parents.append({"identifier": identifier, "sex": sex})
+            try:
+                results = resp.json()
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error": "pyrat_invalid_json", "cross_id": cross_id},
+                ) from exc
 
-        result: Dict[str, Any] = {
-            "cross_id": str(data.get("crossing_id", cross_id)),
-            "line_strain": data.get("strain_name") or data.get("strain_name_with_id") or "",
-            "parents": parents,
-        }
+            if not results:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"error": "cross_not_found", "cross_id": cross_id},
+                )
+
+            data = results[0] if isinstance(results, list) else results
+            if not isinstance(data, dict):
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error": "pyrat_unexpected_payload", "cross_id": cross_id},
+                )
+            _cache_cross_rows([data])
+            result = _cross_snapshot_from_payload(cross_id, data, source="pyrat")
 
         if include_dishes:
-            db_path = _require_db_path()
             try:
                 with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
                     dishes = conn.execute(
@@ -2959,8 +3968,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                         (cross_id,),
                     ).fetchall()
                     result["dishes"] = [_row_to_dict(r) for r in dishes]
-            except sqlite3.Error:
+            except sqlite3.Error as exc:
                 result["dishes"] = []
+                result.setdefault("warnings", []).append({
+                    "source": "dishes",
+                    "message": str(exc),
+                })
 
         return result
 
@@ -3108,6 +4121,52 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             ),
         })
 
+    def _dish_id_for_unique_screening_step(screening_datetime: str) -> Optional[str]:
+        """Recover a dish id for stale malformed step forms with an empty path id."""
+        try:
+            with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT dish_id
+                    FROM screening_steps
+                    WHERE screening_datetime = ?
+                    ORDER BY dish_id
+                    LIMIT 2
+                    """,
+                    (screening_datetime,),
+                ).fetchall()
+            if len(rows) == 1:
+                return rows[0]["dish_id"]
+        except Exception:
+            logger.exception("Could not recover dish id for screening step %s", screening_datetime)
+        return None
+
+    @app.post("/screening//steps/{screening_datetime}/allocations", response_class=HTMLResponse)
+    def add_screening_step_allocation_missing_dish_id(
+        request: Request,
+        screening_datetime: str,
+        bucket: str = Form(...),
+        disposition: str = Form(...),
+        count: int = Form(...),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Compatibility handler for stale forms that rendered with an empty dish id."""
+        recovered_dish_id = _dish_id_for_unique_screening_step(screening_datetime)
+        if not recovered_dish_id:
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": "Could not determine the source dish for this screening step. Refresh the page and try again.",
+                "level": "error",
+            })
+        return add_screening_step_allocation(
+            request,
+            recovered_dish_id,
+            screening_datetime,
+            bucket,
+            disposition,
+            count,
+            notes,
+        )
+
     @app.post("/screening/{dish_id}/steps", response_class=HTMLResponse)
     def add_screening_step(
         request: Request,
@@ -3245,6 +4304,32 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             ) if dish else [],
         })
 
+    @app.post("/screening//steps/{screening_datetime}/destination", response_class=HTMLResponse)
+    def allocate_screening_step_to_existing_dish_missing_dish_id(
+        request: Request,
+        screening_datetime: str,
+        bucket: str = Form(...),
+        count: int = Form(...),
+        destination_dish_id: str = Form(...),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Compatibility handler for stale destination forms with an empty path id."""
+        recovered_dish_id = _dish_id_for_unique_screening_step(screening_datetime)
+        if not recovered_dish_id:
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": "Could not determine the source dish for this screening step. Refresh the page and try again.",
+                "level": "error",
+            })
+        return allocate_screening_step_to_existing_dish(
+            request,
+            recovered_dish_id,
+            screening_datetime,
+            bucket,
+            count,
+            destination_dish_id,
+            notes,
+        )
+
     @app.post("/screening/{dish_id}/finalize", response_class=HTMLResponse)
     def finalize_screening(
         request: Request,
@@ -3329,6 +4414,32 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return RedirectResponse(
             url=f"/screening/{dish_id}",
             status_code=303,
+        )
+
+    @app.post("/screening//steps/{screening_datetime}/split", response_class=HTMLResponse)
+    def split_dish_from_screening_step_missing_dish_id(
+        request: Request,
+        screening_datetime: str,
+        fish_count: int = Form(...),
+        population_type: str = Form(...),
+        container_type: Optional[str] = Form(default=None),
+        notes: Optional[str] = Form(default=None),
+    ):
+        """Compatibility handler for stale split forms with an empty path id."""
+        recovered_dish_id = _dish_id_for_unique_screening_step(screening_datetime)
+        if not recovered_dish_id:
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": "Could not determine the source dish for this screening step. Refresh the page and try again.",
+                "level": "error",
+            })
+        return split_dish_from_screening_step(
+            request,
+            recovered_dish_id,
+            screening_datetime,
+            fish_count,
+            population_type,
+            container_type,
+            notes,
         )
 
     # ------------------------------------------------------------------
@@ -3780,6 +4891,17 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         lineage = _load_cross_lineage(cross_id)
         return templates.TemplateResponse(request, "fish/cross_lineage.html", lineage)
 
+    @app.get("/crosses/{cross_id}/provenance")
+    def cross_provenance_api(cross_id: str) -> Dict[str, Any]:
+        """Return cached PyRAT parent/background provenance for a cross."""
+        return _load_cross_provenance(cross_id)
+
+    @app.get("/crosses/{cross_id}/provenance/", response_class=HTMLResponse)
+    def cross_provenance_page(request: Request, cross_id: str):
+        """Read-only page for inspecting PyRAT parent/background provenance."""
+        provenance = _load_cross_provenance(cross_id)
+        return templates.TemplateResponse(request, "fish/cross_provenance.html", provenance)
+
     @app.get("/crosses/{cross_id}/fish/", response_class=HTMLResponse)
     def fish_cross_page(request: Request, cross_id: str):
         """Web page showing all fish for a cross, grouped by dish."""
@@ -3851,6 +4973,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "total_fish": len(subjects),
             "total_dishes": len(dish_meta),
             "lineage_url": f"/crosses/{cross_id}/lineage/",
+            "provenance_url": f"/crosses/{cross_id}/provenance/",
         })
 
     # ------------------------------------------------------------------

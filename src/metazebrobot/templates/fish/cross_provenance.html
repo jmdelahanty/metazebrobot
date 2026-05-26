@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Provenance - Cross {{ cross_id }}{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Provenance - Cross {{ cross_id }}</h2>
+    <p>
+        {{ summary.parent_count }} parent{{ "s" if summary.parent_count != 1 }},
+        {{ summary.dish_count }} local dish{{ "es" if summary.dish_count != 1 }}.
+    </p>
+</hgroup>
+
+<p>
+    <a href="/crosses/{{ cross_id }}/lineage/" role="button" class="outline">Dish lineage</a>
+    <a href="/crosses/{{ cross_id }}/fish/" role="button" class="outline">Fish for this cross</a>
+    <a href="/dishes/new?cross_id={{ cross_id }}" role="button" class="outline secondary">New dish</a>
+</p>
+
+{% if cross %}
+<section>
+    <h3>Cached PyRAT Cross</h3>
+    <table>
+        <tbody>
+            <tr><th>Status</th><td>{{ cross.cross_status or "-" }}</td></tr>
+            <tr><th>Strain</th><td>{{ cross.strain_name or cross.line_strain or "-" }}</td></tr>
+            <tr><th>Responsible</th><td>{{ cross.responsible_fullname or "-" }}</td></tr>
+            <tr><th>Setup Date</th><td>{{ cross.date_of_set_up or "-" }}</td></tr>
+            <tr><th>Record Date</th><td>{{ cross.date_of_record or "-" }}</td></tr>
+            <tr><th>Cache Updated</th><td>{{ cross.updated_at or "-" }}</td></tr>
+        </tbody>
+    </table>
+</section>
+{% else %}
+<p><em>No cached PyRAT cross row found for this cross. Exact lookup or PyRAT sync can populate it if PyRAT allows access.</em></p>
+{% endif %}
+
+<section>
+    <h3>Parent Background Summary</h3>
+    {% if background_summary %}
+    <table>
+        <tbody>
+            <tr><th>Summary</th><td>{{ background_summary.background_summary or "raw" }}</td></tr>
+            <tr><th>Backgrounds</th><td>{{ background_summary.background_strains | join(", ") if background_summary.background_strains else "-" }}</td></tr>
+            <tr><th>Line Labels</th><td>{{ background_summary.line_labels | join(", ") if background_summary.line_labels else "-" }}</td></tr>
+            <tr><th>Mutant Backgrounds</th><td>{{ background_summary.mutant_backgrounds | join(", ") if background_summary.mutant_backgrounds else "-" }}</td></tr>
+            <tr><th>Mixed Background</th><td>{{ "yes" if background_summary.has_mixed_background else "no" }}</td></tr>
+        </tbody>
+    </table>
+    {% else %}
+    <p><em>No parent background summary available.</em></p>
+    {% endif %}
+</section>
+
+<section>
+    <h3>Parents</h3>
+    {% if parents %}
+    <table role="grid">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Role</th>
+                <th>Tank</th>
+                <th>Strain</th>
+                <th>Generation</th>
+                <th>Parsed Background</th>
+                <th>Confidence</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for parent in parents %}
+            <tr>
+                <td>{{ parent.parent_index }}</td>
+                <td>{{ parent.role or "unknown" }}</td>
+                <td>{{ parent.location_display or parent.tank_label or parent.tank_id or "-" }}</td>
+                <td>{{ parent.raw_strain_name or "-" }}</td>
+                <td>{{ parent.generation or "-" }}</td>
+                <td>
+                    {% set pieces = [] %}
+                    {% for item in parent.background_strains or [] %}{% set _ = pieces.append(item) %}{% endfor %}
+                    {% for item in parent.line_labels or [] %}{% set _ = pieces.append(item) %}{% endfor %}
+                    {% for item in parent.mutant_backgrounds or [] %}{% set _ = pieces.append(item) %}{% endfor %}
+                    {{ pieces | join(", ") if pieces else "raw" }}
+                </td>
+                <td>{{ parent.confidence or "raw" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p><em>No parent rows available for this cross.</em></p>
+    {% endif %}
+</section>
+
+<section>
+    <h3>Local Dishes</h3>
+    {% if dishes %}
+    <table role="grid">
+        <thead>
+            <tr>
+                <th>Dish</th>
+                <th>Status</th>
+                <th>Population</th>
+                <th>DOF</th>
+                <th>Fish</th>
+                <th>Responsible</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for dish in dishes %}
+            <tr>
+                <td><a href="/screening/{{ dish.dish_id }}">{{ dish.dish_id }}</a></td>
+                <td>{{ dish.status or "-" }}</td>
+                <td>{{ (dish.dish_population_type or "primary") | replace("_", " ") }}</td>
+                <td>{{ dish.dof or "-" }}</td>
+                <td>{{ dish.current_fish_count if dish.current_fish_count is not none else dish.fish_count if dish.fish_count is not none else "-" }}</td>
+                <td>{{ dish.responsible or "-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p><em>No local dishes found for this cross.</em></p>
+    {% endif %}
+</section>
+{% endblock %}

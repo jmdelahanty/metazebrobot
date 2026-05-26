@@ -14,6 +14,19 @@
       "is_active": true
     },
     {
+      "canonical_name": "GRABATP1.0",
+      "aliases": ["GRABATP1.0", "GRAB_ATP1.0", "GRAB-ATP1.0", "GRAB ATP1.0", "GRAB-ATP", "GRAB_ATP", "GRABATP"],
+      "construct_role": "sensor",
+      "family": "GRAB",
+      "target": "ATP",
+      "fluorophore": "cpEGFP",
+      "excitation_nm": 500,
+      "emission_nm": 520,
+      "screen_color": "green",
+      "notes": "GFP-like extracellular ATP sensor. Reported peak spectra are approximately 500 nm excitation and 520 nm emission; commonly imaged with 488 nm excitation and GFP/FITC emission collection.",
+      "is_active": true
+    },
+    {
       "canonical_name": "GCaMP6s",
       "aliases": ["gcamp6s", "GCaMP", "gcamp"],
       "construct_role": "sensor",

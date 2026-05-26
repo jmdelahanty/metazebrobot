@@ -131,6 +131,7 @@ def login_pyrat_frontend(
         if alias_response.status_code not in (302, 303):
             alias_response.raise_for_status()
         alias_location = alias_response.headers.get("Location")
+        alias_redirect_response = None
         if alias_location:
             alias_redirect_response = session.get(
                 urljoin(_frontend_choose_alias_url(base_url), alias_location),
@@ -138,9 +139,39 @@ def login_pyrat_frontend(
                 timeout=15,
             )
             alias_redirect_response.raise_for_status()
+
+            if "welcome" in alias_redirect_response.url:
+                welcome_response = session.post(
+                    alias_redirect_response.url,
+                    data={"sessionid": session_id},
+                    headers={
+                        "Origin": origin,
+                        "Referer": alias_redirect_response.url,
+                    },
+                    allow_redirects=False,
+                    verify=verify_ssl,
+                    timeout=15,
+                )
+                if welcome_response.status_code in (302, 303):
+                    welcome_location = welcome_response.headers.get("Location")
+                    if welcome_location:
+                        welcome_redirect_response = session.get(
+                            urljoin(alias_redirect_response.url, welcome_location),
+                            verify=verify_ssl,
+                            timeout=15,
+                        )
+                        welcome_redirect_response.raise_for_status()
+                    if debug_info is not None:
+                        debug_info["welcome_continue_location"] = welcome_location
+                else:
+                    welcome_response.raise_for_status()
+                if debug_info is not None:
+                    debug_info["welcome_continue_status_code"] = welcome_response.status_code
+                    debug_info["cookie_names_after_welcome_continue"] = sorted(cookie.name for cookie in session.cookies)
         if debug_info is not None:
             debug_info["alias_submit_status_code"] = alias_response.status_code
             debug_info["alias_submit_location"] = alias_location
+            debug_info["alias_choice"] = "no_alias"
             debug_info["cookie_names_after_alias_submit"] = sorted(cookie.name for cookie in session.cookies)
             debug_info["has_expected_session_cookie_after_alias_submit"] = (
                 expected_session_cookie_name in debug_info["cookie_names_after_alias_submit"]
@@ -150,6 +181,17 @@ def login_pyrat_frontend(
                     _frontend_choose_alias_url(base_url),
                     alias_location,
                 )
+
+    crossings_response = session.get(
+        _frontend_crossings_url(base_url, session_id),
+        verify=verify_ssl,
+        timeout=15,
+    )
+    crossings_response.raise_for_status()
+    if debug_info is not None:
+        debug_info["frontend_crossings_status_code"] = crossings_response.status_code
+        debug_info["frontend_crossings_url"] = crossings_response.url
+        debug_info["cookie_names_after_frontend_crossings"] = sorted(cookie.name for cookie in session.cookies)
 
     if debug_info is not None:
         debug_info["final_frontend_cookie_names"] = sorted(cookie.name for cookie in session.cookies)
@@ -259,6 +301,15 @@ def enrich_crossings_with_frontend_details(
                     crossing_id,
                     exc,
                 )
+                if isinstance(exc, requests.HTTPError) and exc.response is not None:
+                    if exc.response.status_code in (401, 403):
+                        logger.warning(
+                            "Stopping PyRAT backend/v1 enrichment after auth failure; "
+                            "remaining crossings will use base API data."
+                        )
+                        enriched.append(merged)
+                        enriched.extend(dict(item) for item in crossings[index:])
+                        break
 
         enriched.append(merged)
 

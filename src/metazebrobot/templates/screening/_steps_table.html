@@ -16,9 +16,9 @@
     {%- endif -%}
 {%- endmacro %}
 
-{% macro allocation_form(dish_id, screening_datetime, has_indicator_screen, pigment_screened) %}
+{% macro allocation_form(source_dish_id, screening_datetime, has_indicator_screen, pigment_screened) %}
 <form method="post"
-      hx-post="/screening/{{ dish_id }}/steps/{{ screening_datetime }}/allocations"
+      hx-post="/screening/{{ source_dish_id }}/steps/{{ screening_datetime }}/allocations"
       hx-target="#steps-table"
       hx-swap="innerHTML"
       style="margin:0.5rem 0 1rem">
@@ -57,9 +57,9 @@
 </form>
 {% endmacro %}
 
-{% macro split_form(dish_id, screening_datetime, has_indicator_screen, pigment_screened) %}
+{% macro split_form(source_dish_id, screening_datetime, has_indicator_screen, pigment_screened) %}
 <form method="post"
-      action="/screening/{{ dish_id }}/steps/{{ screening_datetime }}/split"
+      action="/screening/{{ source_dish_id }}/steps/{{ screening_datetime }}/split"
       style="margin:0.5rem 0 0.25rem">
     <div class="grid">
         <label>
@@ -98,10 +98,10 @@
 </form>
 {% endmacro %}
 
-{% macro existing_destination_form(dish_id, screening_datetime, has_indicator_screen, pigment_screened, destination_dishes) %}
+{% macro existing_destination_form(source_dish_id, screening_datetime, has_indicator_screen, pigment_screened, destination_dishes) %}
 {% if destination_dishes %}
 <form method="post"
-      hx-post="/screening/{{ dish_id }}/steps/{{ screening_datetime }}/destination"
+      hx-post="/screening/{{ source_dish_id }}/steps/{{ screening_datetime }}/destination"
       hx-target="#steps-table"
       hx-swap="innerHTML"
       style="margin:0.5rem 0 0.25rem">
@@ -145,9 +145,9 @@
 {% endif %}
 {% endmacro %}
 
-{% macro quick_remainder_form(dish_id, screening_datetime, remainder_count) %}
+{% macro quick_remainder_form(source_dish_id, screening_datetime, remainder_count) %}
 <form method="post"
-      hx-post="/screening/{{ dish_id }}/steps/{{ screening_datetime }}/allocations"
+      hx-post="/screening/{{ source_dish_id }}/steps/{{ screening_datetime }}/allocations"
       hx-target="#steps-table"
       hx-swap="innerHTML"
       style="margin:0.75rem 0 1rem">
@@ -166,6 +166,7 @@
 {% endif %}
 
 {% if steps %}
+{% set source_dish_id = dish_id %}
 <figure>
 <table class="screening-steps-table" role="grid">
     <thead>
@@ -240,23 +241,23 @@
                             <small style="display:block; margin-top:0.6rem">
                                 This step still has <strong>{{ s.unallocated_count }}</strong> fish unallocated.
                             </small>
-                            {{ quick_remainder_form(dish_id, s.screening_datetime, s.unallocated_count) }}
+                            {{ quick_remainder_form(source_dish_id, s.screening_datetime, s.unallocated_count) }}
                             {% endif %}
-                            {{ allocation_form(dish_id, s.screening_datetime, has_indicator_screen, s.pigment_screened) }}
+                            {{ allocation_form(source_dish_id, s.screening_datetime, has_indicator_screen, s.pigment_screened) }}
                         </section>
                         <section class="screening-step-action-panel">
                             <h6>Add To Existing Dish</h6>
                             <small style="display:block; margin-top:0.1rem">
                                 Move screened fish into an active same-cross destination dish.
                             </small>
-                            {{ existing_destination_form(dish_id, s.screening_datetime, has_indicator_screen, s.pigment_screened, destination_dishes | default([])) }}
+                            {{ existing_destination_form(source_dish_id, s.screening_datetime, has_indicator_screen, s.pigment_screened, destination_dishes | default([])) }}
                         </section>
                         <section class="screening-step-action-panel">
                             <h6>Create New Derived Dish</h6>
                             <small style="display:block; margin-top:0.1rem">
                                 Create a derived dish when fish move into a new dish from this step.
                             </small>
-                            {{ split_form(dish_id, s.screening_datetime, has_indicator_screen, s.pigment_screened) }}
+                            {{ split_form(source_dish_id, s.screening_datetime, has_indicator_screen, s.pigment_screened) }}
                         </section>
                     </div>
                 </details>

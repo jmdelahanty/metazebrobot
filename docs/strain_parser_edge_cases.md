@@ -2,6 +2,13 @@
 
 The `strain_parser.parse_strain_name()` utility extracts transgenic indicator components from PyRAT strain name strings. It handles the common `Tg(promoter:reporter)` notation well, but some strain names in PyRAT use inconsistent or complex notation that the parser cannot fully decompose. These cases are flagged for user review.
 
+This parser is intentionally about transgenic indicator constructs, not the
+full biological provenance of a cross. Parent wild-type backgrounds and mutant
+line labels such as `AB`, `WIK`, `TU`, `nacre`, or `Casper_HHMI` should be
+modeled separately from transgene parsing. See
+`docs/cross_parent_background_design.md` for the proposed cross-parent
+background model.
+
 ## What Parses Cleanly
 
 Standard notation with one or more semicolon-separated constructs:

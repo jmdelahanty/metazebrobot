@@ -401,6 +401,64 @@ class DataManager:
                 """)
 
                 cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS crosses (
+                        cross_id TEXT PRIMARY KEY,
+                        cross_status TEXT,
+                        line_strain TEXT,
+                        parents TEXT,
+                        data TEXT,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Structured PyRAT cross-parent provenance for background analytics.
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS cross_parents (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        cross_id TEXT NOT NULL,
+                        parent_index INTEGER NOT NULL,
+                        role TEXT,
+                        tank_id TEXT,
+                        tank_label TEXT,
+                        location_display TEXT,
+                        raw_strain_name TEXT,
+                        generation TEXT,
+                        parsed_background_strains TEXT,
+                        parsed_line_labels TEXT,
+                        parsed_transgenes TEXT,
+                        parsed_mutant_alleles TEXT,
+                        source TEXT DEFAULT 'pyrat',
+                        confidence TEXT DEFAULT 'raw',
+                        raw_payload TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (cross_id) REFERENCES crosses(cross_id),
+                        UNIQUE(cross_id, parent_index)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_cross_parents_cross_id
+                    ON cross_parents(cross_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_cross_parents_tank_id
+                    ON cross_parents(tank_id)
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS cross_background_summaries (
+                        cross_id TEXT PRIMARY KEY,
+                        background_summary TEXT,
+                        background_strains TEXT,
+                        line_labels TEXT,
+                        mutant_backgrounds TEXT,
+                        transgenes TEXT,
+                        has_mixed_background INTEGER DEFAULT 0,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (cross_id) REFERENCES crosses(cross_id)
+                    )
+                """)
+
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS dish_transgenes (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         dish_id TEXT NOT NULL,

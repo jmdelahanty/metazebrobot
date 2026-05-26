@@ -22,3 +22,36 @@
     Parents <small>(comma-separated)</small>
     <input type="text" name="parents" value="{{ parents or '' }}">
 </label>
+{% if parent_provenance and parent_provenance.parents %}
+<details>
+    <summary><strong>Parent Provenance</strong>{% if parent_provenance.summary and parent_provenance.summary.background_summary %} <small>{{ parent_provenance.summary.background_summary }}</small>{% endif %}</summary>
+    <table>
+        <thead>
+            <tr>
+                <th>Parent</th>
+                <th>Tank</th>
+                <th>Strain</th>
+                <th>Generation</th>
+                <th>Parsed Background</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for parent in parent_provenance.parents %}
+            <tr>
+                <td>{{ parent.role or "unknown" }}</td>
+                <td>{{ parent.location_display or parent.tank_label or parent.tank_id or "" }}</td>
+                <td>{{ parent.raw_strain_name or "" }}</td>
+                <td>{{ parent.generation or "" }}</td>
+                <td>
+                    {% set pieces = [] %}
+                    {% for item in parent.background_strains or [] %}{% set _ = pieces.append(item) %}{% endfor %}
+                    {% for item in parent.line_labels or [] %}{% set _ = pieces.append(item) %}{% endfor %}
+                    {% for item in parent.mutant_backgrounds or [] %}{% set _ = pieces.append(item) %}{% endfor %}
+                    {{ pieces | join(", ") if pieces else "raw" }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</details>
+{% endif %}
