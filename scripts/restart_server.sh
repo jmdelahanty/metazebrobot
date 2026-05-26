@@ -9,6 +9,35 @@ DB_PATH="${DB_PATH:-/nvme1/zebrobot.db}"
 HOST="${HOST:-127.0.0.1}"
 LOG_FILE="${LOG_FILE:-./.metazebrobot-server.log}"
 PID_FILE="${PID_FILE:-./.metazebrobot-server.pid}"
+SERVICE_NAME="${SERVICE_NAME:-metazebrobot-api}"
+USE_SYSTEMD="${USE_SYSTEMD:-auto}"
+
+systemd_unit_available() {
+  command -v systemctl >/dev/null 2>&1 && systemctl cat "$SERVICE_NAME" >/dev/null 2>&1
+}
+
+run_systemctl_restart() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    systemctl restart "$SERVICE_NAME"
+  else
+    sudo systemctl restart "$SERVICE_NAME"
+  fi
+}
+
+if [[ "$USE_SYSTEMD" != "0" && "$USE_SYSTEMD" != "false" ]] && systemd_unit_available; then
+  echo "Restarting systemd service ${SERVICE_NAME}"
+  run_systemctl_restart
+  systemctl is-active "$SERVICE_NAME"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sS -o /tmp/metazebrobot-restart-health.txt -w "HTTP %{http_code}\n" \
+      "http://127.0.0.1:${PORT}/health?check_db=true" || true
+    cat /tmp/metazebrobot-restart-health.txt 2>/dev/null || true
+    echo
+  fi
+  exit 0
+fi
+
+echo "Starting manual server process. Set USE_SYSTEMD=auto to prefer ${SERVICE_NAME} when available."
 
 find_listening_pids() {
   if command -v lsof >/dev/null 2>&1; then
