@@ -30,7 +30,9 @@ from .models.fish_dish import (
     DISH_COUNT_REASON_LABELS,
     DISH_COUNT_REASON_OPTIONS,
     TERMINATION_REASON_OPTIONS,
+    normalize_termination_reason,
     termination_reason_label,
+    termination_reason_options_text,
 )
 from .utils.label_generator import generate_dish_label
 from .utils.ome_reference_export import (
@@ -3210,6 +3212,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         terminated: Optional[str] = Query(default=None),
         transferred: Optional[str] = Query(default=None),
         count_updated: Optional[str] = Query(default=None),
+        batch_terminated: Optional[int] = Query(default=None),
     ):
         """Inventory-style dish index for local MetaZebrobot dishes."""
         db_path = _require_db_path()
@@ -3344,6 +3347,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         flash_message = None
         if terminated:
             flash_message = f"Terminated dish {terminated}."
+        elif batch_terminated:
+            flash_message = f"Terminated {batch_terminated} dishes."
         elif transferred:
             flash_message = f"Transferred fish from dish {transferred}."
         elif count_updated:
@@ -3359,6 +3364,114 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "flash_message": flash_message,
             "flash_level": "success",
         })
+
+    @app.post("/dishes/batch-terminate", response_class=HTMLResponse)
+    def batch_terminate_dishes_web(
+        dish_ids: List[str] = Form(default=[]),
+        termination_date: Optional[str] = Form(default=None),
+        termination_reason: Optional[str] = Form(default=None),
+        return_status: str = Form(default="all"),
+    ):
+        """Terminate multiple active dishes from the inventory page."""
+        db_path = _require_db_path()
+        normalized_status = (return_status or "all").strip().lower()
+        if normalized_status not in {"all", "active", "inactive"}:
+            normalized_status = "all"
+
+        selected_dish_ids = list(dict.fromkeys(dish_id.strip() for dish_id in dish_ids if dish_id.strip()))
+        if not selected_dish_ids:
+            raise HTTPException(status_code=400, detail="Select at least one active dish to terminate.")
+
+        stored_termination_date = _yyyymmdd_from_html_date(termination_date)
+        if termination_date and not stored_termination_date:
+            raise HTTPException(status_code=400, detail="Termination date must be a valid date.")
+        if not stored_termination_date:
+            stored_termination_date = datetime.now().strftime("%Y%m%d")
+
+        normalized_reason = normalize_termination_reason(termination_reason)
+        if not normalized_reason:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Termination reason is required and must be one of: "
+                    f"{termination_reason_options_text()}."
+                ),
+            )
+
+        placeholders = ",".join("?" for _ in selected_dish_ids)
+        with data_manager.get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                f"""
+                SELECT dish_id, status, data
+                FROM dishes
+                WHERE dish_id IN ({placeholders})
+                """,
+                selected_dish_ids,
+            ).fetchall()
+            rows_by_id = {row["dish_id"]: row for row in rows}
+            missing_dish_ids = [dish_id for dish_id in selected_dish_ids if dish_id not in rows_by_id]
+            if missing_dish_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Dish not found: {', '.join(missing_dish_ids)}",
+                )
+
+            inactive_dish_ids = [
+                dish_id
+                for dish_id in selected_dish_ids
+                if rows_by_id[dish_id]["status"] != "active"
+            ]
+            if inactive_dish_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Only active dishes can be batch terminated: {', '.join(inactive_dish_ids)}",
+                )
+
+            updated_payloads: Dict[str, Dict[str, Any]] = {}
+            for dish_id in selected_dish_ids:
+                row = rows_by_id[dish_id]
+                try:
+                    payload = json.loads(row["data"] or "{}")
+                except json.JSONDecodeError:
+                    payload = {}
+                payload.update({
+                    "dish_id": dish_id,
+                    "status": "inactive",
+                    "termination_date": stored_termination_date,
+                    "termination_reason": normalized_reason,
+                })
+                result = conn.execute(
+                    """
+                    UPDATE dishes
+                    SET status = 'inactive',
+                        termination_date = ?,
+                        termination_reason = ?,
+                        data = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE dish_id = ? AND status = 'active'
+                    """,
+                    (
+                        stored_termination_date,
+                        normalized_reason,
+                        json.dumps(payload),
+                        dish_id,
+                    ),
+                )
+                if result.rowcount != 1:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Dish {dish_id} was not active at update time.",
+                    )
+                updated_payloads[dish_id] = payload
+
+            conn.commit()
+
+        data_manager.data_cache.setdefault("fish_dishes", {}).update(updated_payloads)
+        return RedirectResponse(
+            url=f"/dishes/?status={normalized_status}&batch_terminated={len(selected_dish_ids)}",
+            status_code=303,
+        )
 
     @app.post("/dishes/{dish_id}/terminate", response_class=HTMLResponse)
     def terminate_dish_web(

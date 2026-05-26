@@ -1269,6 +1269,9 @@ class TestDishInventory:
         resp = client.get("/dishes/")
 
         assert resp.status_code == 200
+        assert 'action="/dishes/batch-terminate"' in resp.text
+        assert 'id="batch-select-all"' in resp.text
+        assert 'data-batch-dish' in resp.text
         assert f'action="/dishes/{seed_full_dish}/terminate"' in resp.text
         assert 'name="return_status" value="all"' in resp.text
         assert 'name="termination_reason"' in resp.text
@@ -1551,6 +1554,147 @@ class TestDishInventory:
         assert row[0] == "inactive"
         assert row[1] == "20260405"
         assert row[2] == "euthanasia"
+
+    def test_batch_terminate_dishes_web_marks_selected_active_dishes_inactive(
+        self, client, seed_full_dish, tmp_db_path
+    ):
+        from metazebrobot.models.fish_dish import FishDish
+
+        second_dish = FishDish.create_new(
+            cross_id=f"CROSS_{uuid.uuid4().hex[:6]}",
+            dish_number=1,
+            genotype="Tg(elavl3:GCaMP6s)",
+            responsible="test-user",
+            fish_count=20,
+            dof="20260401",
+            container_type="petri_dish",
+        )
+        data_manager.save_fish_dish(second_dish.model_dump(mode="json", exclude_none=True))
+
+        resp = client.post(
+            "/dishes/batch-terminate",
+            data={
+                "dish_ids": [seed_full_dish, second_dish.dish_id],
+                "termination_date": "2026-04-05",
+                "termination_reason": "euthanasia",
+                "return_status": "active",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/dishes/?status=active&batch_terminated=2"
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        rows = conn.execute(
+            """
+            SELECT dish_id, status, termination_date, termination_reason, data
+            FROM dishes
+            WHERE dish_id IN (?, ?)
+            ORDER BY dish_id
+            """,
+            (seed_full_dish, second_dish.dish_id),
+        ).fetchall()
+        conn.close()
+
+        assert len(rows) == 2
+        for row in rows:
+            payload = json.loads(row[4])
+            assert row[1:4] == ("inactive", "20260405", "euthanasia")
+            assert payload["status"] == "inactive"
+            assert payload["termination_date"] == "20260405"
+            assert payload["termination_reason"] == "euthanasia"
+
+    def test_batch_terminate_dishes_web_rejects_no_selection(self, client):
+        resp = client.post(
+            "/dishes/batch-terminate",
+            data={
+                "termination_date": "2026-04-05",
+                "termination_reason": "euthanasia",
+                "return_status": "all",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 400
+        assert "Select at least one active dish" in resp.text
+
+    def test_batch_terminate_dishes_web_rejects_unrecognized_reason(self, client, seed_full_dish):
+        resp = client.post(
+            "/dishes/batch-terminate",
+            data={
+                "dish_ids": [seed_full_dish],
+                "termination_date": "2026-04-05",
+                "termination_reason": "No embryos remaining",
+                "return_status": "all",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 400
+        assert "Termination reason is required" in resp.text
+
+    def test_batch_terminate_dishes_web_rejects_invalid_date(self, client, seed_full_dish):
+        resp = client.post(
+            "/dishes/batch-terminate",
+            data={
+                "dish_ids": [seed_full_dish],
+                "termination_date": "not-a-date",
+                "termination_reason": "euthanasia",
+                "return_status": "all",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 400
+        assert "Termination date must be a valid date" in resp.text
+
+    def test_batch_terminate_dishes_web_rejects_inactive_dishes_without_partial_update(
+        self, client, seed_full_dish, tmp_db_path
+    ):
+        from metazebrobot.models.fish_dish import FishDish
+
+        inactive_dish = FishDish.create_new(
+            cross_id=f"CROSS_{uuid.uuid4().hex[:6]}",
+            dish_number=1,
+            genotype="Tg(elavl3:GCaMP6s)",
+            responsible="test-user",
+            fish_count=20,
+            dof="20260401",
+            container_type="petri_dish",
+        )
+        inactive_dish.status = "inactive"
+        inactive_dish.termination_date = "20260401"
+        inactive_dish.termination_reason = "propagation"
+        data_manager.save_fish_dish(inactive_dish.model_dump(mode="json", exclude_none=True))
+
+        resp = client.post(
+            "/dishes/batch-terminate",
+            data={
+                "dish_ids": [seed_full_dish, inactive_dish.dish_id],
+                "termination_date": "2026-04-05",
+                "termination_reason": "euthanasia",
+                "return_status": "all",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 400
+        assert "Only active dishes can be batch terminated" in resp.text
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        active_row = conn.execute(
+            "SELECT status, termination_date, termination_reason FROM dishes WHERE dish_id = ?",
+            (seed_full_dish,),
+        ).fetchone()
+        inactive_row = conn.execute(
+            "SELECT status, termination_date, termination_reason FROM dishes WHERE dish_id = ?",
+            (inactive_dish.dish_id,),
+        ).fetchone()
+        conn.close()
+
+        assert active_row == ("active", None, None)
+        assert inactive_row == ("inactive", "20260401", "propagation")
 
     def test_update_inactive_dish_termination_date_web(self, client, seed_full_dish, tmp_db_path):
         client.post(

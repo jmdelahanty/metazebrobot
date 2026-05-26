@@ -30,10 +30,40 @@
 </p>
 
 {% if dishes %}
+<form id="batch-terminate-form"
+      method="post"
+      action="/dishes/batch-terminate"
+      onsubmit="return confirm('Terminate ' + document.querySelectorAll('[data-batch-dish]:checked').length + ' selected dishes?');">
+    <input type="hidden" name="return_status" value="{{ status_filter }}">
+    <div class="grid" style="align-items:end">
+        <label>
+            Termination date
+            <input type="date" name="termination_date" value="{{ today }}" required>
+        </label>
+        <label>
+            Reason
+            <select name="termination_reason" required>
+                {% for reason in termination_reason_options %}
+                <option value="{{ reason.value }}">{{ reason.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button id="batch-terminate-submit" type="submit" class="secondary" disabled>
+            Terminate Selected
+        </button>
+    </div>
+    <p><small><span id="batch-terminate-count">0</span> selected for batch termination</small></p>
+</form>
+
 <figure>
 <table role="grid" class="screening-steps-table">
     <thead>
         <tr>
+            <th>
+                <input type="checkbox"
+                       id="batch-select-all"
+                       aria-label="Select all visible active dishes for batch termination">
+            </th>
             <th class="sortable">Dish</th>
             <th class="sortable">Cross</th>
             <th class="sortable">Genotype</th>
@@ -51,6 +81,16 @@
         <tr data-dish-row="1"
             data-search="{{ d.search_text }}"
             {% if d.status != "active" %}style="opacity:0.72"{% endif %}>
+            <td>
+                {% if d.status == "active" %}
+                <input type="checkbox"
+                       name="dish_ids"
+                       value="{{ d.dish_id }}"
+                       form="batch-terminate-form"
+                       data-batch-dish
+                       aria-label="Select {{ d.dish_id }} for batch termination">
+                {% endif %}
+            </td>
             <td>
                 <strong>{{ d.dish_id }}</strong>
                 <br>
@@ -236,7 +276,46 @@
 <script>
 document.addEventListener("DOMContentLoaded", function() {
     var input = document.getElementById("dish-filter");
+    var batchCheckboxes = Array.from(document.querySelectorAll("[data-batch-dish]"));
+    var batchCount = document.getElementById("batch-terminate-count");
+    var batchSubmit = document.getElementById("batch-terminate-submit");
+    var batchSelectAll = document.getElementById("batch-select-all");
+    function updateBatchState() {
+        var selectedCount = batchCheckboxes.filter(function(checkbox) {
+            return checkbox.checked;
+        }).length;
+        if (batchCount) {
+            batchCount.textContent = selectedCount;
+        }
+        if (batchSubmit) {
+            batchSubmit.disabled = selectedCount === 0;
+        }
+        if (batchSelectAll) {
+            var visibleCheckboxes = batchCheckboxes.filter(function(checkbox) {
+                return checkbox.closest("[data-dish-row]").style.display !== "none";
+            });
+            var selectedVisibleCount = visibleCheckboxes.filter(function(checkbox) {
+                return checkbox.checked;
+            }).length;
+            batchSelectAll.checked = visibleCheckboxes.length > 0 && selectedVisibleCount === visibleCheckboxes.length;
+            batchSelectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleCheckboxes.length;
+        }
+    }
+    batchCheckboxes.forEach(function(checkbox) {
+        checkbox.addEventListener("change", updateBatchState);
+    });
+    if (batchSelectAll) {
+        batchSelectAll.addEventListener("change", function() {
+            batchCheckboxes.forEach(function(checkbox) {
+                if (checkbox.closest("[data-dish-row]").style.display !== "none") {
+                    checkbox.checked = batchSelectAll.checked;
+                }
+            });
+            updateBatchState();
+        });
+    }
     if (!input) {
+        updateBatchState();
         return;
     }
     var rows = Array.from(document.querySelectorAll("[data-dish-row]"));
@@ -246,7 +325,9 @@ document.addEventListener("DOMContentLoaded", function() {
             var haystack = row.dataset.search || "";
             row.style.display = !query || haystack.indexOf(query) !== -1 ? "" : "none";
         });
+        updateBatchState();
     });
+    updateBatchState();
 });
 </script>
 {% endblock %}
