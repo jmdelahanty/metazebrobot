@@ -33,6 +33,7 @@ CREATE TABLE quality_checks (
             vol_water_changed INTEGER,
             num_dead INTEGER,
             notes TEXT,
+            image_filename TEXT,
             data JSON,  -- Full check data
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (dish_id) REFERENCES dishes (dish_id)
@@ -78,7 +79,7 @@ CREATE VIEW recent_quality_checks AS
         WHERE d.status = 'active'
         ORDER BY qc.check_time DESC
         LIMIT 50
-/* recent_quality_checks(id,dish_id,check_time,fed,feed_type,water_changed,vol_water_changed,num_dead,notes,data,created_at,cross_id,genotype,responsible) */;
+/* recent_quality_checks(id,dish_id,check_time,fed,feed_type,water_changed,vol_water_changed,num_dead,notes,image_filename,data,created_at,cross_id,genotype,responsible) */;
 CREATE UNIQUE INDEX idx_quality_checks_unique
                     ON quality_checks(dish_id, check_time)
                 ;

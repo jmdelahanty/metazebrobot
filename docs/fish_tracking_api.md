@@ -307,6 +307,45 @@ Returns `{"items": [...]}` ordered by `check_time` descending.
 
 ---
 
+### Dish-level daily care checks
+
+The web care page chooses this form for simple containers such as petri dishes,
+beakers, and tanks.
+
+#### Log a dish-level check
+
+```
+POST /care/{dish_id}/check
+Content-Type: multipart/form-data
+
+check_time: "20260401T09:30:00"   (required)
+fed: true                         (optional)
+feed_type: "paramecia"            (optional)
+water_changed: true               (optional)
+vol_water_changed: 50             (optional)
+num_dead: 0                       (optional)
+notes: "dirty dish"               (optional)
+care_image: <binary image data>   (optional, JPEG or PNG)
+```
+
+Returns an HTML partial containing the recent check table. If `care_image` is
+provided, the file is stored under `care_images/{dish_id}/`, served at
+`/care-images/{dish_id}/{filename}`, and linked from
+`quality_checks.image_filename`.
+
+#### Recent dish-level checks
+
+```
+GET /care/{dish_id}/checks-table
+```
+
+Returns an HTML partial. Dish-level rows include an image thumbnail when a
+care image is attached. For well plates or other multi-unit dishes, the same
+partial shows per-unit check history; per-unit batch checks do not currently
+attach images.
+
+---
+
 ### Fish reference images
 
 #### Upload an image

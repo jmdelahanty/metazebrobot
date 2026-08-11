@@ -18,6 +18,7 @@
             <th>Water</th>
             <th>Vol (mL)</th>
             <th>Dead</th>
+            {% if not unit_level %}<th>Image</th>{% endif %}
             <th>Notes</th>
         </tr>
     </thead>
@@ -31,6 +32,19 @@
             <td>{{ "Yes" if c.water_changed else "No" }}</td>
             <td>{{ c.vol_water_changed if c.vol_water_changed else "-" }}</td>
             <td>{{ c.num_dead if c.num_dead else "0" }}</td>
+            {% if not unit_level %}
+            <td>
+                {% if c.image_filename %}
+                <a href="/care-images/{{ dish_id }}/{{ c.image_filename }}" target="_blank">
+                    <img src="/care-images/{{ dish_id }}/{{ c.image_filename }}"
+                         alt="Care check image for {{ c.check_time }}"
+                         style="max-width:5rem; max-height:5rem; object-fit:cover; border-radius:4px">
+                </a>
+                {% else %}
+                -
+                {% endif %}
+            </td>
+            {% endif %}
             <td>{{ c.notes or "-" }}</td>
         </tr>
         {% endfor %}

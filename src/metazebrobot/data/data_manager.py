@@ -127,6 +127,10 @@ class DataManager:
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_quality_checks_unique
                     ON quality_checks(dish_id, check_time)
                 """)
+                cursor.execute("PRAGMA table_info(quality_checks)")
+                quality_check_cols = {row[1] for row in cursor.fetchall()}
+                if "image_filename" not in quality_check_cols:
+                    cursor.execute("ALTER TABLE quality_checks ADD COLUMN image_filename TEXT")
 
                 # Phase 1: Create screening_steps table
                 cursor.execute("""
@@ -1097,8 +1101,8 @@ class DataManager:
             cursor.execute("""
             INSERT INTO quality_checks
             (dish_id, check_time, fed, feed_type, water_changed,
-             vol_water_changed, num_dead, notes, data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             vol_water_changed, num_dead, notes, image_filename, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 dish_id,
                 check_time,
@@ -1108,6 +1112,7 @@ class DataManager:
                 check_data.get('vol_water_changed'),
                 check_data.get('num_dead'),
                 check_data.get('notes'),
+                check_data.get('image_filename'),
                 json.dumps(check_data)
             ))
 
@@ -2119,8 +2124,8 @@ class DataManager:
                 conn.execute("""
                     INSERT OR REPLACE INTO quality_checks
                     (dish_id, check_time, fed, feed_type, water_changed,
-                     vol_water_changed, num_dead, notes, data)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     vol_water_changed, num_dead, notes, image_filename, data)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     dish_id,
                     check_data["check_time"],
@@ -2130,6 +2135,7 @@ class DataManager:
                     check_data.get("vol_water_changed"),
                     check_data.get("num_dead", 0),
                     check_data.get("notes"),
+                    check_data.get("image_filename"),
                     json.dumps(check_data),
                 ))
                 conn.commit()
@@ -2146,7 +2152,7 @@ class DataManager:
             with self.get_connection() as conn:
                 rows = conn.execute("""
                     SELECT check_time, fed, feed_type, water_changed,
-                           vol_water_changed, num_dead, notes
+                           vol_water_changed, num_dead, notes, image_filename
                     FROM quality_checks
                     WHERE dish_id = ?
                     ORDER BY check_time DESC

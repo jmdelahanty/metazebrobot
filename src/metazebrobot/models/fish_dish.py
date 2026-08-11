@@ -196,6 +196,7 @@ class QualityCheckData(BaseModel):
     vol_water_changed: Optional[int] = None
     num_dead: int = 0
     notes: Optional[str] = None
+    image_filename: Optional[str] = None
 
     @field_validator('check_time')
     @classmethod

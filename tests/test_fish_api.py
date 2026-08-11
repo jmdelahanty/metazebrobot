@@ -1006,6 +1006,36 @@ class TestDailyCare:
         assert resp.status_code == 200
         assert "Check saved" in resp.text
 
+    def test_submit_dish_check_with_image(self, client, seed_dish, tmp_db_path):
+        fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+        resp = client.post(
+            f"/care/{seed_dish}/check",
+            data={
+                "check_time": "20260403T09:30:00",
+                "num_dead": 0,
+                "notes": "dirty dish",
+            },
+            files={"care_image": ("dirty.png", fake_png, "image/png")},
+        )
+        assert resp.status_code == 200
+        assert "Check saved" in resp.text
+        assert "/care-images/" in resp.text
+        assert "Care check image for 20260403T09:30:00" in resp.text
+
+        image_dir = tmp_db_path.parent / "care_images" / seed_dish
+        saved_images = list(image_dir.glob("20260403T09_30_00_*.png"))
+        assert len(saved_images) == 1
+
+    def test_submit_dish_check_rejects_invalid_image_type(self, client, seed_dish):
+        resp = client.post(
+            f"/care/{seed_dish}/check",
+            data={"check_time": "20260403T09:45:00", "num_dead": 0},
+            files={"care_image": ("dirty.gif", b"GIF89a", "image/gif")},
+        )
+        assert resp.status_code == 200
+        assert "Invalid file type" in resp.text
+        assert "20260403T09:45:00" not in resp.text
+
     def test_checks_table_partial(self, client, seed_dish):
         # Submit a check first
         client.post(

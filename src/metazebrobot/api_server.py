@@ -1278,6 +1278,12 @@ def _clean_parent_identifier(value: Optional[Any]) -> str:
     return text.replace(">", "_").replace(":", "_").replace(" ", "_")
 
 
+def _safe_care_image_stem(check_time: str) -> str:
+    """Return a filesystem-safe filename stem for a care check timestamp."""
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", check_time.strip())
+    return stem.strip("._-") or "check"
+
+
 def _parent_sex_from_counts_or_role(parent: Dict[str, Any]) -> str:
     role = (parent.get("role") or "").lower()
     if role == "male":
@@ -1984,6 +1990,12 @@ async def lifespan(app: FastAPI):
         app.state.dish_images_dir = dish_images_dir
         logger.info(f"Dish images directory: {dish_images_dir}")
 
+        # Ensure daily care check images directory exists
+        care_images_dir = db_path.parent / "care_images"
+        care_images_dir.mkdir(parents=True, exist_ok=True)
+        app.state.care_images_dir = care_images_dir
+        logger.info(f"Care images directory: {care_images_dir}")
+
         # Ensure curated genotype reference images directory exists
         genotype_reference_images_dir = db_path.parent / "genotype_reference_images"
         genotype_reference_images_dir.mkdir(parents=True, exist_ok=True)
@@ -2043,6 +2055,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "/dish-images",
             StaticFiles(directory=str(_dish_images_dir)),
             name="dish_images",
+        )
+        # Serve uploaded daily care check images
+        _care_images_dir = app.state.db_path.parent / "care_images"
+        _care_images_dir.mkdir(parents=True, exist_ok=True)
+        app.mount(
+            "/care-images",
+            StaticFiles(directory=str(_care_images_dir)),
+            name="care_images",
         )
         # Serve curated full-genotype reference images
         _genotype_reference_images_dir = app.state.db_path.parent / "genotype_reference_images"
@@ -4631,12 +4651,13 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             checks = data_manager.get_dish_quality_checks(dish_id)
 
         return templates.TemplateResponse(request, "care/_checks_table.html", {
+            "dish_id": dish_id,
             "checks": checks,
             "unit_level": has_units,
         })
 
     @app.post("/care/{dish_id}/check", response_class=HTMLResponse)
-    def submit_dish_check(
+    async def submit_dish_check(
         request: Request,
         dish_id: str,
         check_time: str = Form(...),
@@ -4646,9 +4667,45 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         vol_water_changed: Optional[int] = Form(default=None),
         num_dead: int = Form(default=0),
         notes: Optional[str] = Form(default=None),
+        care_image: Optional[UploadFile] = File(default=None),
     ):
         """Submit a dish-level quality check."""
-        _require_db_path()
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            row = conn.execute(
+                "SELECT dish_id FROM dishes WHERE dish_id = ?",
+                (dish_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Dish not found")
+
+        image_filename = None
+        if care_image is not None and care_image.filename:
+            allowed = {"image/jpeg", "image/png"}
+            if care_image.content_type not in allowed:
+                checks = data_manager.get_dish_quality_checks(dish_id)
+                return templates.TemplateResponse(request, "care/_checks_table.html", {
+                    "dish_id": dish_id,
+                    "checks": checks,
+                    "unit_level": False,
+                    "flash_message": f"Invalid file type: {care_image.content_type}. Only JPEG and PNG are accepted.",
+                    "flash_level": "error",
+                })
+
+            care_images_dir: Path = app.state.care_images_dir
+            dish_dir = care_images_dir / dish_id
+            dish_dir.mkdir(parents=True, exist_ok=True)
+
+            ext = "jpg" if care_image.content_type == "image/jpeg" else "png"
+            stem = _safe_care_image_stem(check_time)
+            existing = list(dish_dir.glob(f"{stem}_*"))
+            seq = len(existing) + 1
+            image_filename = f"{stem}_{seq:03d}.{ext}"
+
+            dest = dish_dir / image_filename
+            contents = await care_image.read()
+            dest.write_bytes(contents)
+
         check_data = {
             "check_time": check_time,
             "fed": fed,
@@ -4657,10 +4714,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "vol_water_changed": vol_water_changed,
             "num_dead": num_dead,
             "notes": notes or None,
+            "image_filename": image_filename,
         }
         success = data_manager.save_dish_quality_check(dish_id, check_data)
         checks = data_manager.get_dish_quality_checks(dish_id)
         return templates.TemplateResponse(request, "care/_checks_table.html", {
+            "dish_id": dish_id,
             "checks": checks,
             "unit_level": False,
             "flash_message": "Check saved." if success else "Failed to save check.",
@@ -4711,6 +4770,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         checks = checks[:50]
 
         return templates.TemplateResponse(request, "care/_checks_table.html", {
+            "dish_id": dish_id,
             "checks": checks,
             "unit_level": True,
             "flash_message": f"Saved {saved} unit checks." if saved else "No checks to save (nothing filled in).",

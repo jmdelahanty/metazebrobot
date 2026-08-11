@@ -205,6 +205,7 @@ def tmp_db_path(tmp_path_factory) -> Path:
             vol_water_changed INTEGER,
             num_dead INTEGER DEFAULT 0,
             notes TEXT,
+            image_filename TEXT,
             data TEXT,
             UNIQUE(dish_id, check_time)
         )
