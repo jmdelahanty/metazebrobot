@@ -50,6 +50,8 @@
 - [x] "Apply to all" convenience toggles for fed/water on per-unit form
 - [x] `POST /care/{dish_id}/check` and `POST /care/{dish_id}/unit-checks` endpoints
 - [x] HTMX check history partial
+- [x] Dish-level care checks support optional JPEG/PNG image capture
+- [x] Care-check images are stored under `care_images/{dish_id}/` and shown as history thumbnails
 
 ### Labels and barcode scanning
 - [x] `GET /dishes/{dish_id}/label` — PNG label (62x29mm, 300 DPI) with QR code
@@ -66,6 +68,8 @@
 - [x] "Refresh Crosses from PyRAT" button (last 30 days, filtered by user)
 - [x] Redirects to screening page on success
 - [x] "New Dish" buttons on home, screening, and care pages
+- [x] Manual fish transfers can create a derived destination dish with inherited metadata and lineage
+- [x] Transfer-created dish labels show the event-derived current fish count
 
 ### In-browser guided tour
 - [x] Driver.js v1.4.0 vendored (MIT, ~7KB gzipped)
@@ -81,6 +85,8 @@
 - [x] `/pyrat/tanks/` — tank list with age color coding (URGENT >365d, WARNING >315d, OK)
 - [x] Summary badges showing urgent/warning/ok counts
 - [x] `/pyrat/crossings/` — crossing list with status colors and performance tracking
+- [x] PyRAT crossings use frontend backend/v1 detail enrichment for raised/performance counts when frontend credentials are configured
+- [x] PyRAT crossing details refresh immediately, poll every 5 minutes, and retry once with a fresh frontend login after 401/403 detail failures
 - [x] Links from crossings to local dishes
 - [x] Sortable table columns (click headers, numeric + alpha sort, ▲/▼ indicators)
 - [x] Filtered by current user's responsible_id

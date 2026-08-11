@@ -12,7 +12,9 @@ MetaZebrobot is meant to start tracking metadata for my work at Janelia in the J
 - **Fish Water Management**: Monitor fish water batches and derivatives
 - **Poly-L-Serine Management**: Track poly-l-serine bottles and aliquots
 - **Fish Dish Tracking**: Monitor experimental fish dishes with quality checks
-- **PyRAT API Integration**: Query and analyze data from the PyRAT aquatics system
+  and optional daily care images
+- **PyRAT API Integration**: Query tanks/crossings from PyRAT and enrich
+  crossing performance from authenticated frontend detail endpoints
 
 ## Project Structure
 
@@ -30,6 +32,7 @@ metazebrobot/
 │   │   ├── data/                   # Data access layer
 │   │   └── utils/                  # Utility functions
 ├── bin/                            # Utility scripts
+├── docs/                           # Design notes and web/API documentation
 ├── tests/                          # Test directory
 ├── config.example.json             # Example user config
 ├── pyrat_credentials_tool.py       # PyRAT credential setup / clear tool
@@ -75,6 +78,13 @@ python pyrat_credentials_tool.py --setup-credentials
 ```
 
 The query tool still supports `--setup-credentials`, but the dedicated credentials tool is now the primary setup path.
+
+For systemd deployments, PyRAT credentials can also be provided through
+environment variables (`PYRAT_BASE_URL`, `PYRAT_CLIENT_TOKEN`,
+`PYRAT_USER_TOKEN`, and optionally `PYRAT_FRONTEND_USERNAME` /
+`PYRAT_FRONTEND_PASSWORD`). `scripts/inspect_pyrat_keyring.py --env-format`
+prints the stored keyring values in a format suitable for a protected
+`EnvironmentFile`.
 
 #### Tank Query Tool
 
@@ -143,6 +153,8 @@ Then open:
 
 - `http://127.0.0.1:8000/`
 - `http://127.0.0.1:8000/dishes/new`
+- `http://127.0.0.1:8000/care/`
+- `http://127.0.0.1:8000/pyrat/crossings/`
 
 If you prefer a plain Python environment instead of Pixi:
 
@@ -159,9 +171,18 @@ Example routes:
 
 - `GET /`
 - `GET /dishes/new`
+- `GET /dishes/`
+- `GET /screening/`
+- `GET /care/`
+- `GET /fish/`
+- `GET /references/`
+- `GET /pyrat/tanks/`
+- `GET /pyrat/crossings/`
 - `GET /health`
 - `GET /dishes?status=active&limit=200&offset=0`
 - `GET /dishes/{dish_id}?include_checks=true`
+
+See `docs/web_pages.md` for the current page-by-page capability map.
 
 ### systemd service (Ubuntu)
 
@@ -184,6 +205,9 @@ The application uses a SQLite database (`zebrobot.db`) for core data:
 
 - **Dishes, crosses, materials, quality checks**: stored in SQLite tables
 - **JSON blobs** are retained in the DB for flexible record storage
+- **Uploaded images** are stored on disk beside the SQLite database
+  (`screening_images/`, `fish_images/`, `dish_images/`, `care_images/`) with
+  paths/filenames stored in SQLite
 - **PyRAT data** query results can still be exported to JSON for analysis
 
 The `migrate_to_nosql.py` script can migrate legacy JSON directories into the
