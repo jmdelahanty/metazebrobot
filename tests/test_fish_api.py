@@ -1327,6 +1327,111 @@ class TestDishInventory:
         assert '<option value="well_plate_setup">Well plate setup</option>' in resp.text
         assert '<option value="consolidation">Consolidation</option>' in resp.text
 
+    def test_dishes_inventory_page_shows_transfer_to_new_dish_without_destination(
+        self,
+        client,
+        seed_full_dish,
+    ):
+        resp = client.get("/dishes/")
+
+        assert resp.status_code == 200
+        assert f'action="/dishes/{seed_full_dish}/transfer/new"' in resp.text
+        assert "Transfer to New Dish" in resp.text
+        assert "Create Dish &amp; Transfer" in resp.text
+
+    def test_transfer_dish_fish_to_new_dish_creates_lineage_event_and_label(
+        self,
+        client,
+        seed_full_dish,
+        tmp_db_path,
+        monkeypatch,
+    ):
+        destination_id = f"{seed_full_dish}_transfer1"
+
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/transfer/new",
+            data={
+                "count": 7,
+                "reason": "manual_transfer",
+                "container_type": "beaker",
+                "notes": "manual split for imaging",
+                "return_status": "active",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == (
+            f"/dishes/?status=active&transferred={seed_full_dish}"
+            f"&created_destination={destination_id}"
+        )
+
+        source = client.get(f"/dishes/{seed_full_dish}").json()["data"]
+        destination = client.get(f"/dishes/{destination_id}").json()["data"]
+        assert source["current_fish_count"] == 43
+        assert destination["parent_dish_id"] == seed_full_dish
+        assert destination["dish_population_type"] == "manual_transfer"
+        assert destination["fish_count"] == 0
+        assert destination["incoming_transfer_count"] == 7
+        assert destination["current_fish_count"] == 7
+        assert destination["enclosure"]["container_type"] == "beaker"
+        assert "manual split for imaging" in destination["notes"]
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        transfer = conn.execute(
+            """
+            SELECT source_dish_id, destination_dish_id, count, reason, notes
+            FROM dish_transfer_events
+            WHERE source_dish_id = ? AND destination_dish_id = ?
+            """,
+            (seed_full_dish, destination_id),
+        ).fetchone()
+        conn.close()
+        assert transfer == (
+            seed_full_dish,
+            destination_id,
+            7,
+            "manual_transfer",
+            "manual split for imaging",
+        )
+
+        label_fields = {}
+
+        def fake_generate_dish_label(**kwargs):
+            label_fields.update(kwargs)
+            return b"\x89PNG\r\n\x1a\n"
+
+        monkeypatch.setattr(
+            "metazebrobot.api_server.generate_dish_label",
+            fake_generate_dish_label,
+        )
+        label = client.get(f"/dishes/{destination_id}/label")
+        assert label.status_code == 200
+        assert label.headers["content-type"] == "image/png"
+        assert label_fields["dish_id"] == destination_id
+        assert label_fields["fish_count"] == 7
+
+    def test_transfer_dish_fish_to_new_dish_rejects_excess_without_creating_dish(
+        self,
+        client,
+        seed_full_dish,
+    ):
+        destination_id = f"{seed_full_dish}_transfer1"
+
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/transfer/new",
+            data={
+                "count": 51,
+                "reason": "manual_transfer",
+                "container_type": "petri_dish",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 400
+        assert "exceeds source current fish count" in resp.text
+        assert client.get(f"/dishes/{destination_id}").status_code == 404
+
     def test_transfer_dish_fish_web_persists_event_and_counts(self, client, seed_full_dish, tmp_db_path):
         client.post(
             f"/screening/{seed_full_dish}/split",

@@ -3231,6 +3231,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         status: str = Query(default="all"),
         terminated: Optional[str] = Query(default=None),
         transferred: Optional[str] = Query(default=None),
+        created_destination: Optional[str] = Query(default=None),
         count_updated: Optional[str] = Query(default=None),
         batch_terminated: Optional[int] = Query(default=None),
     ):
@@ -3248,6 +3249,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 d.dof,
                 d.fish_count,
                 d.current_fish_count,
+                d.container_type,
                 d.responsible,
                 d.status,
                 d.termination_date,
@@ -3323,6 +3325,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "dpf": dpf,
                 "fish_count": d.get("fish_count"),
                 "current_fish_count": d.get("current_fish_count"),
+                "container_type": d.get("container_type") or "petri_dish",
                 "registered_fish_count": d.get("registered_fish_count"),
                 "responsible": d.get("responsible"),
                 "status": d.get("status"),
@@ -3369,6 +3372,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             flash_message = f"Terminated dish {terminated}."
         elif batch_terminated:
             flash_message = f"Terminated {batch_terminated} dishes."
+        elif transferred and created_destination:
+            flash_message = (
+                f"Transferred fish from dish {transferred} into new dish "
+                f"{created_destination}."
+            )
         elif transferred:
             flash_message = f"Transferred fish from dish {transferred}."
         elif count_updated:
@@ -3579,6 +3587,39 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         return RedirectResponse(
             url=f"/dishes/?status={normalized_status}&transferred={source_dish_id}",
+            status_code=303,
+        )
+
+    @app.post("/dishes/{source_dish_id}/transfer/new", response_class=HTMLResponse)
+    def transfer_dish_fish_to_new_dish_web(
+        source_dish_id: str,
+        count: int = Form(...),
+        reason: str = Form(default="manual_transfer"),
+        container_type: Optional[str] = Form(default=None),
+        notes: Optional[str] = Form(default=None),
+        return_status: str = Form(default="all"),
+    ):
+        """Create a derived destination dish and transfer fish into it."""
+        _require_db_path()
+        normalized_status = (return_status or "all").strip().lower()
+        if normalized_status not in {"all", "active", "inactive"}:
+            normalized_status = "all"
+
+        success, message, new_dish = fish_dish_ctrl.transfer_fish_to_new_dish(
+            source_dish_id=source_dish_id,
+            count=count,
+            reason=reason,
+            container_type=container_type or None,
+            notes=notes or None,
+        )
+        if not success or not new_dish:
+            raise HTTPException(status_code=400, detail=message)
+
+        return RedirectResponse(
+            url=(
+                f"/dishes/?status={normalized_status}&transferred={source_dish_id}"
+                f"&created_destination={new_dish.dish_id}"
+            ),
             status_code=303,
         )
 
@@ -5707,17 +5748,24 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         db_path = _require_db_path()
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             row = conn.execute(
-                "SELECT dish_id, genotype, dof, fish_count, container_type FROM dishes WHERE dish_id = ?",
+                """
+                SELECT dish_id, genotype, dof, fish_count, current_fish_count, container_type
+                FROM dishes
+                WHERE dish_id = ?
+                """,
                 (dish_id,),
             ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Dish not found")
             dish = _row_to_dict(row)
+        label_fish_count = dish.get("current_fish_count")
+        if label_fish_count is None:
+            label_fish_count = dish.get("fish_count")
         png_bytes = generate_dish_label(
             dish_id=dish["dish_id"],
             genotype=dish.get("genotype"),
             dof=dish.get("dof"),
-            fish_count=dish.get("fish_count"),
+            fish_count=label_fish_count,
             container_type=dish.get("container_type"),
         )
         return Response(content=png_bytes, media_type="image/png")

@@ -148,6 +148,7 @@ DishPopulationType = Literal[
     "negative_screened",
     "positive_screened",
     "pigmented_screened",
+    "manual_transfer",
     "other",
 ]
 

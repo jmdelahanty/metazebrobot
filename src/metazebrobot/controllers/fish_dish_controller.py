@@ -725,6 +725,157 @@ class FishDishController:
             )
             return False, f"An unexpected error occurred: {str(e)}", None
 
+    def transfer_fish_to_new_dish(
+        self,
+        source_dish_id: str,
+        count: int,
+        reason: str,
+        container_type: Optional[str] = None,
+        event_datetime: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Tuple[bool, str, Optional[FishDish]]:
+        """Create a derived destination dish and transfer fish into it.
+
+        The destination starts with a zero baseline count. Its current count is
+        then derived from the transfer event, preventing the moved fish from
+        being counted once at creation and again as an incoming transfer.
+        """
+        try:
+            source_dish = self.get_dish(source_dish_id)
+            if not source_dish:
+                return False, f"Source dish {source_dish_id} not found.", None
+            if source_dish.status != "active":
+                return False, f"Source dish {source_dish_id} is not active.", None
+            if count <= 0:
+                return False, "Transfer count must be greater than zero.", None
+
+            source_current_count = source_dish.current_fish_count
+            if source_current_count is None:
+                source_current_count = source_dish.fish_count
+            if count > source_current_count:
+                return False, (
+                    f"Transfer count ({count}) exceeds source current fish count "
+                    f"({source_current_count})."
+                ), None
+
+            normalized_reason = normalize_dish_transfer_reason(reason)
+            if not normalized_reason:
+                return False, (
+                    "Transfer reason is required and must be one of: "
+                    f"{dish_transfer_reason_options_text()}."
+                ), None
+
+            if event_datetime:
+                try:
+                    datetime.strptime(event_datetime, "%Y%m%dT%H:%M:%S")
+                except ValueError:
+                    return False, "Invalid transfer datetime format. Expected YYYYMMDDTHH:MM:SS.", None
+            else:
+                event_datetime = datetime.now().strftime("%Y%m%dT%H:%M:%S")
+
+            index = 1
+            new_dish_id = f"{source_dish_id}_transfer{index}"
+            while data_manager.load_single_dish(new_dish_id):
+                index += 1
+                new_dish_id = f"{source_dish_id}_transfer{index}"
+                if index > 99:
+                    return False, (
+                        f"Could not generate a unique transfer dish ID for source "
+                        f"{source_dish_id}."
+                    ), None
+
+            destination_notes = (
+                f"Created for {normalized_reason.replace('_', ' ')} transfer from "
+                f"{source_dish_id} on {event_datetime[:8]}."
+            )
+            if notes:
+                destination_notes = f"{destination_notes} {notes.strip()}"
+
+            new_dish = FishDish.create_new(
+                dish_id=new_dish_id,
+                cross_id=source_dish.cross_id,
+                genotype=source_dish.genotype,
+                responsible=source_dish.responsible,
+                source_group_id=source_dish.source_group_id,
+                cross_setup_date=source_dish.cross_setup_date,
+                dof_source=source_dish.dof_source,
+                dof=source_dish.dof,
+                fish_count=0,
+                parent_dish_id=source_dish_id,
+                dish_population_type="manual_transfer",
+                species=source_dish.species,
+                sex=source_dish.sex,
+                parents=source_dish.breeding.parents,
+                temperature=source_dish.enclosure.temperature,
+                light_duration=(
+                    source_dish.enclosure.light_cycle.light_duration
+                    if source_dish.enclosure.light_cycle else None
+                ),
+                dawn_dusk=(
+                    source_dish.enclosure.light_cycle.dawn_dusk
+                    if source_dish.enclosure.light_cycle else None
+                ),
+                room=source_dish.enclosure.room,
+                container_type=container_type or source_dish.enclosure.container_type,
+                vol_water_total=source_dish.enclosure.vol_water_total,
+                notes=destination_notes,
+                dish_number=None,
+            )
+
+            if not data_manager.save_fish_dish(
+                new_dish.model_dump(mode="json", exclude_none=True)
+            ):
+                return False, f"Failed to save new destination dish {new_dish_id}.", None
+
+            data_manager.data_cache["fish_dishes"][new_dish_id] = new_dish.model_dump(
+                mode="json",
+                exclude_none=True,
+            )
+            success, message, _ = self.transfer_fish_between_dishes(
+                source_dish_id=source_dish_id,
+                destination_dish_id=new_dish_id,
+                count=count,
+                reason=normalized_reason,
+                event_datetime=event_datetime,
+                notes=notes,
+            )
+            if not success:
+                return False, (
+                    f"New destination dish {new_dish_id} was created, but the transfer failed: "
+                    f"{message}"
+                ), new_dish
+
+            refreshed_destination = self.get_dish(new_dish_id)
+            logger.info(
+                "Created destination dish %s and transferred %s fish from %s",
+                new_dish_id,
+                count,
+                source_dish_id,
+            )
+            return True, new_dish_id, refreshed_destination or new_dish
+
+        except ValidationError as e:
+            logger.error(
+                "Validation failed creating transfer destination from %s: %s",
+                source_dish_id,
+                e,
+            )
+            error_details = e.errors()
+            message = (
+                f"Validation Error: {error_details[0]['msg']} "
+                f"(field: {error_details[0]['loc'][0]})"
+                if error_details else str(e)
+            )
+            return False, message, None
+        except Exception as e:
+            logger.error(
+                "Error creating transfer destination from %s: %s",
+                source_dish_id,
+                e,
+                exc_info=True,
+            )
+            return False, f"An unexpected error occurred: {str(e)}", None
+
     def update_dish_fish_count(
         self,
         dish_id: str,
