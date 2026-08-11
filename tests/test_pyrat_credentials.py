@@ -68,6 +68,24 @@ def test_get_pyrat_frontend_credentials_falls_back_to_api_base_url(monkeypatch):
     }
 
 
+def test_get_pyrat_frontend_credentials_uses_api_env_base_url(monkeypatch):
+    keyring_stub = _KeyringStub()
+    monkeypatch.setattr(pyrat_credentials, "keyring", keyring_stub)
+
+    monkeypatch.setenv("PYRAT_BASE_URL", "https://env.example/aquatic")
+    monkeypatch.delenv("PYRAT_FRONTEND_BASE_URL", raising=False)
+    monkeypatch.setenv("PYRAT_FRONTEND_USERNAME", "frontend-user")
+    monkeypatch.setenv("PYRAT_FRONTEND_PASSWORD", "frontend-pass")
+
+    credentials = pyrat_credentials.get_pyrat_frontend_credentials()
+
+    assert credentials == {
+        "base_url": "https://env.example/aquatic/",
+        "username": "frontend-user",
+        "password": "frontend-pass",
+    }
+
+
 def test_save_pyrat_credentials_clears_stale_frontend_values_when_skipped(monkeypatch):
     keyring_stub = _KeyringStub()
     keyring_stub.set_password(pyrat_credentials.KEYRING_SERVICE, "frontend_username", "old-user")

@@ -1,7 +1,7 @@
 <div id="pyrat-crossings-table"
      {% if details_refresh_enabled %}
      hx-get="/pyrat/crossings/table"
-     hx-trigger="load"
+     hx-trigger="{{ details_refresh_trigger | default('load') }}"
      hx-swap="outerHTML"
      {% endif %}>
 {% if error %}
@@ -60,8 +60,8 @@
     </tbody>
 </table>
 </figure>
-{% if details_refresh_enabled %}
-<small><em>Refreshing PyRAT detail counts...</em></small>
+{% if details_refresh_enabled and details_refresh_note %}
+<small><em>{{ details_refresh_note }}</em></small>
 {% endif %}
 {% else %}
 <p><em>No crossings found. {% if not error %}Check that PyRAT credentials are configured.{% endif %}</em></p>

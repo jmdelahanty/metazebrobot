@@ -103,6 +103,8 @@ def get_pyrat_frontend_credentials(default_base_url: Optional[str] = None) -> Op
     if env_username and env_password:
         base_url = env_base_url
         if not base_url:
+            base_url = os.environ.get("PYRAT_BASE_URL")
+        if not base_url:
             try:
                 base_url = keyring.get_password(KEYRING_SERVICE, "frontend_base_url")
             except Exception:

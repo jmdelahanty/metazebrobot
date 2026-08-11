@@ -243,16 +243,64 @@ def enrich_crossings_with_frontend_details(
         return list(crossings)
 
     started = perf_counter()
-    try:
-        session, session_id = login_pyrat_frontend(
-            frontend_credentials["base_url"],
-            frontend_credentials["username"],
-            frontend_credentials["password"],
+    base_url = frontend_credentials["base_url"]
+    username = frontend_credentials["username"]
+    password = frontend_credentials["password"]
+
+    def login() -> Tuple[requests.Session, str]:
+        return login_pyrat_frontend(
+            base_url,
+            username,
+            password,
             verify_ssl=verify_ssl,
         )
+
+    try:
+        session, session_id = login()
     except Exception as exc:
         logger.warning("Unable to create PyRAT frontend session: %s", exc)
         return list(crossings)
+
+    auth_retry_used = False
+
+    def fetch_detail_with_auth_retry(crossing_id: Any) -> Dict[str, Any]:
+        """Fetch one detail payload, re-authenticating once on auth failures."""
+        nonlocal session, session_id, auth_retry_used
+
+        try:
+            return fetch_crossing_detail(
+                session,
+                base_url,
+                session_id,
+                crossing_id,
+                verify_ssl=verify_ssl,
+            )
+        except requests.HTTPError as exc:
+            response = exc.response
+            if (
+                response is None
+                or response.status_code not in (401, 403)
+                or auth_retry_used
+            ):
+                raise
+
+            auth_retry_used = True
+            logger.warning(
+                "PyRAT backend/v1 auth failed while enriching crossing %s; "
+                "creating a fresh frontend session and retrying once.",
+                crossing_id,
+            )
+            try:
+                session, session_id = login()
+            except Exception:
+                raise exc
+            return fetch_crossing_detail(
+                session,
+                base_url,
+                session_id,
+                crossing_id,
+                verify_ssl=verify_ssl,
+            )
 
     enriched: List[Dict[str, Any]] = []
     total = len(crossings)
@@ -264,13 +312,7 @@ def enrich_crossings_with_frontend_details(
 
         if crossing_id is not None:
             try:
-                payload = fetch_crossing_detail(
-                    session,
-                    frontend_credentials["base_url"],
-                    session_id,
-                    crossing_id,
-                    verify_ssl=verify_ssl,
-                )
+                payload = fetch_detail_with_auth_retry(crossing_id)
                 detail = payload.get("crossing_detail", payload)
 
                 merged["completed"] = detail.get("completed")

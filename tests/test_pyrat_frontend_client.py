@@ -118,18 +118,71 @@ def test_login_pyrat_frontend_visits_crossings_page(monkeypatch):
     ) in session.post_calls
 
 
-def test_enrich_crossings_stops_after_auth_failure(monkeypatch):
+def test_enrich_crossings_reauthenticates_once_after_auth_failure(monkeypatch):
+    crossings = [
+        {"crossing_id": 1, "status": "recorded"},
+        {"crossing_id": 2, "status": "recorded"},
+    ]
+
+    login_calls = []
+
+    def fake_login(*args, **kwargs):
+        login_calls.append(args)
+        return object(), f"session{len(login_calls)}"
+
+    monkeypatch.setattr(pyrat_frontend_client, "login_pyrat_frontend", fake_login)
+
+    calls = []
+
+    def fake_fetch_detail(*args, **kwargs):
+        session_id = args[2]
+        crossing_id = kwargs.get("crossing_id") or args[3]
+        calls.append((session_id, crossing_id))
+        if session_id == "session1" and crossing_id == 1:
+            response = _Response(status_code=401, text='{"detail":"Login chain not finished."}')
+            error = requests.HTTPError("401 unauthorized")
+            error.response = response
+            raise error
+        return {
+            "crossing_detail": {
+                "crossing_id": crossing_id,
+                "crossing_tanks": 2,
+                "raised_tanks": 1,
+                "really_raised_tanks": 1,
+            },
+        }
+
+    monkeypatch.setattr(pyrat_frontend_client, "fetch_crossing_detail", fake_fetch_detail)
+
+    enriched = pyrat_frontend_client.enrich_crossings_with_frontend_details(
+        crossings,
+        {
+            "base_url": "https://pyrat.example/aquatic/",
+            "username": "user",
+            "password": "password",
+        },
+    )
+
+    assert len(login_calls) == 2
+    assert calls == [("session1", 1), ("session2", 1), ("session2", 2)]
+    assert [item["crossing_tanks"] for item in enriched] == [2, 2]
+    assert [item["raised_tanks"] for item in enriched] == [1, 1]
+
+
+def test_enrich_crossings_stops_after_auth_retry_fails(monkeypatch):
     crossings = [
         {"crossing_id": 1, "status": "recorded"},
         {"crossing_id": 2, "status": "recorded"},
         {"crossing_id": 3, "status": "recorded"},
     ]
 
-    monkeypatch.setattr(
-        pyrat_frontend_client,
-        "login_pyrat_frontend",
-        lambda *args, **kwargs: (object(), "session123"),
-    )
+    login_calls = []
+
+    def fake_login(*args, **kwargs):
+        login_calls.append(args)
+        return object(), f"session{len(login_calls)}"
+
+    monkeypatch.setattr(pyrat_frontend_client, "login_pyrat_frontend", fake_login)
 
     calls = []
 
@@ -151,5 +204,6 @@ def test_enrich_crossings_stops_after_auth_failure(monkeypatch):
         },
     )
 
-    assert calls == [1]
+    assert len(login_calls) == 2
+    assert calls == [1, 1]
     assert enriched == crossings

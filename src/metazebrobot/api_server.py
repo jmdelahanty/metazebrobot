@@ -5633,6 +5633,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "crossings": crossings,
             "error": error_msg,
             "details_refresh_enabled": details_refresh_enabled,
+            "details_refresh_trigger": "load",
+            "details_refresh_note": "Refreshing PyRAT detail counts...",
         })
 
     @app.get("/pyrat/crossings/table", response_class=HTMLResponse)
@@ -5686,10 +5688,13 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         except Exception as e:
             error_msg = str(e)
 
+        details_refresh_enabled = bool(get_pyrat_frontend_credentials())
         return templates.TemplateResponse(request, "pyrat/_crossings_table.html", {
             "crossings": crossings,
             "error": error_msg,
-            "details_refresh_enabled": False,
+            "details_refresh_enabled": details_refresh_enabled,
+            "details_refresh_trigger": "every 5m",
+            "details_refresh_note": "PyRAT detail counts refresh every 5 minutes.",
         })
 
     # ------------------------------------------------------------------
