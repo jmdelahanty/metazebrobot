@@ -82,6 +82,19 @@ class CrossSnapshotResponse(BaseModel):
     dishes: Optional[List[Dict[str, Any]]] = None
 
 
+class CrossListItem(BaseModel):
+    cross_id: str
+    line_strain: Optional[str] = None
+    cross_type: Optional[str] = None
+    cross_status: Optional[str] = None
+    request_date: Optional[str] = None
+    responsible_requestor: Optional[str] = None
+
+
+class CrossListResponse(BaseModel):
+    items: List[CrossListItem] = Field(default_factory=list)
+
+
 class DishListItem(BaseModel):
     dish_id: str
     cross_id: Optional[str] = None
@@ -4029,6 +4042,100 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     ).fetchall()
                     dish["quality_checks"] = [_row_to_dict(r) for r in checks]
             return dish
+        except sqlite3.Error as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/crosses", response_model=CrossListResponse)
+    def list_crosses_api(
+        has_active_dishes: bool = Query(default=False),
+        limit: int = Query(default=100, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> Dict[str, Any]:
+        """List locally cached crosses, optionally limited to active dishes.
+
+        Older MetaZebrobot databases stored several summary fields in dedicated
+        columns. Newer PyRAT cache rows may store those values only in ``data``;
+        normalize both layouts into the original collection response contract.
+        """
+        db_path = _require_db_path()
+        try:
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                columns = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(crosses)").fetchall()
+                }
+
+                def selected_column(name: str) -> str:
+                    return f"c.{name}" if name in columns else f"NULL AS {name}"
+
+                where_clause = ""
+                if has_active_dishes:
+                    where_clause = """
+                        WHERE EXISTS (
+                            SELECT 1
+                            FROM dishes d
+                            WHERE d.cross_id = c.cross_id
+                              AND d.status = 'active'
+                        )
+                    """
+
+                if "request_date" in columns:
+                    order_expression = "COALESCE(c.request_date, c.updated_at)"
+                elif "updated_at" in columns:
+                    order_expression = "c.updated_at"
+                else:
+                    order_expression = "c.cross_id"
+
+                rows = conn.execute(
+                    f"""
+                    SELECT
+                        c.cross_id,
+                        {selected_column('line_strain')},
+                        {selected_column('cross_type')},
+                        {selected_column('cross_status')},
+                        {selected_column('request_date')},
+                        {selected_column('responsible_requestor')},
+                        {selected_column('data')}
+                    FROM crosses c
+                    {where_clause}
+                    ORDER BY {order_expression} DESC, c.cross_id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (limit, offset),
+                ).fetchall()
+
+            items = []
+            for row in rows:
+                item = _row_to_dict(row)
+                try:
+                    payload = json.loads(item.pop("data") or "{}")
+                except (TypeError, ValueError):
+                    payload = {}
+                if not isinstance(payload, dict):
+                    payload = {}
+
+                item["cross_id"] = str(item["cross_id"])
+                item["line_strain"] = (
+                    item.get("line_strain")
+                    or payload.get("strain_name")
+                    or payload.get("strain_name_with_id")
+                )
+                item["cross_type"] = item.get("cross_type") or payload.get("cross_type")
+                item["cross_status"] = item.get("cross_status") or payload.get("status")
+                item["request_date"] = (
+                    item.get("request_date")
+                    or payload.get("request_date")
+                    or payload.get("date_of_record")
+                    or payload.get("date_of_set_up")
+                )
+                item["responsible_requestor"] = (
+                    item.get("responsible_requestor")
+                    or payload.get("responsible_requestor")
+                    or payload.get("responsible_fullname")
+                )
+                items.append(item)
+
+            return {"items": items}
         except sqlite3.Error as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 

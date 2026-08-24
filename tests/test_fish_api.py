@@ -2034,12 +2034,14 @@ class TestDishCreation:
     def test_new_dish_form_prefills_selected_cross(self, client, monkeypatch):
         import metazebrobot.api_server as api_server
 
+        cross_id = f"PYRAT_{uuid.uuid4().hex[:8]}"
+
         def fake_fetch_pyrat(endpoint, params=None):
             assert endpoint == "tanks/crossings"
-            assert params["crossing_id"] == "17907"
+            assert params["crossing_id"] == cross_id
             assert "responsible_id" not in params
             return [{
-                "crossing_id": "17907",
+                "crossing_id": cross_id,
                 "strain_name": "Tg(elavl3:GRAB-5HT)",
                 "responsible_fullname": "Delahanty Jeremy",
                 "date_of_set_up": "2026-04-06",
@@ -2056,11 +2058,11 @@ class TestDishCreation:
 
         monkeypatch.setattr(api_server, "_fetch_pyrat", fake_fetch_pyrat)
 
-        resp = client.get("/dishes/new?cross_id=17907")
+        resp = client.get("/dishes/new", params={"cross_id": cross_id})
 
         assert resp.status_code == 200
         assert 'name="cross_id"' in resp.text
-        assert 'value="17907"' in resp.text
+        assert f'value="{cross_id}"' in resp.text
         assert 'value="Tg(elavl3:GRAB-5HT)"' in resp.text
         assert 'value="Delahanty Jeremy"' in resp.text
         assert 'value="#123_M11&gt;E1"' in resp.text
@@ -2227,12 +2229,14 @@ class TestDishCreation:
     def test_cross_info_partial_prefills_from_pyrat(self, client, monkeypatch):
         import metazebrobot.api_server as api_server
 
+        cross_id = f"PYRAT_{uuid.uuid4().hex[:8]}"
+
         def fake_fetch_pyrat(endpoint, params=None):
             assert endpoint == "tanks/crossings"
-            assert params["crossing_id"] == "17907"
+            assert params["crossing_id"] == cross_id
             assert "responsible_id" not in params
             return [{
-                "crossing_id": "17907",
+                "crossing_id": cross_id,
                 "strain_name": "Tg(elavl3:GRAB-5HT)",
                 "responsible_fullname": "Delahanty Jeremy",
                 "date_of_set_up": "2026-04-06",
@@ -2260,7 +2264,7 @@ class TestDishCreation:
 
         monkeypatch.setattr(api_server, "_fetch_pyrat", fake_fetch_pyrat)
 
-        resp = client.get("/dishes/new/cross-info?cross_id=17907")
+        resp = client.get("/dishes/new/cross-info", params={"cross_id": cross_id})
 
         assert resp.status_code == 200
         assert 'value="Tg(elavl3:GRAB-5HT)"' in resp.text
