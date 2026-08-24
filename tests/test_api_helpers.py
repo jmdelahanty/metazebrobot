@@ -7,12 +7,33 @@ from metazebrobot.api_server import (
     _ensure_cross_parent_provenance_schema,
     _load_cross_parent_provenance,
     _merge_cross_payload,
+    _natural_sort_key,
     _next_dish_number_for_cross,
     _prepare_crossings_for_display,
     _screening_indicator_suggestions,
     _upsert_cross_parent_provenance,
 )
 from metazebrobot.utils.cross_provenance import parse_parent_background
+
+
+class TestNaturalSortKey:
+    def test_sorts_multi_digit_dish_suffixes_numerically(self):
+        dish_ids = ["18973_9", "18973_15", "18973_2", "18973_14"]
+
+        assert sorted(dish_ids, key=_natural_sort_key, reverse=True) == [
+            "18973_15",
+            "18973_14",
+            "18973_9",
+            "18973_2",
+        ]
+
+    def test_sorts_numeric_runs_in_derived_dish_ids(self):
+        dish_ids = ["18973_15_transfer2", "18973_15_transfer10"]
+
+        assert sorted(dish_ids, key=_natural_sort_key) == [
+            "18973_15_transfer2",
+            "18973_15_transfer10",
+        ]
 
 
 class TestScreeningIndicatorSuggestions:

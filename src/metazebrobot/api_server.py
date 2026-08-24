@@ -844,6 +844,15 @@ def _next_dish_number_for_cross(conn: sqlite3.Connection, cross_id: Optional[str
     return max(dish_numbers, default=0) + 1
 
 
+def _natural_sort_key(value: Optional[Any]) -> Tuple[Tuple[int, Any], ...]:
+    """Split text into case-insensitive text and integer runs for natural sorting."""
+    return tuple(
+        (1, int(part)) if part.isdigit() else (0, part.casefold())
+        for part in re.split(r"(\d+)", str(value or ""))
+        if part
+    )
+
+
 def _load_cross_dish_counts(conn: sqlite3.Connection) -> Dict[str, int]:
     """Load active local dish counts keyed by cross id."""
     rows = conn.execute(
@@ -3298,8 +3307,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             WHERE (? = 'all' OR d.status = ?)
             ORDER BY
                 CASE WHEN d.status = 'active' THEN 0 ELSE 1 END,
-                d.date_created DESC,
-                d.dish_id DESC
+                d.date_created DESC
         """
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             rows = conn.execute(query, (normalized_status, normalized_status)).fetchall()
@@ -3358,6 +3366,22 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "search_text": search_text,
                 "transfer_destinations": [],
             })
+
+        # SQLite compares dish IDs lexicographically, which places suffix 9
+        # ahead of suffix 15 in descending order. Stable Python sorts preserve
+        # the existing status/date priorities while comparing digit runs as
+        # integers for the final dish-ID tie-breaker.
+        dishes.sort(
+            key=lambda item: _natural_sort_key(item.get("dish_id")),
+            reverse=True,
+        )
+        dishes.sort(
+            key=lambda item: item.get("date_created") or "",
+            reverse=True,
+        )
+        dishes.sort(
+            key=lambda item: 0 if item.get("status") == "active" else 1,
+        )
 
         active_by_cross: Dict[str, List[Dict[str, Any]]] = {}
         for d in dishes:

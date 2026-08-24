@@ -109,6 +109,10 @@
         }
 
         // Sortable table columns
+        var naturalCollator = new Intl.Collator(undefined, {
+            numeric: true,
+            sensitivity: "base"
+        });
         document.querySelectorAll("th.sortable").forEach(function(th) {
             th.addEventListener("click", function() {
                 var table = th.closest("table");
@@ -123,14 +127,19 @@
                 });
 
                 rows.sort(function(a, b) {
-                    var aVal = a.children[colIdx].textContent.trim();
-                    var bVal = b.children[colIdx].textContent.trim();
-                    var aNum = parseFloat(aVal);
-                    var bNum = parseFloat(bVal);
-                    if (!isNaN(aNum) && !isNaN(bNum)) {
-                        return isAsc ? bNum - aNum : aNum - bNum;
+                    var aCell = a.children[colIdx];
+                    var bCell = b.children[colIdx];
+                    var aVal = aCell.dataset.sortValue || aCell.textContent.trim();
+                    var bVal = bCell.dataset.sortValue || bCell.textContent.trim();
+                    var aNum = Number(aVal);
+                    var bNum = Number(bVal);
+                    var comparison;
+                    if (aVal !== "" && bVal !== "" && Number.isFinite(aNum) && Number.isFinite(bNum)) {
+                        comparison = aNum - bNum;
+                    } else {
+                        comparison = naturalCollator.compare(aVal, bVal);
                     }
-                    return isAsc ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
+                    return isAsc ? -comparison : comparison;
                 });
 
                 th.classList.add(isAsc ? "sort-desc" : "sort-asc");

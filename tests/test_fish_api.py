@@ -1119,6 +1119,40 @@ class TestDishInventory:
         assert resp.status_code == 200
         assert f'href="/crosses/{cross_id}/lineage/"' in resp.text
 
+    def test_dishes_inventory_naturally_orders_numeric_suffixes(self, client):
+        cross_id = f"SORT_{uuid.uuid4().hex[:8]}"
+        dish_ids = [
+            f"{cross_id}_2",
+            f"{cross_id}_15",
+            f"{cross_id}_9",
+            f"{cross_id}_14",
+        ]
+        conn = sqlite3.connect(str(data_manager.database_path))
+        for dish_id in dish_ids:
+            conn.execute(
+                """
+                INSERT INTO dishes (
+                    dish_id, data, genotype, species, status, cross_id,
+                    date_created, dish_population_type
+                )
+                VALUES (?, ?, 'AB', 'Danio rerio', 'active', ?, '20260824', 'primary')
+                """,
+                (dish_id, json.dumps({"dish_id": dish_id}), cross_id),
+            )
+        conn.commit()
+        conn.close()
+
+        resp = client.get("/dishes/")
+
+        assert resp.status_code == 200
+        rendered_positions = {dish_id: resp.text.index(dish_id) for dish_id in dish_ids}
+        assert rendered_positions[f"{cross_id}_15"] < rendered_positions[f"{cross_id}_14"]
+        assert rendered_positions[f"{cross_id}_14"] < rendered_positions[f"{cross_id}_9"]
+        assert rendered_positions[f"{cross_id}_9"] < rendered_positions[f"{cross_id}_2"]
+        assert f'data-sort-value="{cross_id}_15"' in resp.text
+        assert "numeric: true" in resp.text
+        assert "Number(aVal)" in resp.text
+
     def test_acquisition_dishes_defaults_to_active_with_context(self, client, seed_cross_dishes):
         cross_id, dish_a, dish_b = seed_cross_dishes
         conn = sqlite3.connect(str(data_manager.database_path))
