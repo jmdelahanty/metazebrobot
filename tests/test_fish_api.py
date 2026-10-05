@@ -1366,21 +1366,26 @@ class TestDishInventory:
         client,
         seed_full_dish,
     ):
+        cross_id = client.get(f"/dishes/{seed_full_dish}").json()["cross_id"]
+        destination_id = f"{cross_id}_2"
+
         resp = client.get("/dishes/")
 
         assert resp.status_code == 200
         assert f'action="/dishes/{seed_full_dish}/transfer/new"' in resp.text
         assert "Transfer to New Dish" in resp.text
+        assert f"Creates {destination_id}" in resp.text
         assert "Create Dish &amp; Transfer" in resp.text
 
-    def test_transfer_dish_fish_to_new_dish_creates_lineage_event_and_label(
+    def test_transfer_dish_fish_to_new_numbered_dish_creates_lineage_event_and_label(
         self,
         client,
         seed_full_dish,
         tmp_db_path,
         monkeypatch,
     ):
-        destination_id = f"{seed_full_dish}_transfer1"
+        cross_id = client.get(f"/dishes/{seed_full_dish}").json()["cross_id"]
+        destination_id = f"{cross_id}_2"
 
         resp = client.post(
             f"/dishes/{seed_full_dish}/transfer/new",
@@ -1403,6 +1408,7 @@ class TestDishInventory:
         source = client.get(f"/dishes/{seed_full_dish}").json()["data"]
         destination = client.get(f"/dishes/{destination_id}").json()["data"]
         assert source["current_fish_count"] == 43
+        assert destination["dish_number"] == 2
         assert destination["parent_dish_id"] == seed_full_dish
         assert destination["dish_population_type"] == "manual_transfer"
         assert destination["fish_count"] == 0
@@ -1450,7 +1456,8 @@ class TestDishInventory:
         client,
         seed_full_dish,
     ):
-        destination_id = f"{seed_full_dish}_transfer1"
+        cross_id = client.get(f"/dishes/{seed_full_dish}").json()["cross_id"]
+        destination_id = f"{cross_id}_2"
 
         resp = client.post(
             f"/dishes/{seed_full_dish}/transfer/new",
@@ -1465,6 +1472,49 @@ class TestDishInventory:
         assert resp.status_code == 400
         assert "exceeds source current fish count" in resp.text
         assert client.get(f"/dishes/{destination_id}").status_code == 404
+
+    def test_transfer_to_new_dish_uses_next_number_after_cross_maximum(
+        self,
+        client,
+        seed_full_dish,
+        tmp_db_path,
+    ):
+        cross_id = client.get(f"/dishes/{seed_full_dish}").json()["cross_id"]
+        existing_dish_id = f"{cross_id}_4"
+        destination_id = f"{cross_id}_5"
+        conn = sqlite3.connect(str(tmp_db_path))
+        conn.execute(
+            """
+            INSERT INTO dishes (
+                dish_id, cross_id, date_created, dof, genotype, responsible,
+                status, fish_count, current_fish_count, data
+            )
+            VALUES (?, ?, '20260824', '20260401', 'AB', 'test-user',
+                    'inactive', 0, 0, ?)
+            """,
+            (
+                existing_dish_id,
+                cross_id,
+                json.dumps({"dish_id": existing_dish_id, "cross_id": cross_id}),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.post(
+            f"/dishes/{seed_full_dish}/transfer/new",
+            data={
+                "count": 3,
+                "reason": "manual_transfer",
+                "container_type": "petri_dish",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert f"created_destination={destination_id}" in resp.headers["location"]
+        assert client.get(f"/dishes/{destination_id}").status_code == 200
+        assert client.get(f"/dishes/{cross_id}_2").status_code == 404
 
     def test_transfer_dish_fish_web_persists_event_and_counts(self, client, seed_full_dish, tmp_db_path):
         client.post(
@@ -2817,3 +2867,59 @@ class TestPyRATCrossingsPage:
         assert "50%" in table_resp.text
         assert 'title="1 / 2"' in table_resp.text
         assert 'href="/crosses/14783/lineage/"' in table_resp.text
+
+
+class TestMortalityInventory:
+    def test_dish_care_updates_inventory_and_replacement(self, client, seed_full_dish, tmp_db_path):
+        dish_id = seed_full_dish
+        for deaths, expected in [(8, 42), (8, 42), (5, 45)]:
+            response = client.post(f'/care/{dish_id}/check',
+                                   data={'check_time': '20261002T13:02:45', 'num_dead': deaths})
+            assert 'Check saved' in response.text
+            with sqlite3.connect(tmp_db_path) as conn:
+                row = conn.execute('SELECT current_fish_count, data FROM dishes WHERE dish_id = ?',
+                                   (dish_id,)).fetchone()
+            assert row[0] == expected
+            assert json.loads(row[1])['current_fish_count'] == expected
+            assert client.get(f'/dishes/{dish_id}').json()['data']['current_fish_count'] == expected
+            assert str(expected) in client.get('/dishes/').text
+
+    def test_count_edit_retains_care_images_and_housing_history(self, client, seed_full_dish, tmp_db_path):
+        dish_id = seed_full_dish
+        unit_id = client.post(f'/dishes/{dish_id}/units',
+                              json={'unit_kind': 'open', 'position_label': 'main'}).json()['unit_id']
+        fish_id = client.post(f'/dishes/{dish_id}/fish', json={}).json()['fish_id']
+        assert client.post(f'/fish/{fish_id}/assign', json={'unit_id': unit_id}).status_code == 200
+        assert data_manager.save_dish_quality_check(dish_id, {'check_time': '20261001T12:00:00',
+                                                             'num_dead': 8, 'image_filename': 'care.png'})
+        response = client.post(f'/dishes/{dish_id}/fish-count',
+                               data={'current_fish_count': 40, 'reason': 'manual_recount'},
+                               follow_redirects=False)
+        assert response.status_code == 303
+        with sqlite3.connect(tmp_db_path) as conn:
+            assert conn.execute('SELECT fish_count, current_fish_count FROM dishes WHERE dish_id = ?',
+                                (dish_id,)).fetchone() == (48, 40)
+            assert conn.execute('SELECT COUNT(*) FROM housing_unit_occupancy WHERE fish_id = ?',
+                                (fish_id,)).fetchone()[0] == 1
+        assert data_manager.get_fish_subject(fish_id)['dish_id'] == dish_id
+        assert data_manager.get_housing_unit(unit_id)
+        assert data_manager.get_dish_quality_checks(dish_id)[0]['image_filename'] == 'care.png'
+        assert data_manager.backfill_mortality_inventory()
+        assert client.get(f'/dishes/{dish_id}').json()['data']['current_fish_count'] == 40
+        assert data_manager.save_dish_quality_check(dish_id, {'check_time': '20261002T12:00:00', 'num_dead': 2})
+        assert client.get(f'/dishes/{dish_id}').json()['data']['current_fish_count'] == 38
+
+    def test_unit_care_deducts_and_retry_replaces(self, client, seed_full_dish):
+        dish_id = seed_full_dish
+        unit_id = client.post(f'/dishes/{dish_id}/units',
+                              json={'unit_kind': 'open', 'position_label': 'main'}).json()['unit_id']
+        for deaths, expected in [(3, 47), (3, 47), (1, 49)]:
+            response = client.post(f'/units/{unit_id}/checks',
+                                   json={'check_time': '20261001T12:00:00', 'num_dead': deaths})
+            assert response.status_code == 201
+            assert client.get(f'/dishes/{dish_id}').json()['data']['current_fish_count'] == expected
+        response = client.post(f'/care/{dish_id}/unit-checks',
+                               data={'check_time': '20261002T12:00:00', f'num_dead_{unit_id}': '2'})
+        assert 'Saved 1 unit checks' in response.text
+        assert client.get(f'/dishes/{dish_id}').json()['data']['current_fish_count'] == 47
+        assert len(data_manager.get_housing_unit_checks(unit_id)) == 2

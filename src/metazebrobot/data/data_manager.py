@@ -12,7 +12,8 @@ import json
 import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union, Tuple
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+from pydantic import NonNegativeInt, TypeAdapter
 
 from ..utils.config import config
 from ..utils.file_operations import ensure_directory, load_json_file
@@ -836,6 +837,8 @@ class DataManager:
         self.seed_construct_catalog()
         self.backfill_dish_transgenes()
         self.backfill_crossing_indicator_metadata()
+        if not self.backfill_mortality_inventory():
+            return False
         logger.info("DataManager schema is up to date.")
         return True
 
@@ -1828,7 +1831,89 @@ class DataManager:
             logger.error(f"Error loading crossing indicators for {crossing_id}: {e}")
             return []
 
-    def load_single_dish(self, dish_id: str) -> Optional[Dict[str, Any]]:
+    def _load_inventory_care(self, conn, dish_id: str, dish_data: Dict[str, Any]) -> None:
+        """Merge all care history; normalized checks override their JSON copies."""
+        checks = dict(dish_data.get('quality_checks') or {})
+        rows = conn.execute("""
+            SELECT check_time, fed, feed_type, water_changed, vol_water_changed,
+                   num_dead, notes, image_filename
+            FROM quality_checks WHERE dish_id = ?
+        """, (dish_id,)).fetchall()
+        for row in rows:
+            checks[row['check_time']] = dict(row)
+        dish_data['quality_checks'] = checks
+        unit_rows = conn.execute("""
+            SELECT c.check_time, SUM(MAX(COALESCE(c.num_dead, 0), 0)) AS num_dead
+            FROM housing_unit_checks c
+            JOIN housing_units u ON u.unit_id = c.unit_id
+            WHERE u.dish_id = ? GROUP BY c.check_time
+        """, (dish_id,)).fetchall()
+        unit_mortality = {}
+        for row in unit_rows:
+            # Unit APIs historically accept both ISO dates and compact dates.
+            timestamp = row['check_time']
+            if len(timestamp) > 10 and timestamp[4] == '-':
+                timestamp = timestamp[:10].replace('-', '') + timestamp[10:]
+            unit_mortality[timestamp] = unit_mortality.get(timestamp, 0) + row['num_dead']
+        dish_data['unit_mortality'] = unit_mortality
+        if dish_data.get('mortality_inventory_version') != 1:
+            # The old count editor adjusted the baseline without considering
+            # care losses. Its latest recount already covers earlier deaths.
+            correction = conn.execute("""
+                SELECT event_datetime FROM dish_count_events
+                WHERE dish_id = ? ORDER BY event_datetime DESC, id DESC LIMIT 1
+            """, (dish_id,)).fetchone()
+            dish_data['mortality_counted_through'] = correction['event_datetime'] if correction else None
+            dish_data['mortality_inventory_version'] = 1
+
+    def _refresh_dish_inventory(self, conn, dish_id: str) -> None:
+        """Persist derived inventory in the caller's care transaction."""
+        from ..models.fish_dish import FishDish, ScreeningResults
+
+        dish_data = self.load_single_dish(dish_id, _connection=conn)
+        if not dish_data:
+            raise ValueError(f"Cannot refresh inventory for dish {dish_id}")
+        # Care also supports older rows with incomplete biological metadata.
+        # Construct only the count state; validate its screening history.
+        screenings = ScreeningResults(**dish_data['screening_results'])
+        dish = FishDish.model_construct(**{**dish_data, 'fish_count': dish_data['fish_count'] or 0,
+                                          'screening_results': screenings})
+        dish.refresh_screening_state()
+        current_count = dish.current_fish_count if dish_data['fish_count'] is not None else None
+        updated = {**dish_data, 'current_fish_count': current_count,
+                   'screening_results': screenings.model_dump(mode='json', exclude_none=True)}
+        conn.execute("UPDATE dishes SET current_fish_count = ?, data = ? WHERE dish_id = ?",
+                     (current_count, json.dumps(updated), dish_id))
+        if dish.screening_results:
+            for step in dish.screening_results.screenings:
+                conn.execute("""
+                    UPDATE screening_steps SET count_before_step = ?, count_after_step = ?
+                    WHERE dish_id = ? AND screening_datetime = ?
+                """, (step.count_before_step, step.count_after_step, dish_id, step.screening_datetime))
+        self.data_cache['fish_dishes'].pop(dish_id, None)
+
+    def backfill_mortality_inventory(self) -> bool:
+        """Apply historical deaths once, retaining deaths covered by old recounts."""
+        try:
+            with self.get_connection() as conn:
+                dish_ids = [row['dish_id'] for row in conn.execute("""
+                    SELECT dish_id FROM dishes
+                    WHERE EXISTS (SELECT 1 FROM quality_checks q
+                                  WHERE q.dish_id = dishes.dish_id AND q.num_dead > 0)
+                       OR EXISTS (SELECT 1 FROM housing_units u JOIN housing_unit_checks c
+                                  ON c.unit_id = u.unit_id
+                                  WHERE u.dish_id = dishes.dish_id AND c.num_dead > 0)
+                       OR data LIKE '%"num_dead"%'
+                """)]
+                for dish_id in dish_ids:
+                    self._refresh_dish_inventory(conn, dish_id)
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error("Error backfilling mortality inventory: %s", e, exc_info=True)
+            return False
+
+    def load_single_dish(self, dish_id: str, *, _connection=None) -> Optional[Dict[str, Any]]:
         """Load a single dish by ID from database.
 
         Loads dish data primarily from flattened columns, supplemented with
@@ -1840,7 +1925,7 @@ class DataManager:
             return None
 
         try:
-            with self.get_connection() as conn:
+            with self.get_connection() if _connection is None else nullcontext(_connection) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT dish_id, cross_id, date_created, dof, cross_setup_date, dof_source, genotype, responsible,
@@ -1920,8 +2005,7 @@ class DataManager:
                         'date_finalized': row['screening_date_finalized']
                     }
 
-                    # Quality checks are still loaded from the quality_checks table
-                    # (already normalized, loaded via JSON for now but could be optimized)
+                    self._load_inventory_care(conn, dish_id, dish_data)
 
                     return dish_data
                 else:
@@ -1933,28 +2017,8 @@ class DataManager:
             return None
 
     def update_dish_quality_check(self, dish_id: str, check_data: Dict[str, Any]) -> bool:
-        """Update quality checks for a dish."""
-        logger.debug(f"Updating quality check for dish {dish_id}")
-        
-        # Load current dish data
-        dish_data = self.load_single_dish(dish_id)
-        if not dish_data:
-            logger.error(f"Cannot update quality check: dish {dish_id} not found")
-            return False
-
-        check_time = check_data.get('check_time')
-        if not check_time:
-            logger.error("Cannot add quality check: 'check_time' is missing")
-            return False
-
-        # Update dish data
-        if 'quality_checks' not in dish_data:
-            dish_data['quality_checks'] = {}
-        
-        dish_data['quality_checks'][check_time] = check_data
-        
-        # Save updated dish
-        return self.save_fish_dish(dish_data)
+        """Update a quality check and inventory together."""
+        return self.save_dish_quality_check(dish_id, check_data)
 
     def validate_data_structure(self) -> bool:
         """Validate the data structure has all required top-level keys in the cache."""
@@ -2041,7 +2105,7 @@ class DataManager:
                            notes, room, enclosure_temperature, container_type,
                            enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
                            breeding_parents, screening_final_positive_count, screening_date_finalized,
-                           termination_date, termination_reason
+                           termination_date, termination_reason, data
                     FROM dishes
                 """)
 
@@ -2100,12 +2164,17 @@ class DataManager:
                             'parents': json.loads(row['breeding_parents']) if row['breeding_parents'] else []
                         },
                         'screening_results': {
-                            'screenings': [],  # Loaded separately if needed
+                            'screenings': self.get_screening_steps(dish_id),
                             'final_positive_count': row['screening_final_positive_count'],
                             'date_finalized': row['screening_date_finalized']
                         },
-                        'quality_checks': {}  # Loaded separately if needed
+                        'quality_checks': (json.loads(row['data']) if row['data'] else {}).get('quality_checks', {}),
                     }
+                    stored = json.loads(row['data']) if row['data'] else {}
+                    for key in ('mortality_counted_through', 'mortality_inventory_version'):
+                        if key in stored:
+                            dish_data[key] = stored[key]
+                    self._load_inventory_care(conn, dish_id, dish_data)
                     dishes[dish_id] = dish_data
 
                 return dishes
@@ -2120,7 +2189,11 @@ class DataManager:
         if not self.is_initialized:
             return False
         try:
+            from ..models.fish_dish import QualityCheckData
+            check_data = QualityCheckData(**check_data).model_dump(mode='json')
             with self.get_connection() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                self._refresh_dish_inventory(conn, dish_id)
                 conn.execute("""
                     INSERT OR REPLACE INTO quality_checks
                     (dish_id, check_time, fed, feed_type, water_changed,
@@ -2138,6 +2211,7 @@ class DataManager:
                     check_data.get("image_filename"),
                     json.dumps(check_data),
                 ))
+                self._refresh_dish_inventory(conn, dish_id)
                 conn.commit()
                 return True
         except Exception as e:
@@ -3225,7 +3299,17 @@ class DataManager:
             logger.error("DataManager not initialized.")
             return False
         try:
+            num_dead = TypeAdapter(NonNegativeInt).validate_python(num_dead)
             with self.get_connection() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                unit = conn.execute('SELECT dish_id FROM housing_units WHERE unit_id = ?', (unit_id,)).fetchone()
+                if not unit:
+                    return False
+                dish_id = unit['dish_id']
+                self._refresh_dish_inventory(conn, dish_id)
+                # Submitting the same unit check again replaces that observation.
+                conn.execute('DELETE FROM housing_unit_checks WHERE unit_id = ? AND check_time = ?',
+                             (unit_id, check_time))
                 conn.execute(
                     """
                     INSERT INTO housing_unit_checks
@@ -3236,6 +3320,7 @@ class DataManager:
                     (unit_id, check_time, fed, feed_type, water_changed,
                      vol_water_changed, num_dead, notes),
                 )
+                self._refresh_dish_inventory(conn, dish_id)
                 conn.commit()
                 return True
         except Exception as e:

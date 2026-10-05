@@ -190,7 +190,7 @@ Key settings:
 | `/dishes/` | GET | Dish inventory page with filters, actions, labels, and workflow links |
 | `/dishes/new` | GET | Dish creation form |
 | `/dishes/new` | POST | Create a dish from the web form |
-| `/dishes/{dish_id}/transfer/new` | POST | Create a derived destination dish and transfer fish into it |
+| `/dishes/{dish_id}/transfer/new` | POST | Create the next numbered dish for the cross and transfer fish into it |
 | `/screening/` | GET | Active dish picker for screening |
 | `/screening/{dish_id}` | GET | Screening workflow with steps, references, images, splits, and final count |
 | `/care/` | GET | Daily care dish list with checked-today status |

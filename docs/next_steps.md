@@ -69,6 +69,7 @@
 - [x] Redirects to screening page on success
 - [x] "New Dish" buttons on home, screening, and care pages
 - [x] Manual fish transfers can create a derived destination dish with inherited metadata and lineage
+- [x] Transfer-created destinations use the next cross-level numeric dish ID
 - [x] Transfer-created dish labels show the event-derived current fish count
 
 ### In-browser guided tour

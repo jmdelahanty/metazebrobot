@@ -16,6 +16,7 @@ from ..models.fish_dish import (
     dish_transfer_reason_options_text,
     normalize_dish_count_reason,
     dish_count_reason_options_text,
+    next_numbered_dish_number,
     TERMINATION_REASON_TRANSFER,
     normalize_termination_reason,
     termination_reason_options_text,
@@ -773,15 +774,24 @@ class FishDishController:
             else:
                 event_datetime = datetime.now().strftime("%Y%m%dT%H:%M:%S")
 
-            index = 1
-            new_dish_id = f"{source_dish_id}_transfer{index}"
+            cross_dish_ids = [
+                dish.get("dish_id", "")
+                for dish in data_manager.get_dishes_for_cross(source_dish.cross_id)
+            ]
+            dish_number = next_numbered_dish_number(
+                source_dish.cross_id,
+                cross_dish_ids,
+            )
+            new_dish_id = f"{source_dish.cross_id}_{dish_number}"
+            collision_retries = 0
             while data_manager.load_single_dish(new_dish_id):
-                index += 1
-                new_dish_id = f"{source_dish_id}_transfer{index}"
-                if index > 99:
+                dish_number += 1
+                collision_retries += 1
+                new_dish_id = f"{source_dish.cross_id}_{dish_number}"
+                if collision_retries > 99:
                     return False, (
-                        f"Could not generate a unique transfer dish ID for source "
-                        f"{source_dish_id}."
+                        f"Could not generate a unique numbered dish ID for cross "
+                        f"{source_dish.cross_id}."
                     ), None
 
             destination_notes = (
@@ -819,7 +829,7 @@ class FishDishController:
                 container_type=container_type or source_dish.enclosure.container_type,
                 vol_water_total=source_dish.enclosure.vol_water_total,
                 notes=destination_notes,
-                dish_number=None,
+                dish_number=dish_number,
             )
 
             if not data_manager.save_fish_dish(
@@ -887,7 +897,7 @@ class FishDishController:
         """Correct the dish count while preserving derived-count semantics.
 
         `fish_count` is the editable baseline. `current_fish_count` is derived
-        from that baseline plus screening/transfer history, so update the
+        from that baseline plus screening/transfer/care history, so update the
         baseline enough for the derived current count to match the requested
         present count after reload.
         """
@@ -930,6 +940,7 @@ class FishDishController:
                 + (dish.incoming_transfer_count or 0)
                 - (dish.outgoing_transfer_count or 0)
                 - screening_outgoing_count
+                - dish.mortality_count
             )
             target_baseline_count = current_fish_count - count_offset
             if target_baseline_count < 0:

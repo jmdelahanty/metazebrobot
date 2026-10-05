@@ -31,6 +31,7 @@ from .models.fish_dish import (
     DISH_COUNT_REASON_OPTIONS,
     TERMINATION_REASON_OPTIONS,
     normalize_termination_reason,
+    next_numbered_dish_number,
     termination_reason_label,
     termination_reason_options_text,
 )
@@ -830,18 +831,10 @@ def _next_dish_number_for_cross(conn: sqlite3.Connection, cross_id: Optional[str
     except sqlite3.OperationalError:
         return 1
 
-    prefix = f"{cross_id}_"
-    dish_numbers: List[int] = []
-    for row in rows:
-        dish_id = row["dish_id"] or ""
-        if not dish_id.startswith(prefix):
-            continue
-
-        suffix = dish_id[len(prefix):]
-        if suffix.isdigit():
-            dish_numbers.append(int(suffix))
-
-    return max(dish_numbers, default=0) + 1
+    return next_numbered_dish_number(
+        cross_id,
+        (row["dish_id"] for row in rows),
+    )
 
 
 def _natural_sort_key(value: Optional[Any]) -> Tuple[Tuple[int, Any], ...]:
@@ -3311,6 +3304,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             rows = conn.execute(query, (normalized_status, normalized_status)).fetchall()
+            all_dish_id_rows = conn.execute(
+                "SELECT dish_id, cross_id FROM dishes WHERE cross_id IS NOT NULL"
+            ).fetchall()
 
         dishes = []
         for row in rows:
@@ -3382,6 +3378,16 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         dishes.sort(
             key=lambda item: 0 if item.get("status") == "active" else 1,
         )
+
+        dish_ids_by_cross: Dict[str, List[str]] = {}
+        for row in all_dish_id_rows:
+            dish_ids_by_cross.setdefault(str(row["cross_id"]), []).append(row["dish_id"])
+        next_transfer_id_by_cross = {
+            cross_id: f"{cross_id}_{next_numbered_dish_number(cross_id, dish_ids)}"
+            for cross_id, dish_ids in dish_ids_by_cross.items()
+        }
+        for d in dishes:
+            d["next_transfer_dish_id"] = next_transfer_id_by_cross.get(d.get("cross_id"))
 
         active_by_cross: Dict[str, List[Dict[str, Any]]] = {}
         for d in dishes:

@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Literal, Tuple
+from typing import Optional, Dict, Any, Iterable, List, Literal, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 TERMINATION_REASON_EUTHANASIA = "euthanasia"
@@ -142,6 +142,20 @@ def dish_count_reason_options_text() -> str:
     return ", ".join(DISH_COUNT_REASON_CATEGORIES)
 
 
+def next_numbered_dish_number(cross_id: str, dish_ids: Iterable[str]) -> int:
+    """Return one greater than the largest plain numeric suffix for a cross."""
+    prefix = f"{cross_id}_"
+    numbers = []
+    for dish_id in dish_ids:
+        dish_id = str(dish_id or "")
+        if not dish_id.startswith(prefix):
+            continue
+        suffix = dish_id[len(prefix):]
+        if suffix.isdigit():
+            numbers.append(int(suffix))
+    return max(numbers, default=0) + 1
+
+
 # Define allowed population types
 DishPopulationType = Literal[
     "primary",
@@ -195,7 +209,7 @@ class QualityCheckData(BaseModel):
     feed_type: Optional[str] = None
     water_changed: bool = False
     vol_water_changed: Optional[int] = None
-    num_dead: int = 0
+    num_dead: int = Field(default=0, ge=0)
     notes: Optional[str] = None
     image_filename: Optional[str] = None
 
@@ -410,6 +424,9 @@ class FishDish(BaseModel):
     breeding: Breeding
     enclosure: Enclosure
     quality_checks: Dict[str, Any] = {}
+    unit_mortality: Dict[str, int] = Field(default_factory=dict)
+    mortality_counted_through: Optional[str] = None
+    mortality_inventory_version: int = 1
     screening_results: Optional[ScreeningResults] = None
     notes: Optional[str] = None
     status: Literal["active", "inactive"] = "active"
@@ -507,7 +524,7 @@ class FishDish(BaseModel):
             date_created=today,
             cross_id=cross_id,
             source_group_id=source_group_id,
-            dish_number=dish_number if dish_population_type == "primary" else None, # Only store for primary?
+            dish_number=dish_number,
             cross_setup_date=cross_setup_date,
             dof_source=dof_source,
             dof=dof,
@@ -546,6 +563,7 @@ class FishDish(BaseModel):
         check_time = check_data.check_time
         # Store the validated data as a dictionary
         self.quality_checks[check_time] = check_data.model_dump(exclude_none=True, mode='json')
+        self.refresh_screening_state()
 
     def add_screening_step(self, step_data: ScreeningStep) -> None:
         """
@@ -592,6 +610,24 @@ class FishDish(BaseModel):
         step.allocations.append(allocation)
         self.refresh_screening_state()
 
+    @property
+    def mortality_events(self) -> List[Tuple[str, int]]:
+        """Deaths by check time, excluding losses covered by a legacy recount."""
+        deaths = dict(self.unit_mortality)
+        for check_time, check in self.quality_checks.items():
+            deaths[check_time] = deaths.get(check_time, 0) + max(int(check.get('num_dead') or 0), 0)
+        events = []
+        for check_time, count in sorted(deaths.items()):
+            if self.mortality_counted_through and check_time <= self.mortality_counted_through:
+                continue
+            if count:
+                events.append((check_time, count))
+        return events
+
+    @property
+    def mortality_count(self) -> int:
+        return sum(count for _, count in self.mortality_events)
+
     def refresh_screening_state(self) -> None:
         """Recompute per-step before/after counts and the dish's current fish count."""
         current_count = max(
@@ -601,8 +637,10 @@ class FishDish(BaseModel):
             - (self.outgoing_transfer_count or 0),
             0,
         )
+        mortality = iter(self.mortality_events)
+        next_death = next(mortality, None)
         if self.screening_results is None:
-            self.current_fish_count = current_count
+            self.current_fish_count = max(current_count - self.mortality_count, 0)
             return
 
         try:
@@ -613,11 +651,15 @@ class FishDish(BaseModel):
             logging.warning(f"Could not sort screening steps by datetime for dish {self.dish_id}.")
 
         for step in self.screening_results.screenings:
+            while next_death and next_death[0] <= step.screening_datetime:
+                current_count = max(current_count - next_death[1], 0)
+                next_death = next(mortality, None)
             step.count_before_step = current_count
             current_count = max(current_count - step.outgoing_count, 0)
             step.count_after_step = current_count
 
-        self.current_fish_count = current_count
+        remaining_deaths = (next_death[1] if next_death else 0) + sum(count for _, count in mortality)
+        self.current_fish_count = max(current_count - remaining_deaths, 0)
 
 
     def finalize_screening(self, final_count: int, date_finalized: str) -> None:

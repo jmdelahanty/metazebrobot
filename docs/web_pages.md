@@ -23,7 +23,8 @@ This is the current operator-facing page map for the FastAPI web UI.
 - Browse local dish inventory by active/inactive status.
 - Start new-dish creation, dish count edits, transfers, and terminations.
 - Transfer fish into an existing compatible dish or create a new derived dish
-  that inherits cross, provenance, husbandry metadata, and parent lineage.
+  that inherits cross, provenance, husbandry metadata, and parent lineage. New
+  transfer destinations use the next cross-level numeric dish ID.
 - Print dish labels with QR codes.
 - Follow links to screening, care, fish registration, lineage, and provenance.
 
