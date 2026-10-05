@@ -207,7 +207,17 @@ Key settings:
 | `/health?check_pyrat=true` | GET | Health check with PyRAT API token verification |
 | `/dishes` | GET | List dishes (params: status, cross_id, limit, offset) |
 | `/dishes/{dish_id}` | GET | Get single dish (param: include_checks) |
+| `/dishes/by-uuid/{dish_uuid}` | GET | Get single dish by its immutable UUID (same payload) |
+| `/dishes/{dish_id}/citrus-snapshot` | GET | No-PII acquisition snapshot (`schema_version` 2) |
+| `/acquisition/dishes` | GET | Citrus dish picker list (`schema_version` 2) |
+| `/dishes/{dish_id}/fish` | GET | Fish subjects registered to a dish |
+| `/fish/{fish_id}` | GET | Single fish subject |
 | `/crosses` | GET | List crosses (params: has_active_dishes, limit, offset) |
 | `/crosses/{cross_id}` | GET | Get single cross (param: include_dishes) |
+
+JSON dish and fish responses include `dish_uuid`, `revision`, and
+`updated_at`. JSON read errors use `{"detail": {"error": "dish_not_found" |
+"fish_not_found" | "database_error", ...}}`. See
+`docs/zebrobot_snapshot.md` (Identity and change detection, API errors).
 
 See `docs/web_pages.md` for a page-by-page capability map.

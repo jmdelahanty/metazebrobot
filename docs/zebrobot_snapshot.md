@@ -10,6 +10,8 @@ End-to-end pieces:
 1) **H5 subject metadata** (`/subject_metadata`)
    - `zebrobot_schema_version` (int, start at 1)
    - `dish_id`, `cross_id`, `genotype`, `line_strain`
+   - `dish_uuid`, `dish_revision`, `dish_updated_at` (from API `schema_version` 2;
+     see [Identity and change detection](#identity-and-change-detection))
    - `date_of_fertilization` (YYYYMMDD), `fish_count`, `species`, `sex`
    - `queried_at_utc` (ISO8601)
    - `parents` (JSON string, machine-parseable list of `{identifier, sex}`)
@@ -49,6 +51,7 @@ the DB host.
   - `GET /dishes?status=active&limit=200&offset=0`
 - Fetch a specific dish:
   - `GET /dishes/{dish_id}`
+  - `GET /dishes/by-uuid/{dish_uuid}` (same payload, looked up by the immutable UUID)
 - Fetch the no-PII H5 snapshot payload for a selected dish:
   - `GET /dishes/{dish_id}/citrus-snapshot`
 - Fetch registered fish or housing units for a selected dish:
@@ -69,6 +72,52 @@ MetaZebrobot has no currently active dishes matching the filter. Create or
 reactivate an acquisition-ready dish in MetaZebrobot rather than changing the
 status value in Citrus.
 
+## Identity and change detection
+
+`GET /dishes/{dish_id}/citrus-snapshot` and `GET /acquisition/dishes` return
+`schema_version: 2`. Version 2 is additive: every v1 field is unchanged, and
+each dish also carries:
+
+| Field | Meaning |
+|-------|---------|
+| `dish_uuid` | Immutable UUID4, minted when the dish is created and never reused. Record it alongside `dish_id`. |
+| `revision` | Integer, starts at 1. Increments whenever any value in the dish row changes, and only then. |
+| `updated_at` | UTC timestamp (`YYYY-MM-DD HH:MM:SS`) of the last content change. |
+
+Fish responses (`GET /fish/{fish_id}`, `GET /dishes/{dish_id}/fish`) carry
+`dish_uuid`, `revision`, and `updated_at` the same way.
+
+- `dish_id` (`{cross_id}_{n}`) stays the human-facing id and the lookup key,
+  but it is only unique within this database and could be reused after a
+  delete. `dish_uuid` is the durable reference.
+- An unchanged `(dish_uuid, revision)` pair means the dish row is unchanged.
+  Always compare the pair: a re-created `dish_id` restarts at revision 1 under
+  a new `dish_uuid`.
+- Only "changed / not changed" is meaningful. One save can raise `revision`
+  by more than 1.
+- `revision` covers the dish row only. `parents` and `line_strain` come from
+  the cached PyRAT cross (watch `cross.cache_updated_at` in
+  `/acquisition/dishes`), and `dpf` is computed from `dof` at request time.
+- There is no "read as of time T"; the API always returns the current record.
+  Store the snapshot you fetched.
+
+## API errors
+
+JSON read endpoints return structured errors in FastAPI's `detail` field:
+
+| Status | Body | When |
+|--------|------|------|
+| 404 | `{"detail": {"error": "dish_not_found", "dish_id": "..."}}` | Unknown `dish_id` (also `/dishes/{dish_id}/fish`) |
+| 404 | `{"detail": {"error": "dish_not_found", "dish_uuid": "..."}}` | Unknown `dish_uuid` |
+| 404 | `{"detail": {"error": "fish_not_found", "fish_id": "..."}}` | Unknown `fish_id` |
+| 503 | `{"detail": {"error": "database_error", "message": "..."}}` | SQLite failure (e.g. locked) |
+| 422 | `{"detail": [...]}` | Invalid query parameters |
+
+A 404 means the record does not exist; a 503 means the lookup failed and
+should be retried. A connection failure (service down or tunnel closed) has
+no HTTP status. When recording a failed lookup, keep the HTTP status and
+`detail.error` (if present) in the snapshot `errors[]` entry.
+
 ## Snapshot JSON schema (required fields)
 
 Store a single JSON object with the following fields:
@@ -82,6 +131,9 @@ Store a single JSON object with the following fields:
   "dish_id": "15238_1",
   "dish": {
     "dish_id": "15238_1",
+    "dish_uuid": "b833f00a-0e75-42ab-aebf-8a44a852c7f8",
+    "revision": 3,
+    "updated_at": "2026-01-15 18:02:41",
     "cross_id": "15238",
     "genotype": "Tg(gfap:TRPV1-T2A-GFP)",
     "dof": "20250106",
@@ -124,7 +176,7 @@ Optional provenance:
 
 ```json
 "errors": [
-  { "source": "cross", "message": "not found" }
+  { "source": "dish", "status": 404, "error": "dish_not_found", "message": "..." }
 ]
 ```
 
@@ -138,6 +190,9 @@ Recommended fields:
 
 - `zebrobot_schema_version` (integer, start at 1)
 - `dish_id`
+- `dish_uuid`
+- `dish_revision`
+- `dish_updated_at`
 - `cross_id`
 - `genotype`
 - `line_strain`
@@ -171,7 +226,8 @@ Keep only the explicit fields listed in the snapshot schema above.
 
 - Parse `cross.parents` from JSON string to a list of objects.
   - If parsing fails, set `parents=[]` and add an error if desired.
-- `species` and `sex` are only available from `GET /dishes/{dish_id}`.
+- `GET /dishes/{dish_id}/citrus-snapshot` already returns `species`, `sex`,
+  `dish_uuid`, `revision`, and `updated_at`; no second dish call is needed.
 - `dish_id` is provided by the acquisition UI dropdown (populated from active
   dishes).
 

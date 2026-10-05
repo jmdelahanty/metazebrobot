@@ -1,6 +1,6 @@
 # Dish Identity and Record Revision Plan
 
-Status: planned, not implemented (2026-10-05).
+Status: implemented on branch `dish-identity-revision` (2026-10-05); not yet deployed.
 
 Goal: give consumers (Citrus, Orange via Palette) an immutable, globally
 unique handle for every dish, and a way to detect that a dish or fish record
@@ -184,16 +184,33 @@ HTML/HTMX routes and write endpoints keep their existing error responses.
 
 ## Rollout
 
-1. Back up `zebrobot.db` (`sqlite3 zebrobot.db ".backup zebrobot.db.backup.pre_dish_uuid_<date>"`).
-2. Implement items 1 to 4 on a branch; tests per section; run TestClient tests
-   outside the sandbox per `AGENTS.md`.
-3. Stop `metazebrobot-api.service`; migration runs idempotently in
-   `ensure_schema` on startup; restart; verify:
-   - `SELECT COUNT(*) FROM dishes WHERE dish_uuid IS NULL` = 0
-   - `/dishes/{id}/citrus-snapshot` returns `schema_version: 2`, `dish_uuid`, `revision`.
-4. Update `docs/zebrobot_snapshot.md`, `docs/identity_and_provenance_contract.md`,
-   and `API_SERVICE_GUIDE.md`.
-5. Notify Palette and Citrus that the API is live.
+The service (`deploy/metazebrobot-api.service`) runs from this repo's working
+tree with `METAZEBROBOT_DB_PATH=/nvme1/zebrobot.db`. A restart, including an
+automatic `Restart=on-failure`, runs whatever branch is checked out and
+applies the migration.
+
+1. Merge `dish-identity-revision` and check out the deploy branch in the
+   service working tree.
+2. Back up the production DB:
+   `sqlite3 /nvme1/zebrobot.db ".backup /nvme1/zebrobot.db.backup.pre_dish_uuid_<date>"`.
+3. `sudo systemctl restart metazebrobot-api.service`. The migration runs
+   idempotently in `ensure_schema` on startup.
+4. Verify:
+   - `sqlite3 /nvme1/zebrobot.db "SELECT COUNT(*) FROM dishes WHERE dish_uuid IS NULL"` → 0
+   - `curl -s localhost:8000/dishes/<dish_id>/citrus-snapshot` → `schema_version: 2`,
+     `dish_uuid`, `revision`
+   - `curl -s localhost:8000/dishes/NOPE` → `{"detail": {"error": "dish_not_found", ...}}`
+5. Notify Palette (`palette-a0`), which relays to Citrus.
+
+Dry run on a copy of `/nvme1/zebrobot.db` (2026-10-05): 216 dishes, 0 fish
+subjects; all dishes received distinct UUIDs at `revision = 1`; a second
+startup changed nothing.
+
+**Do not run older checkouts of MetaZebrobot (API or desktop GUI) against the
+migrated DB.** Their `save_fish_dish` still uses `INSERT OR REPLACE`, which
+deletes and re-inserts the row: the fallback trigger then mints a *new*
+`dish_uuid` and `revision` restarts at 1, which silently breaks the identity
+contract.
 
 ## Consumer changes (after rollout)
 

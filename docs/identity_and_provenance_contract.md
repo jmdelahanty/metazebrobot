@@ -67,9 +67,45 @@ Fish always get IDs at recording time (not after). The flow for a fish's
 ### Fish Identity Details
 
 - **`fish_id`** (UUID) — system-generated primary key, globally unique, follows
-  the fish across all systems
+  the fish across all systems. Callers may supply a pre-minted UUID on
+  `POST /dishes/{dish_id}/fish`.
 - **`subject_label`** — optional human-friendly label (e.g. `wt-01`, well
   position). Not unique, not required. For operator convenience at the bench.
+
+### Dish Identity Details
+
+- **`dish_id`** (`{cross_id}_{n}`, e.g. `18055_8`) — primary key and
+  human-facing id. Unique only within this MetaZebrobot database, and could
+  be reused if a dish is deleted and re-created.
+- **`dish_uuid`** (UUID4) — immutable and globally unique. Minted when the
+  dish is created, never changed (a database trigger rejects updates), never
+  reused. External systems record it next to `dish_id` and treat it as the
+  durable reference. Look up with `GET /dishes/by-uuid/{dish_uuid}`.
+
+### Record Versioning
+
+`dishes` and `fish_subjects` rows carry `revision` (integer, starts at 1) and
+`updated_at`. A database trigger raises `revision` whenever any value in the
+row changes, and only then, so every write path is covered and no-op saves or
+service restarts never change it.
+
+- Same `(dish_uuid, revision)` → the dish row is unchanged since it was
+  captured. Same `(fish_id, revision)` → likewise for the fish.
+- Revisions cover the row itself, not related tables (screening steps, care
+  checks) or the cached PyRAT cross (`cache_updated_at`).
+- MetaZebrobot only serves the current record; there is no point-in-time read.
+  Consumers keep the snapshot they fetched, with its revision, as provenance.
+
+### Recordings Without Citrus
+
+Recordings made outside Citrus (e.g. Orange) record only stable identifiers
+at record start: `dish_uuid` and `dish_id`, plus `fish_id` for individually
+tracked fish. At intake, Palette fetches the record from MetaZebrobot,
+checks that `dish_uuid` matches, and stores the fetched snapshot with its
+`revision`. A revision different from one captured at record time means the
+record changed in between. Failed lookups record the HTTP status and
+`detail.error` (`dish_not_found`, `fish_not_found`, `database_error`); see
+`docs/zebrobot_snapshot.md#api-errors`.
 
 ## Multi-Session Fish Lifecycle
 
@@ -122,7 +158,10 @@ import.
 
 Current snapshot schema plus new fields:
 
+- `dish_uuid`, `dish_revision`, `dish_updated_at` — dish identity and version
+  at acquisition (MetaZebrobot API `schema_version` 2)
 - `fish_id` — individual fish UUID (new for individual tracking)
+- `fish_revision` — fish record revision at acquisition
 - `arena_id` — which arena the fish was in (already in Palette's recordings)
 - `current_unit_id` — current housing position (new)
 - `session_uuid` — already captured
