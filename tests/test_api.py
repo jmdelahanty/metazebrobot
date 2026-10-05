@@ -162,6 +162,46 @@ class TestDishUuidEndpoints:
         assert snapshot.json()["dish_uuid"] == _dish_uuid(dish_a)
 
 
+class TestRevisionEndpoints:
+    def test_snapshot_reports_revision_and_tracks_changes(self, client, api_cross):
+        cross_id, dish_a, dish_b = api_cross
+        first = client.get(f"/dishes/{dish_a}/citrus-snapshot").json()
+        assert first["schema_version"] == 2
+        assert isinstance(first["revision"], int)
+        assert first["updated_at"]
+
+        with data_manager.get_connection() as conn:
+            conn.execute(
+                "UPDATE dishes SET genotype = 'Tg(changed)' WHERE dish_id = ?", (dish_a,)
+            )
+            conn.commit()
+
+        second = client.get(f"/dishes/{dish_a}/citrus-snapshot").json()
+        assert second["revision"] == first["revision"] + 1
+        assert second["dish_uuid"] == first["dish_uuid"]
+
+    def test_detail_list_and_acquisition_include_revision(self, client, api_cross):
+        cross_id, dish_a, dish_b = api_cross
+        dish_uuid = _dish_uuid(dish_a)
+        revision = client.get(f"/dishes/{dish_a}").json()["revision"]
+
+        assert client.get(f"/dishes/by-uuid/{dish_uuid}").json()["revision"] == revision
+        listed = {i["dish_id"]: i for i in client.get("/dishes").json()["items"]}
+        assert listed[dish_a]["revision"] == revision
+        acquisition = client.get("/acquisition/dishes", params={"cross_id": cross_id}).json()
+        assert acquisition["schema_version"] == 2
+        items = {i["dish_id"]: i for i in acquisition["items"]}
+        assert items[dish_a]["revision"] == revision
+
+    def test_fish_includes_revision(self, client, seed_dish):
+        fish_id = data_manager.create_fish_subject(dish_id=seed_dish)
+
+        fish = client.get(f"/fish/{fish_id}").json()
+
+        assert fish["revision"] == 1
+        assert fish["updated_at"]
+
+
 class TestCrossesEndpoint:
     def test_cross_list_has_explicit_openapi_schema(self, client):
         response = client.get("/openapi.json")

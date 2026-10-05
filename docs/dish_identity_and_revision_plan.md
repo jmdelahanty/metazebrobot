@@ -86,33 +86,44 @@ the full upsert; at least six partial `UPDATE dishes` paths skip it
 - `dishes`: `ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`.
 - `fish_subjects`: `ADD COLUMN revision INTEGER NOT NULL DEFAULT 1` and
   `ADD COLUMN updated_at TEXT` (backfilled from `created_at`).
-- Triggers (one per table), so *every* write path is covered without touching
-  each `UPDATE` statement:
+- `updated_at` is owned by the trigger; `save_fish_dish` no longer sets it.
+- One `AFTER UPDATE` trigger per table, rebuilt from `PRAGMA table_info` on
+  every startup (`DataManager.ensure_revision_tracking`), so every write path
+  is covered (including raw SQL) and newly added columns are tracked
+  automatically:
 
 ```sql
-CREATE TRIGGER IF NOT EXISTS trg_dishes_revision
+CREATE TRIGGER trg_dishes_revision
 AFTER UPDATE ON dishes
-FOR EACH ROW WHEN NEW.revision = OLD.revision
+FOR EACH ROW WHEN NEW."genotype" IS NOT OLD."genotype" OR ...  -- every column
 BEGIN
     UPDATE dishes
     SET revision = OLD.revision + 1,
         updated_at = CURRENT_TIMESTAMP
-    WHERE dish_id = NEW.dish_id;
+    WHERE rowid = NEW.rowid;
 END;
 ```
 
-  (`fish_subjects` identical, keyed on `fish_id`.) `recursive_triggers` is off
-  by default, and the `WHEN` guard prevents loops if it is ever turned on.
+  Excluded from the comparison: `revision`, `updated_at`, `dish_uuid`.
+  An `AFTER INSERT` trigger fills `updated_at` where `ALTER TABLE` could not
+  give it a default (`fish_subjects`).
 
 ### Semantics
 
-- `revision` increments on every write to that row. It means "the row was
-  written", not strictly "a value changed"; a no-op UI save still bumps it.
-  Consumers treat `revision` mismatch as "re-check", and compare their stored
-  snapshot content to decide whether anything material changed.
+- `revision` increments when any tracked column's value changes, and only
+  then. No-op saves and the idempotent startup backfills (termination-reason
+  normalization, `current_fish_count` fill-in, mortality inventory) do not
+  bump it, so restarts never change revisions.
+- Same `(dish_uuid, revision)` means the `dishes` row content is unchanged.
+  Compare the pair: a deleted and re-created `dish_id` restarts at
+  `revision = 1` under a new `dish_uuid`.
+- A single save may bump `revision` by more than 1 (e.g. the upsert and the
+  screening-finalize update in the same transaction). Only "changed / not
+  changed" is meaningful, not the size of the step.
 - Coverage is the `dishes` / `fish_subjects` row only. Screening steps, quality
   checks, and cross cache refreshes do not bump the dish revision. The cross
-  cache already exposes its own `cache_updated_at`.
+  cache already exposes its own `cache_updated_at`. `dpf` is computed from
+  `dof` at request time and changes daily without a revision bump.
 - There is still no "read as of time T". Point-in-time reconstruction is out of
   scope (possible later via an append-only `dish_revisions` table). Fish count
   history remains available via `dish_count_events`.
@@ -128,13 +139,21 @@ END;
 
 ### Tests
 
-- Each partial update path bumps `revision` and `updated_at`: one test per
-  path (`data_manager.py:313, 597, 602, 1180, 1885, 4007`), plus the upsert in
-  `save_fish_dish`. Palette relies on this to treat "same `dish_uuid` and same
-  `revision`" as "row unchanged".
-- Fish `PATCH` and `assign` bump fish `revision`.
-- The migration backfills (`dish_uuid`, fish `updated_at`) run before the
-  triggers are created, so existing rows start at `revision = 1`.
+Implemented in `tests/test_data.py::TestDishRevision` / `TestFishRevision`
+and `tests/test_api.py::TestRevisionEndpoints`:
+
+- Generic: a raw `UPDATE` of every tracked `dishes` column (read from
+  `PRAGMA table_info`) bumps `revision` by exactly 1. This covers every
+  partial-update path by construction.
+- Named paths: `save_fish_dish` change, screening finalize, inventory refresh
+  after a care check with deaths, startup backfills (bump once when they
+  change data, then stable).
+- No bump: no-op `UPDATE`, `updated_at`-only write, repeated identical save,
+  and `ensure_schema` re-run over all dishes.
+- Fish: create starts at 1; `update_fish_subject` and `assign_fish_to_unit`
+  bump; an unchanged update does not.
+- Existing rows start at `revision = 1` (verified on a copy of the
+  production DB: 81 dishes, restart-stable).
 
 ## 4. Structured error bodies
 

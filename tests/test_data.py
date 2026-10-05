@@ -190,6 +190,183 @@ class TestDishUuid:
         )
 
 
+def _revision(table, key_column, key):
+    with data_manager.get_connection() as conn:
+        row = conn.execute(
+            f"SELECT revision, updated_at FROM {table} WHERE {key_column} = ?", (key,)
+        ).fetchone()
+    return row["revision"], row["updated_at"]
+
+
+def _dish_revision(dish_id):
+    return _revision("dishes", "dish_id", dish_id)[0]
+
+
+def _set_dish_columns(dish_id, **values):
+    assignments = ", ".join(f"{column} = ?" for column in values)
+    with data_manager.get_connection() as conn:
+        conn.execute(
+            f"UPDATE dishes SET {assignments} WHERE dish_id = ?",
+            (*values.values(), dish_id),
+        )
+        conn.commit()
+
+
+class TestDishRevision:
+    """revision bumps on every content change to a dishes row, and only then.
+
+    Palette treats an unchanged (dish_uuid, revision) pair as an unchanged
+    dishes row, so every write path must be covered.
+    """
+
+    def test_raw_insert_starts_at_revision_one(self, client, seed_dish):
+        revision, updated_at = _revision("dishes", "dish_id", seed_dish)
+        assert revision == 1
+        assert updated_at is not None
+
+    def test_save_fish_dish_insert_starts_at_revision_one(self, client):
+        dish_id = f"REV_{uuid.uuid4().hex[:8]}"
+        assert data_manager.save_fish_dish({"dish_id": dish_id, "fish_count": 5})
+        assert _dish_revision(dish_id) == 1
+
+    def test_every_tracked_column_bumps_revision(self, client, seed_dish):
+        """Generic coverage: a raw UPDATE of any single column bumps revision."""
+        excluded = data_manager._REVISION_EXCLUDED_COLUMNS | {"dish_id"}
+        with data_manager.get_connection() as conn:
+            columns = [r[1] for r in conn.execute("PRAGMA table_info(dishes)")]
+            current = dict(conn.execute(
+                "SELECT * FROM dishes WHERE dish_id = ?", (seed_dish,)
+            ).fetchone())
+        tracked = [c for c in columns if c not in excluded]
+        assert "current_fish_count" in tracked and "data" in tracked
+
+        for column in tracked:
+            before = _dish_revision(seed_dish)
+            new_value = 1 if current[column] is None else None
+            _set_dish_columns(seed_dish, **{column: new_value})
+            assert _dish_revision(seed_dish) == before + 1, column
+
+    def test_noop_update_keeps_revision_and_updated_at(self, client, seed_dish):
+        before = _revision("dishes", "dish_id", seed_dish)
+        with data_manager.get_connection() as conn:
+            conn.execute(
+                "UPDATE dishes SET genotype = genotype, status = status WHERE dish_id = ?",
+                (seed_dish,),
+            )
+            conn.commit()
+        assert _revision("dishes", "dish_id", seed_dish) == before
+
+    def test_updated_at_only_write_does_not_bump(self, client, seed_dish):
+        before = _dish_revision(seed_dish)
+        _set_dish_columns(seed_dish, updated_at="2000-01-01 00:00:00")
+        assert _dish_revision(seed_dish) == before
+
+    def test_updated_at_moves_with_revision(self, client, seed_dish):
+        _set_dish_columns(seed_dish, updated_at="2000-01-01 00:00:00")
+        _set_dish_columns(seed_dish, genotype="Tg(changed)")
+        assert _revision("dishes", "dish_id", seed_dish)[1] != "2000-01-01 00:00:00"
+
+    # --- named write paths -------------------------------------------------
+
+    def test_save_fish_dish_change_bumps(self, client, seed_full_dish):
+        before = _dish_revision(seed_full_dish)
+        dish_data = data_manager.load_single_dish(seed_full_dish)
+        dish_data["genotype"] = "Tg(elavl3:jRGECO1b)"
+        assert data_manager.save_fish_dish(dish_data)
+        assert _dish_revision(seed_full_dish) > before
+
+    def test_repeated_identical_save_does_not_bump(self, client, seed_full_dish):
+        dish_data = data_manager.load_single_dish(seed_full_dish)
+        assert data_manager.save_fish_dish(dish_data)
+        after_first = _dish_revision(seed_full_dish)
+        assert data_manager.save_fish_dish(data_manager.load_single_dish(seed_full_dish))
+        assert _dish_revision(seed_full_dish) == after_first
+
+    def test_screening_finalize_bumps(self, client, seed_full_dish):
+        dish_data = data_manager.load_single_dish(seed_full_dish)
+        assert data_manager.save_fish_dish(dish_data)
+        before = _dish_revision(seed_full_dish)
+        with data_manager.get_connection() as conn:
+            data_manager._save_screening_steps(
+                conn.cursor(),
+                seed_full_dish,
+                {"screenings": [], "final_positive_count": 7, "date_finalized": "20260501"},
+            )
+            conn.commit()
+        assert _dish_revision(seed_full_dish) == before + 1
+
+    def test_inventory_refresh_bumps(self, client, seed_full_dish):
+        """Care check with deaths rewrites current_fish_count (_refresh_dish_inventory)."""
+        before = _dish_revision(seed_full_dish)
+        assert data_manager.save_dish_quality_check(
+            seed_full_dish,
+            {"check_time": "20260402T09:00:00", "fed": True, "num_dead": 3},
+        )
+        assert _dish_revision(seed_full_dish) > before
+
+    def test_startup_backfills_bump_once_then_are_stable(self, client, seed_dish):
+        # Rows that the startup backfills will rewrite: termination reason
+        # normalization and the current_fish_count fill-in.
+        _set_dish_columns(
+            seed_dish,
+            termination_reason=" Euthanasia ",
+            fish_count=10,
+            current_fish_count=None,
+        )
+        before = _dish_revision(seed_dish)
+
+        assert data_manager.ensure_schema()
+        after_first = _dish_revision(seed_dish)
+        assert after_first > before
+        with data_manager.get_connection() as conn:
+            row = conn.execute(
+                "SELECT termination_reason, current_fish_count FROM dishes WHERE dish_id = ?",
+                (seed_dish,),
+            ).fetchone()
+        assert row["termination_reason"] == "euthanasia"
+        assert row["current_fish_count"] == 10
+
+        assert data_manager.ensure_schema()
+        assert _dish_revision(seed_dish) == after_first
+
+    def test_restart_leaves_all_revisions_unchanged(self, client, seed_full_dish):
+        assert data_manager.save_dish_quality_check(
+            seed_full_dish,
+            {"check_time": "20260403T09:00:00", "fed": True, "num_dead": 1},
+        )
+        assert data_manager.ensure_schema()
+
+        with data_manager.get_connection() as conn:
+            before = conn.execute("SELECT dish_id, revision FROM dishes").fetchall()
+        assert data_manager.ensure_schema()
+        with data_manager.get_connection() as conn:
+            after = conn.execute("SELECT dish_id, revision FROM dishes").fetchall()
+        assert dict(map(tuple, after)) == dict(map(tuple, before))
+
+
+class TestFishRevision:
+    def test_create_starts_at_revision_one(self, client, seed_dish):
+        fish_id = data_manager.create_fish_subject(dish_id=seed_dish)
+        fish = data_manager.get_fish_subject(fish_id)
+        assert fish["revision"] == 1
+        assert fish["updated_at"] is not None
+
+    def test_update_bumps_and_noop_does_not(self, client, seed_dish):
+        fish_id = data_manager.create_fish_subject(dish_id=seed_dish, sex="unknown")
+        assert data_manager.update_fish_subject(fish_id, sex="male")
+        assert data_manager.get_fish_subject(fish_id)["revision"] == 2
+        assert data_manager.update_fish_subject(fish_id, sex="male")
+        assert data_manager.get_fish_subject(fish_id)["revision"] == 2
+
+    def test_assign_to_unit_bumps(self, client, seed_dish):
+        fish_id = data_manager.create_fish_subject(dish_id=seed_dish)
+        unit_id = data_manager.create_housing_unit(
+            dish_id=seed_dish, position_label="rev-test"
+        )
+        data_manager.assign_fish_to_unit(fish_id, unit_id)
+        assert data_manager.get_fish_subject(fish_id)["revision"] == 2
+
+
 class TestHousingUnitData:
     """data_manager housing unit methods."""
 

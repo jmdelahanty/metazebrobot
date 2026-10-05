@@ -1230,7 +1230,7 @@ class TestDishInventory:
 
         assert resp.status_code == 200
         payload = resp.json()
-        assert payload["schema_version"] == 1
+        assert payload["schema_version"] == 2
         assert payload["purpose"] == "citrus_acquisition_dish_picker"
         ids = {item["dish_id"] for item in payload["items"]}
         assert dish_a in ids
@@ -1299,7 +1299,7 @@ class TestDishInventory:
 
         assert resp.status_code == 200
         payload = resp.json()
-        assert payload["schema_version"] == 1
+        assert payload["schema_version"] == 2
         assert payload["dish_id"] == dish_a
         assert payload["cross_id"] == cross_id
         assert payload["fish_count"] == 9

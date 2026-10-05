@@ -99,6 +99,8 @@ class CrossListResponse(BaseModel):
 class DishListItem(BaseModel):
     dish_id: str
     dish_uuid: Optional[str] = None
+    revision: Optional[int] = None
+    updated_at: Optional[str] = None
     cross_id: Optional[str] = None
     genotype: Optional[str] = None
     responsible: Optional[str] = None
@@ -141,6 +143,8 @@ class AcquisitionLinks(BaseModel):
 class AcquisitionDishItem(BaseModel):
     dish_id: str
     dish_uuid: Optional[str] = None
+    revision: Optional[int] = None
+    updated_at: Optional[str] = None
     cross_id: Optional[str] = None
     genotype: Optional[str] = None
     species: str = "Danio rerio"
@@ -173,7 +177,7 @@ class AcquisitionDishItem(BaseModel):
 
 
 class AcquisitionDishesResponse(BaseModel):
-    schema_version: int = 1
+    schema_version: int = 2
     purpose: str = "citrus_acquisition_dish_picker"
     status_filter: str
     limit: int
@@ -183,9 +187,11 @@ class AcquisitionDishesResponse(BaseModel):
 
 
 class CitrusSnapshotResponse(BaseModel):
-    schema_version: int = 1
+    schema_version: int = 2
     dish_id: str
     dish_uuid: Optional[str] = None
+    revision: Optional[int] = None
+    updated_at: Optional[str] = None
     cross_id: Optional[str] = None
     genotype: Optional[str] = None
     dof: Optional[str] = None
@@ -3750,6 +3756,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             SELECT
                 d.dish_id,
                 d.dish_uuid,
+                d.revision,
+                d.updated_at,
                 d.cross_id,
                 d.genotype,
                 d.responsible,
@@ -3826,6 +3834,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             SELECT
                 d.dish_id,
                 d.dish_uuid,
+                d.revision,
+                d.updated_at,
                 d.cross_id,
                 d.genotype,
                 d.species,
@@ -3908,6 +3918,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             items.append({
                 "dish_id": dish.get("dish_id"),
                 "dish_uuid": dish.get("dish_uuid"),
+                "revision": dish.get("revision"),
+                "updated_at": dish.get("updated_at"),
                 "cross_id": dish.get("cross_id"),
                 "genotype": dish.get("genotype"),
                 "species": dish.get("species") or "Danio rerio",
@@ -3958,7 +3970,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             })
 
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "purpose": "citrus_acquisition_dish_picker",
             "status_filter": status,
             "limit": limit,
@@ -3975,7 +3987,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
                 row = conn.execute(
                     """
-                    SELECT dish_id, dish_uuid, cross_id, genotype, dof, fish_count,
+                    SELECT dish_id, dish_uuid, revision, updated_at, cross_id,
+                           genotype, dof, fish_count,
                            current_fish_count, species, sex, breeding_parents,
                            status, termination_date
                     FROM dishes
@@ -4013,9 +4026,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if fish_count is None:
             fish_count = dish.get("fish_count")
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "dish_id": dish["dish_id"],
             "dish_uuid": dish.get("dish_uuid"),
+            "revision": dish.get("revision"),
+            "updated_at": dish.get("updated_at"),
             "cross_id": cross_id,
             "genotype": dish.get("genotype"),
             "dof": dish.get("dof"),

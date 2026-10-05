@@ -145,6 +145,65 @@ class DataManager:
             END
         """)
 
+    # Columns that never count as a content change: the tracking columns
+    # themselves, and dish_uuid (immutable once minted by its own trigger).
+    _REVISION_EXCLUDED_COLUMNS = {'revision', 'updated_at', 'dish_uuid'}
+
+    def ensure_revision_tracking(self) -> bool:
+        """Give dishes and fish_subjects a content ``revision`` + ``updated_at``.
+
+        An AFTER UPDATE trigger bumps ``revision`` and sets ``updated_at``
+        only when some other column's value actually changed, so every write
+        path is covered (including raw SQL) while no-op saves and idempotent
+        startup backfills leave the revision alone. The trigger is rebuilt
+        from the current column list on every startup so newly added columns
+        are tracked too.
+        """
+        try:
+            with self.get_connection() as conn:
+                for table in ('dishes', 'fish_subjects'):
+                    columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+                    if 'revision' not in columns:
+                        conn.execute(
+                            f"ALTER TABLE {table} ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
+                        )
+                    if 'updated_at' not in columns:
+                        # ALTER TABLE cannot add a CURRENT_TIMESTAMP default;
+                        # the insert trigger below fills it instead.
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN updated_at TEXT")
+                        conn.execute(
+                            f"UPDATE {table} SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP)"
+                        )
+
+                    tracked = [c for c in columns if c not in self._REVISION_EXCLUDED_COLUMNS]
+                    changed = " OR ".join(f'NEW."{c}" IS NOT OLD."{c}"' for c in tracked)
+                    conn.execute(f"DROP TRIGGER IF EXISTS trg_{table}_revision")
+                    conn.execute(f"""
+                        CREATE TRIGGER trg_{table}_revision
+                        AFTER UPDATE ON {table}
+                        FOR EACH ROW WHEN {changed}
+                        BEGIN
+                            UPDATE {table}
+                            SET revision = OLD.revision + 1,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE rowid = NEW.rowid;
+                        END
+                    """)
+                    conn.execute(f"""
+                        CREATE TRIGGER IF NOT EXISTS trg_{table}_updated_at_default
+                        AFTER INSERT ON {table}
+                        FOR EACH ROW WHEN NEW.updated_at IS NULL
+                        BEGIN
+                            UPDATE {table} SET updated_at = CURRENT_TIMESTAMP
+                            WHERE rowid = NEW.rowid;
+                        END
+                    """)
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error("Error ensuring revision tracking: %s", e, exc_info=True)
+            return False
+
     def ensure_schema(self) -> bool:
         """Verify required tables exist and apply all known schema migrations."""
         if not self.database_path:
@@ -889,6 +948,8 @@ class DataManager:
         self.backfill_crossing_indicator_metadata()
         if not self.backfill_mortality_inventory():
             return False
+        if not self.ensure_revision_tracking():
+            return False
         logger.info("DataManager schema is up to date.")
         return True
 
@@ -1082,6 +1143,7 @@ class DataManager:
             # Insert or update dish with all flattened columns. A true upsert
             # (not INSERT OR REPLACE, which deletes and re-inserts the row)
             # keeps created_at and any column not listed here intact.
+            # revision/updated_at are maintained by trg_dishes_revision.
             cursor.execute("""
             INSERT INTO dishes
             (dish_id, cross_id, date_created, dof, cross_setup_date, dof_source, genotype, responsible,
@@ -1089,8 +1151,8 @@ class DataManager:
              source_screening_datetime, source_screening_bucket,
              notes, room, enclosure_temperature, container_type,
              enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
-             breeding_parents, termination_date, termination_reason, data, dish_uuid, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+             breeding_parents, termination_date, termination_reason, data, dish_uuid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(dish_id) DO UPDATE SET
                 cross_id = excluded.cross_id,
                 date_created = excluded.date_created,
@@ -1118,8 +1180,7 @@ class DataManager:
                 breeding_parents = excluded.breeding_parents,
                 termination_date = excluded.termination_date,
                 termination_reason = excluded.termination_reason,
-                data = excluded.data,
-                updated_at = excluded.updated_at
+                data = excluded.data
             """, (
                 dish_id,
                 dish_data.get('cross_id'),
@@ -2966,7 +3027,7 @@ class DataManager:
                     """
                     SELECT f.fish_id, f.dish_id, d.dish_uuid, f.subject_label,
                            f.sex, f.genotype, f.species, f.created_at, f.notes,
-                           f.current_unit_id
+                           f.current_unit_id, f.revision, f.updated_at
                     FROM fish_subjects f
                     LEFT JOIN dishes d ON d.dish_id = f.dish_id
                     WHERE f.dish_id = ?
@@ -3062,7 +3123,7 @@ class DataManager:
                     """
                     SELECT f.fish_id, f.dish_id, d.dish_uuid, f.subject_label,
                            f.sex, f.genotype, f.species, f.created_at, f.notes,
-                           f.current_unit_id
+                           f.current_unit_id, f.revision, f.updated_at
                     FROM fish_subjects f
                     LEFT JOIN dishes d ON d.dish_id = f.dish_id
                     WHERE f.fish_id = ?
