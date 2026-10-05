@@ -3017,8 +3017,14 @@ class DataManager:
             logger.error(f"Error creating fish subject: {e}")
             return None
 
-    def get_fish_subjects(self, dish_id: str) -> List[Dict[str, Any]]:
-        """List all fish subjects for a dish, ordered by created_at."""
+    def get_fish_subjects(
+        self, dish_id: str, *, raise_errors: bool = False
+    ) -> List[Dict[str, Any]]:
+        """List all fish subjects for a dish, ordered by created_at.
+
+        With ``raise_errors``, database errors propagate instead of reading
+        as an empty list (the JSON API reports them as 503).
+        """
         if not self.is_initialized:
             return []
         try:
@@ -3038,6 +3044,8 @@ class DataManager:
                 return [{k: row[k] for k in row.keys()} for row in rows]
         except Exception as e:
             logger.error(f"Error querying fish subjects: {e}")
+            if raise_errors:
+                raise
             return []
 
     def get_crosses_with_fish_counts(self) -> List[Dict[str, Any]]:
@@ -3113,8 +3121,14 @@ class DataManager:
             logger.error(f"Error querying fish subjects for cross: {e}")
             return []
 
-    def get_fish_subject(self, fish_id: str) -> Optional[Dict[str, Any]]:
-        """Fetch a single fish subject by UUID."""
+    def get_fish_subject(
+        self, fish_id: str, *, raise_errors: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a single fish subject by UUID.
+
+        With ``raise_errors``, database errors propagate instead of reading
+        as "not found" (the JSON API reports them as 503).
+        """
         if not self.is_initialized:
             return None
         try:
@@ -3135,6 +3149,8 @@ class DataManager:
                 return {k: row[k] for k in row.keys()}
         except Exception as e:
             logger.error(f"Error fetching fish subject: {e}")
+            if raise_errors:
+                raise
             return None
 
     def update_fish_subject(self, fish_id: str, **kwargs) -> bool:

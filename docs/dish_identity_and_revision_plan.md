@@ -172,6 +172,16 @@ Endpoints: `GET /dishes/{dish_id}`, `GET /dishes/by-uuid/{dish_uuid}`,
 No existing test or template matches on the old `"Dish not found"` /
 `"Fish not found"` strings. Citrus keys off the status code only.
 
+Also fixed while doing this:
+
+- `GET /fish/{fish_id}` used to report a database failure as 404 (the data
+  layer swallowed the error and returned `None`). It now returns 503
+  `database_error`, so a lookup failure is never recorded as "does not exist".
+- `GET /dishes/{dish_id}/fish` used to return `200 {"items": []}` for an
+  unknown dish; it now returns 404 `dish_not_found`.
+
+HTML/HTMX routes and write endpoints keep their existing error responses.
+
 ## Rollout
 
 1. Back up `zebrobot.db` (`sqlite3 zebrobot.db ".backup zebrobot.db.backup.pre_dish_uuid_<date>"`).

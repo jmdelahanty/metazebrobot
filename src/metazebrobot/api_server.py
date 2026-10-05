@@ -579,6 +579,22 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
+def _not_found(entity: str, **identifiers: Any) -> HTTPException:
+    """404 with the structured JSON API error shape."""
+    return HTTPException(
+        status_code=404,
+        detail={"error": f"{entity}_not_found", **identifiers},
+    )
+
+
+def _database_error(exc: Exception) -> HTTPException:
+    """503 with the structured JSON API error shape."""
+    return HTTPException(
+        status_code=503,
+        detail={"error": "database_error", "message": str(exc)},
+    )
+
+
 def _screening_indicator_suggestions(
     transgenes: List[Dict[str, Any]],
     current_step: Optional[Any] = None,
@@ -3806,7 +3822,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 items.append(dish)
             return {"items": items}
         except sqlite3.Error as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise _database_error(exc) from exc
 
     @app.get("/acquisition/dishes", response_model=AcquisitionDishesResponse)
     def list_acquisition_dishes(
@@ -3905,7 +3921,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
                 rows = conn.execute(query, params).fetchall()
         except sqlite3.Error as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise _database_error(exc) from exc
 
         items = []
         for row in rows:
@@ -3997,18 +4013,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     (dish_id,),
                 ).fetchone()
                 if not row:
-                    raise HTTPException(
-                        status_code=404,
-                        detail={"error": "dish_not_found", "dish_id": dish_id},
-                    )
+                    raise _not_found("dish", dish_id=dish_id)
                 dish = _row_to_dict(row)
                 cross_id = dish.get("cross_id")
                 cross_snapshot = _load_cached_cross_snapshot(conn, str(cross_id)) if cross_id else None
         except sqlite3.Error as exc:
-            raise HTTPException(
-                status_code=503,
-                detail={"error": "database_error", "message": str(exc)},
-            ) from exc
+            raise _database_error(exc) from exc
 
         parents = []
         line_strain = None
@@ -4046,7 +4056,6 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         key_column: str,
         key_value: str,
         include_checks: bool,
-        not_found_detail: Any,
     ) -> Dict[str, Any]:
         """Shared body for the dish detail routes (by dish_id or dish_uuid)."""
         db_path = _require_db_path()
@@ -4057,7 +4066,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     (key_value,),
                 ).fetchone()
                 if not row:
-                    raise HTTPException(status_code=404, detail=not_found_detail)
+                    raise _not_found("dish", **{key_column: key_value})
                 dish = _row_to_dict(row)
                 dish_id = dish["dish_id"]
                 if dish.get("data"):
@@ -4098,26 +4107,21 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     dish["quality_checks"] = [_row_to_dict(r) for r in checks]
             return dish
         except sqlite3.Error as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise _database_error(exc) from exc
 
     @app.get("/dishes/by-uuid/{dish_uuid}")
     def get_dish_by_uuid_api(
         dish_uuid: str,
         include_checks: bool = Query(default=False),
     ) -> Dict[str, Any]:
-        return _load_dish_detail(
-            "dish_uuid",
-            dish_uuid,
-            include_checks,
-            {"error": "dish_not_found", "dish_uuid": dish_uuid},
-        )
+        return _load_dish_detail("dish_uuid", dish_uuid, include_checks)
 
     @app.get("/dishes/{dish_id}")
     def get_dish_api(
         dish_id: str,
         include_checks: bool = Query(default=False),
     ) -> Dict[str, Any]:
-        return _load_dish_detail("dish_id", dish_id, include_checks, "Dish not found")
+        return _load_dish_detail("dish_id", dish_id, include_checks)
 
     @app.get("/crosses", response_model=CrossListResponse)
     def list_crosses_api(
@@ -4211,7 +4215,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
             return {"items": items}
         except sqlite3.Error as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise _database_error(exc) from exc
 
     @app.get("/crosses/{cross_id}", response_model=CrossSnapshotResponse)
     def get_cross_api(
@@ -5073,8 +5077,17 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     @app.get("/dishes/{dish_id}/fish")
     def list_fish_for_dish(dish_id: str) -> Dict[str, Any]:
         """List all fish subjects registered to a dish."""
-        _require_db_path()
-        subjects = data_manager.get_fish_subjects(dish_id)
+        db_path = _require_db_path()
+        try:
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                exists = conn.execute(
+                    "SELECT 1 FROM dishes WHERE dish_id = ?", (dish_id,)
+                ).fetchone()
+            if not exists:
+                raise _not_found("dish", dish_id=dish_id)
+            subjects = data_manager.get_fish_subjects(dish_id, raise_errors=True)
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
         return {"items": subjects}
 
     @app.post("/dishes/{dish_id}/fish", status_code=201)
@@ -5110,9 +5123,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     def get_fish(fish_id: str) -> Dict[str, Any]:
         """Fetch a single fish subject by UUID."""
         _require_db_path()
-        fish = data_manager.get_fish_subject(fish_id)
+        try:
+            fish = data_manager.get_fish_subject(fish_id, raise_errors=True)
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
         if fish is None:
-            raise HTTPException(status_code=404, detail="Fish not found")
+            raise _not_found("fish", fish_id=fish_id)
         return fish
 
     @app.patch("/fish/{fish_id}")

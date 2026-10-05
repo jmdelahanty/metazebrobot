@@ -1,10 +1,12 @@
 """Focused tests for the read-only JSON API using a temporary database."""
 
 import json
+import sqlite3
 import uuid
 
 import pytest
 
+from metazebrobot import api_server
 from metazebrobot.data.data_manager import data_manager
 
 
@@ -200,6 +202,61 @@ class TestRevisionEndpoints:
 
         assert fish["revision"] == 1
         assert fish["updated_at"]
+
+
+def _failing_connection(*args, **kwargs):
+    raise sqlite3.OperationalError("database is locked")
+
+
+class TestStructuredErrors:
+    """JSON read endpoints share one error shape so callers can record it."""
+
+    def test_unknown_dish(self, client):
+        response = client.get("/dishes/NONEXISTENT_DISH_12345")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == {
+            "error": "dish_not_found",
+            "dish_id": "NONEXISTENT_DISH_12345",
+        }
+
+    def test_unknown_dish_fish_list(self, client):
+        response = client.get("/dishes/NONEXISTENT_DISH_12345/fish")
+
+        assert response.status_code == 404
+        assert response.json()["detail"]["error"] == "dish_not_found"
+
+    def test_unknown_fish(self, client):
+        fish_id = str(uuid.uuid4())
+
+        response = client.get(f"/fish/{fish_id}")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == {"error": "fish_not_found", "fish_id": fish_id}
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/dishes", "/acquisition/dishes", "/dishes/ANY", "/dishes/ANY/citrus-snapshot",
+         "/dishes/by-uuid/ANY", "/dishes/ANY/fish"],
+    )
+    def test_dish_reads_report_database_error(self, client, monkeypatch, path):
+        monkeypatch.setattr(api_server, "_open_readonly_connection", _failing_connection)
+
+        response = client.get(path)
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == {
+            "error": "database_error",
+            "message": "database is locked",
+        }
+
+    def test_fish_database_error_is_not_reported_as_missing(self, client, monkeypatch):
+        monkeypatch.setattr(data_manager, "get_connection", _failing_connection)
+
+        response = client.get(f"/fish/{uuid.uuid4()}")
+
+        assert response.status_code == 503
+        assert response.json()["detail"]["error"] == "database_error"
 
 
 class TestCrossesEndpoint:
