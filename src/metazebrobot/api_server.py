@@ -98,6 +98,7 @@ class CrossListResponse(BaseModel):
 
 class DishListItem(BaseModel):
     dish_id: str
+    dish_uuid: Optional[str] = None
     cross_id: Optional[str] = None
     genotype: Optional[str] = None
     responsible: Optional[str] = None
@@ -139,6 +140,7 @@ class AcquisitionLinks(BaseModel):
 
 class AcquisitionDishItem(BaseModel):
     dish_id: str
+    dish_uuid: Optional[str] = None
     cross_id: Optional[str] = None
     genotype: Optional[str] = None
     species: str = "Danio rerio"
@@ -183,6 +185,7 @@ class AcquisitionDishesResponse(BaseModel):
 class CitrusSnapshotResponse(BaseModel):
     schema_version: int = 1
     dish_id: str
+    dish_uuid: Optional[str] = None
     cross_id: Optional[str] = None
     genotype: Optional[str] = None
     dof: Optional[str] = None
@@ -3746,6 +3749,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         query = """
             SELECT
                 d.dish_id,
+                d.dish_uuid,
                 d.cross_id,
                 d.genotype,
                 d.responsible,
@@ -3821,6 +3825,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         query = f"""
             SELECT
                 d.dish_id,
+                d.dish_uuid,
                 d.cross_id,
                 d.genotype,
                 d.species,
@@ -3902,6 +3907,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
             items.append({
                 "dish_id": dish.get("dish_id"),
+                "dish_uuid": dish.get("dish_uuid"),
                 "cross_id": dish.get("cross_id"),
                 "genotype": dish.get("genotype"),
                 "species": dish.get("species") or "Danio rerio",
@@ -3969,7 +3975,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
                 row = conn.execute(
                     """
-                    SELECT dish_id, cross_id, genotype, dof, fish_count,
+                    SELECT dish_id, dish_uuid, cross_id, genotype, dof, fish_count,
                            current_fish_count, species, sex, breeding_parents,
                            status, termination_date
                     FROM dishes
@@ -4009,6 +4015,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return {
             "schema_version": 1,
             "dish_id": dish["dish_id"],
+            "dish_uuid": dish.get("dish_uuid"),
             "cross_id": cross_id,
             "genotype": dish.get("genotype"),
             "dof": dish.get("dof"),
@@ -4020,21 +4027,24 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "parents": parents,
         }
 
-    @app.get("/dishes/{dish_id}")
-    def get_dish_api(
-        dish_id: str,
-        include_checks: bool = Query(default=False),
+    def _load_dish_detail(
+        key_column: str,
+        key_value: str,
+        include_checks: bool,
+        not_found_detail: Any,
     ) -> Dict[str, Any]:
+        """Shared body for the dish detail routes (by dish_id or dish_uuid)."""
         db_path = _require_db_path()
         try:
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
                 row = conn.execute(
-                    "SELECT * FROM dishes WHERE dish_id = ?",
-                    (dish_id,),
+                    f"SELECT * FROM dishes WHERE {key_column} = ?",
+                    (key_value,),
                 ).fetchone()
                 if not row:
-                    raise HTTPException(status_code=404, detail="Dish not found")
+                    raise HTTPException(status_code=404, detail=not_found_detail)
                 dish = _row_to_dict(row)
+                dish_id = dish["dish_id"]
                 if dish.get("data"):
                     try:
                         dish["data"] = json.loads(dish["data"])
@@ -4074,6 +4084,25 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             return dish
         except sqlite3.Error as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/dishes/by-uuid/{dish_uuid}")
+    def get_dish_by_uuid_api(
+        dish_uuid: str,
+        include_checks: bool = Query(default=False),
+    ) -> Dict[str, Any]:
+        return _load_dish_detail(
+            "dish_uuid",
+            dish_uuid,
+            include_checks,
+            {"error": "dish_not_found", "dish_uuid": dish_uuid},
+        )
+
+    @app.get("/dishes/{dish_id}")
+    def get_dish_api(
+        dish_id: str,
+        include_checks: bool = Query(default=False),
+    ) -> Dict[str, Any]:
+        return _load_dish_detail("dish_id", dish_id, include_checks, "Dish not found")
 
     @app.get("/crosses", response_model=CrossListResponse)
     def list_crosses_api(

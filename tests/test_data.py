@@ -10,6 +10,7 @@ which initialises data_manager and creates all tables.
 
 import json
 import re
+import sqlite3
 import uuid
 from io import BytesIO
 
@@ -126,6 +127,66 @@ class TestDishUpsert:
         assert data_manager.get_fish_subject(fish_id)["dish_id"] == seed_dish
         assert any(
             u["unit_id"] == unit_id for u in data_manager.get_housing_units(seed_dish)
+        )
+
+
+class TestDishUuid:
+    """Every dish gets an immutable, unique dish_uuid."""
+
+    def _dish_uuid(self, dish_id):
+        with data_manager.get_connection() as conn:
+            row = conn.execute(
+                "SELECT dish_uuid FROM dishes WHERE dish_id = ?", (dish_id,)
+            ).fetchone()
+        return row["dish_uuid"] if row else None
+
+    def test_raw_insert_gets_uuid_from_trigger(self, client, seed_dish):
+        # seed_dish inserts via raw SQL without dish_uuid.
+        assert UUID_RE.match(self._dish_uuid(seed_dish))
+
+    def test_save_fish_dish_mints_uuid_and_keeps_it(self, client):
+        dish_id = f"UUID_{uuid.uuid4().hex[:8]}"
+        assert data_manager.save_fish_dish({"dish_id": dish_id, "fish_count": 5})
+        minted = self._dish_uuid(dish_id)
+        assert UUID_RE.match(minted)
+
+        dish_data = data_manager.load_single_dish(dish_id)
+        dish_data["genotype"] = "Tg(elavl3:GCaMP6s)"
+        assert data_manager.save_fish_dish(dish_data)
+        assert self._dish_uuid(dish_id) == minted
+
+    def test_uuids_are_distinct(self, client, seed_dish):
+        other = f"UUID_{uuid.uuid4().hex[:8]}"
+        assert data_manager.save_fish_dish({"dish_id": other})
+        assert self._dish_uuid(other) != self._dish_uuid(seed_dish)
+
+    def test_uuid_cannot_be_changed(self, client, seed_dish):
+        with pytest.raises(sqlite3.IntegrityError, match="dish_uuid is immutable"):
+            with data_manager.get_connection() as conn:
+                conn.execute(
+                    "UPDATE dishes SET dish_uuid = ? WHERE dish_id = ?",
+                    (str(uuid.uuid4()), seed_dish),
+                )
+
+    def test_ensure_schema_backfills_missing_uuid(self, client):
+        dish_id = f"UUID_{uuid.uuid4().hex[:8]}"
+        with data_manager.get_connection() as conn:
+            conn.execute("DROP TRIGGER trg_dishes_dish_uuid_default")
+            conn.execute(
+                "INSERT INTO dishes (dish_id, data) VALUES (?, '{}')", (dish_id,)
+            )
+            conn.commit()
+        assert self._dish_uuid(dish_id) is None
+
+        assert data_manager.ensure_schema()
+        assert UUID_RE.match(self._dish_uuid(dish_id))
+
+    def test_fish_subject_includes_dish_uuid(self, client, seed_dish):
+        fish_id = data_manager.create_fish_subject(dish_id=seed_dish)
+        expected = self._dish_uuid(seed_dish)
+        assert data_manager.get_fish_subject(fish_id)["dish_uuid"] == expected
+        assert all(
+            f["dish_uuid"] == expected for f in data_manager.get_fish_subjects(seed_dish)
         )
 
 

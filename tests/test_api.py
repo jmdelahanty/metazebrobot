@@ -111,6 +111,57 @@ class TestDishesEndpoint:
         assert response.status_code == 404
 
 
+def _dish_uuid(dish_id):
+    with data_manager.get_connection() as conn:
+        return conn.execute(
+            "SELECT dish_uuid FROM dishes WHERE dish_id = ?", (dish_id,)
+        ).fetchone()["dish_uuid"]
+
+
+class TestDishUuidEndpoints:
+    def test_dish_detail_includes_uuid(self, client, seed_full_dish):
+        response = client.get(f"/dishes/{seed_full_dish}")
+
+        assert response.status_code == 200
+        assert response.json()["dish_uuid"] == _dish_uuid(seed_full_dish)
+
+    def test_list_dishes_includes_uuid(self, client, seed_full_dish):
+        response = client.get("/dishes")
+
+        items = {item["dish_id"]: item for item in response.json()["items"]}
+        assert items[seed_full_dish]["dish_uuid"] == _dish_uuid(seed_full_dish)
+
+    def test_get_dish_by_uuid(self, client, seed_full_dish):
+        dish_uuid = _dish_uuid(seed_full_dish)
+
+        response = client.get(f"/dishes/by-uuid/{dish_uuid}")
+
+        assert response.status_code == 200
+        assert response.json()["dish_id"] == seed_full_dish
+        assert response.json() == client.get(f"/dishes/{seed_full_dish}").json()
+
+    def test_get_dish_by_unknown_uuid(self, client):
+        missing = str(uuid.uuid4())
+
+        response = client.get(f"/dishes/by-uuid/{missing}")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == {
+            "error": "dish_not_found",
+            "dish_uuid": missing,
+        }
+
+    def test_acquisition_and_snapshot_include_uuid(self, client, api_cross):
+        cross_id, dish_a, dish_b = api_cross
+
+        acquisition = client.get("/acquisition/dishes", params={"cross_id": cross_id})
+        snapshot = client.get(f"/dishes/{dish_a}/citrus-snapshot")
+
+        items = {item["dish_id"]: item for item in acquisition.json()["items"]}
+        assert items[dish_a]["dish_uuid"] == _dish_uuid(dish_a)
+        assert snapshot.json()["dish_uuid"] == _dish_uuid(dish_a)
+
+
 class TestCrossesEndpoint:
     def test_cross_list_has_explicit_openapi_schema(self, client):
         response = client.get("/openapi.json")

@@ -97,6 +97,54 @@ class DataManager:
 
         return self.ensure_schema()
 
+    @staticmethod
+    def _ensure_dish_uuid_schema(cursor, existing_columns) -> None:
+        """Give every dish an immutable, globally unique ``dish_uuid``.
+
+        ``dish_id`` (``{cross_id}_{n}``) is only unique within this database
+        and could be reused after a delete, so external consumers record
+        ``dish_uuid`` as the durable reference.
+        """
+        if 'dish_uuid' not in existing_columns:
+            cursor.execute("ALTER TABLE dishes ADD COLUMN dish_uuid TEXT")
+        missing = cursor.execute(
+            "SELECT dish_id FROM dishes WHERE dish_uuid IS NULL"
+        ).fetchall()
+        for row in missing:
+            cursor.execute(
+                "UPDATE dishes SET dish_uuid = ? WHERE dish_id = ?",
+                (str(uuid.uuid4()), row[0]),
+            )
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_dishes_dish_uuid ON dishes(dish_uuid)"
+        )
+        # Fallback for inserts that bypass save_fish_dish (scripts, tour
+        # setup): mint a lowercase UUID4 in SQL.
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_dishes_dish_uuid_default
+            AFTER INSERT ON dishes
+            FOR EACH ROW WHEN NEW.dish_uuid IS NULL
+            BEGIN
+                UPDATE dishes SET dish_uuid =
+                    lower(hex(randomblob(4))) || '-' ||
+                    lower(hex(randomblob(2))) || '-4' ||
+                    substr(lower(hex(randomblob(2))), 2) || '-' ||
+                    substr('89ab', 1 + (abs(random()) % 4), 1) ||
+                    substr(lower(hex(randomblob(2))), 2) || '-' ||
+                    lower(hex(randomblob(6)))
+                WHERE rowid = NEW.rowid;
+            END
+        """)
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_dishes_dish_uuid_immutable
+            BEFORE UPDATE OF dish_uuid ON dishes
+            FOR EACH ROW
+            WHEN OLD.dish_uuid IS NOT NULL AND NEW.dish_uuid IS NOT OLD.dish_uuid
+            BEGIN
+                SELECT RAISE(ABORT, 'dish_uuid is immutable');
+            END
+        """)
+
     def ensure_schema(self) -> bool:
         """Verify required tables exist and apply all known schema migrations."""
         if not self.database_path:
@@ -617,6 +665,8 @@ class DataManager:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_dishes_dof ON dishes(dof)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_dishes_date_created ON dishes(date_created)")
 
+                self._ensure_dish_uuid_schema(cursor, existing_columns)
+
                 # Screening step images (filesystem paths)
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS screening_step_images (
@@ -1039,8 +1089,8 @@ class DataManager:
              source_screening_datetime, source_screening_bucket,
              notes, room, enclosure_temperature, container_type,
              enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
-             breeding_parents, termination_date, termination_reason, data, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+             breeding_parents, termination_date, termination_reason, data, dish_uuid, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(dish_id) DO UPDATE SET
                 cross_id = excluded.cross_id,
                 date_created = excluded.date_created,
@@ -1098,7 +1148,8 @@ class DataManager:
                 json.dumps(breeding_parents) if breeding_parents else None,
                 dish_data.get('termination_date'),
                 dish_data.get('termination_reason'),
-                json.dumps(dish_data)  # Keep JSON for backward compatibility during transition
+                json.dumps(dish_data),  # Keep JSON for backward compatibility during transition
+                str(uuid.uuid4()),  # Only used on insert; never in the SET list
             ))
 
             # Update quality checks (within same transaction)
@@ -2913,11 +2964,13 @@ class DataManager:
             with self.get_connection() as conn:
                 rows = conn.execute(
                     """
-                    SELECT fish_id, dish_id, subject_label, sex, genotype,
-                           species, created_at, notes, current_unit_id
-                    FROM fish_subjects
-                    WHERE dish_id = ?
-                    ORDER BY created_at
+                    SELECT f.fish_id, f.dish_id, d.dish_uuid, f.subject_label,
+                           f.sex, f.genotype, f.species, f.created_at, f.notes,
+                           f.current_unit_id
+                    FROM fish_subjects f
+                    LEFT JOIN dishes d ON d.dish_id = f.dish_id
+                    WHERE f.dish_id = ?
+                    ORDER BY f.created_at
                     """,
                     (dish_id,),
                 ).fetchall()
@@ -3007,10 +3060,12 @@ class DataManager:
             with self.get_connection() as conn:
                 row = conn.execute(
                     """
-                    SELECT fish_id, dish_id, subject_label, sex, genotype,
-                           species, created_at, notes, current_unit_id
-                    FROM fish_subjects
-                    WHERE fish_id = ?
+                    SELECT f.fish_id, f.dish_id, d.dish_uuid, f.subject_label,
+                           f.sex, f.genotype, f.species, f.created_at, f.notes,
+                           f.current_unit_id
+                    FROM fish_subjects f
+                    LEFT JOIN dishes d ON d.dish_id = f.dish_id
+                    WHERE f.fish_id = ?
                     """,
                     (fish_id,),
                 ).fetchone()
