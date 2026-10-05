@@ -80,7 +80,18 @@ def test_dish_detail_passes_other_columns_through():
     assert dumped["data"] == {"a": 1}
 
 
-@pytest.mark.parametrize("method,path", CONSUMER_ENDPOINTS)
+LOOKUP_ENDPOINTS = [e for e in CONSUMER_ENDPOINTS if e[1] != "/version"]
+
+
+def test_version_fields(schema):
+    props = _properties(schema, "VersionResponse")
+    for field in ("service_commit", "service_commit_dirty",
+                  "consumer_schema_sha256", "api_schema_version", "started_at_utc"):
+        assert field in props
+    assert props["api_schema_version"]["default"] == 2
+
+
+@pytest.mark.parametrize("method,path", LOOKUP_ENDPOINTS)
 def test_lookup_errors_are_declared(schema, method, path):
     responses = schema["paths"][path][method]["responses"]
     assert responses["503"]["content"]["application/json"]["schema"]["$ref"].endswith(

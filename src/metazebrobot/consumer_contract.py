@@ -27,6 +27,7 @@ CONSUMER_ENDPOINTS: List[Tuple[str, str]] = [
     ("get", "/dishes/by-uuid/{dish_uuid}"),
     ("get", "/dishes/{dish_id}/fish"),
     ("get", "/fish/{fish_id}"),
+    ("get", "/version"),
 ]
 
 CONSUMER_OPENAPI_PATH = (

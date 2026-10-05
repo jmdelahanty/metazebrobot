@@ -259,6 +259,24 @@ class TestStructuredErrors:
         assert response.json()["detail"]["error"] == "database_error"
 
 
+class TestVersionEndpoint:
+    def test_version_reports_running_code_and_schema(self, client):
+        import subprocess
+        from metazebrobot.consumer_contract import CONSUMER_OPENAPI_PATH, digest
+
+        body = client.get("/version").json()
+
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True
+        ).stdout.strip()
+        assert body["service_commit"] == head
+        assert isinstance(body["service_commit_dirty"], bool)
+        assert body["api_schema_version"] == 2
+        assert body["started_at_utc"].endswith("Z")
+        # Computed from the running app, equal to the committed pin.
+        assert body["consumer_schema_sha256"] == digest(CONSUMER_OPENAPI_PATH.read_text())
+
+
 class TestCrossesEndpoint:
     def test_cross_list_has_explicit_openapi_schema(self, client):
         response = client.get("/openapi.json")

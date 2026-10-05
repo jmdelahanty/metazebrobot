@@ -9,8 +9,9 @@ import logging
 import os
 import re
 import sqlite3
+import subprocess
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Tuple
@@ -22,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
+from .consumer_contract import consumer_openapi, digest, render
 from .controllers.fish_dish_controller import FishDishController
 from .data.data_manager import data_manager
 from .models.fish_dish import (
@@ -68,6 +70,16 @@ class HealthResponse(BaseModel):
     db: Optional[str] = None
     pyrat: Optional[str] = None
     components: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VersionResponse(BaseModel):
+    """Which MetaZebrobot a client is talking to, for provenance."""
+
+    service_commit: Optional[str] = None
+    service_commit_dirty: Optional[bool] = None
+    consumer_schema_sha256: str
+    api_schema_version: int = 2
+    started_at_utc: str
 
 
 class CrossParentSnapshot(BaseModel):
@@ -621,6 +633,22 @@ def _fetch_pyrat(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
 # ---------------------------------------------------------------------------
 # Database helpers (read-only JSON API still uses its own lightweight conn)
 # ---------------------------------------------------------------------------
+
+def _git_commit() -> Tuple[Optional[str], Optional[bool]]:
+    """Return (HEAD sha, has uncommitted tracked changes) for the running code."""
+    try:
+        def git(*args: str) -> str:
+            return subprocess.run(
+                ["git", "-C", str(_PACKAGE_DIR), *args],
+                capture_output=True, text=True, check=True, timeout=5,
+            ).stdout.strip()
+
+        commit = git("rev-parse", "HEAD")
+        dirty = bool(git("status", "--porcelain", "--untracked-files=no"))
+        return commit, dirty
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+
 
 def _resolve_db_path(db_path: Optional[str]) -> Optional[Path]:
     if db_path:
@@ -2119,6 +2147,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     app = FastAPI(title="MetaZebrobot API", lifespan=lifespan)
     app.state.db_path = _resolve_db_path(db_path)
     app.state.busy_timeout_ms = DEFAULT_BUSY_TIMEOUT_MS
+    app.state.started_at_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    app.state.service_commit, app.state.service_commit_dirty = _git_commit()
+    app.state.consumer_schema_sha256 = None  # computed on first /version call
 
     # Jinja2 templates & static files
     templates = Jinja2Templates(directory=str(_PACKAGE_DIR / "templates"))
@@ -3750,6 +3781,24 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     # ------------------------------------------------------------------
     # JSON API — health + dishes
     # ------------------------------------------------------------------
+
+    @app.get("/version", response_model=VersionResponse)
+    def version() -> Dict[str, Any]:
+        """Code and consumer-schema identity of this running process.
+
+        ``consumer_schema_sha256`` is computed from the running app's own
+        OpenAPI, so it matches docs/api/consumer_openapi.json only when the
+        process serves the pinned schema.
+        """
+        if app.state.consumer_schema_sha256 is None:
+            app.state.consumer_schema_sha256 = digest(render(consumer_openapi(app)))
+        return {
+            "service_commit": app.state.service_commit,
+            "service_commit_dirty": app.state.service_commit_dirty,
+            "consumer_schema_sha256": app.state.consumer_schema_sha256,
+            "api_schema_version": 2,
+            "started_at_utc": app.state.started_at_utc,
+        }
 
     @app.get("/health", response_model=HealthResponse)
     def health(

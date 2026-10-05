@@ -126,13 +126,28 @@ Field-level shapes are generated from the code, not written by hand:
 - `docs/api/consumer_openapi.json`: the OpenAPI slice for
   `/dishes/{dish_id}/citrus-snapshot`, `/acquisition/dishes`,
   `/dishes/{dish_id}`, `/dishes/by-uuid/{dish_uuid}`,
-  `/dishes/{dish_id}/fish`, and `/fish/{fish_id}`, including their
-  404/503 error models.
+  `/dishes/{dish_id}/fish`, `/fish/{fish_id}`, and `/version`, including
+  their 404/503 error models.
 - `tests/test_consumer_contract.py` fails if the code and that file
   disagree, and asserts the identity fields explicitly.
 - `pixi run python scripts/export_consumer_openapi.py --check` verifies it
   and prints its sha256. Downstream contracts pin a MetaZebrobot commit plus
   this digest instead of copying field lists.
+
+### Which MetaZebrobot am I talking to?
+
+`GET /version` returns:
+
+| Field | Meaning |
+|-------|---------|
+| `service_commit` | Git SHA of the code the running process loaded (`null` if unknown). |
+| `service_commit_dirty` | `true` if that checkout had uncommitted changes to tracked files. |
+| `consumer_schema_sha256` | sha256 of the consumer OpenAPI slice, computed from the running app (not read from the file). Equals the pinned digest exactly when the process serves the pinned schema. |
+| `api_schema_version` | Response schema version of the consumer endpoints (2). |
+| `started_at_utc` | When the process started (`YYYY-MM-DDTHH:MM:SSZ`). |
+
+Consumers read it once per session (e.g. at record start) and store
+`service_commit` and `consumer_schema_sha256` as provenance.
 
 Stability promise for response `schema_version` 2:
 

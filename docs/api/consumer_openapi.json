@@ -945,6 +945,52 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "VersionResponse": {
+        "description": "Which MetaZebrobot a client is talking to, for provenance.",
+        "properties": {
+          "api_schema_version": {
+            "default": 2,
+            "title": "Api Schema Version",
+            "type": "integer"
+          },
+          "consumer_schema_sha256": {
+            "title": "Consumer Schema Sha256",
+            "type": "string"
+          },
+          "service_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Commit"
+          },
+          "service_commit_dirty": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Commit Dirty"
+          },
+          "started_at_utc": {
+            "title": "Started At Utc",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consumer_schema_sha256",
+          "started_at_utc"
+        ],
+        "title": "VersionResponse",
+        "type": "object"
       }
     }
   },
@@ -1378,6 +1424,25 @@
           }
         },
         "summary": "Get Fish"
+      }
+    },
+    "/version": {
+      "get": {
+        "description": "Code and consumer-schema identity of this running process.\n\n``consumer_schema_sha256`` is computed from the running app's own\nOpenAPI, so it matches docs/api/consumer_openapi.json only when the\nprocess serves the pinned schema.",
+        "operationId": "version_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Version"
       }
     }
   }
