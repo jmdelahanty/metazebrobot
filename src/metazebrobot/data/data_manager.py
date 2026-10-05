@@ -1029,9 +1029,11 @@ class DataManager:
             breeding = dish_data.get('breeding', {})
             breeding_parents = breeding.get('parents', []) if breeding else []
 
-            # Insert or update dish with all flattened columns
+            # Insert or update dish with all flattened columns. A true upsert
+            # (not INSERT OR REPLACE, which deletes and re-inserts the row)
+            # keeps created_at and any column not listed here intact.
             cursor.execute("""
-            INSERT OR REPLACE INTO dishes
+            INSERT INTO dishes
             (dish_id, cross_id, date_created, dof, cross_setup_date, dof_source, genotype, responsible,
              status, fish_count, current_fish_count, species, sex, parent_dish_id, dish_population_type,
              source_screening_datetime, source_screening_bucket,
@@ -1039,6 +1041,35 @@ class DataManager:
              enclosure_vol_water_total, enclosure_light_duration, enclosure_dawn_dusk,
              breeding_parents, termination_date, termination_reason, data, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(dish_id) DO UPDATE SET
+                cross_id = excluded.cross_id,
+                date_created = excluded.date_created,
+                dof = excluded.dof,
+                cross_setup_date = excluded.cross_setup_date,
+                dof_source = excluded.dof_source,
+                genotype = excluded.genotype,
+                responsible = excluded.responsible,
+                status = excluded.status,
+                fish_count = excluded.fish_count,
+                current_fish_count = excluded.current_fish_count,
+                species = excluded.species,
+                sex = excluded.sex,
+                parent_dish_id = excluded.parent_dish_id,
+                dish_population_type = excluded.dish_population_type,
+                source_screening_datetime = excluded.source_screening_datetime,
+                source_screening_bucket = excluded.source_screening_bucket,
+                notes = excluded.notes,
+                room = excluded.room,
+                enclosure_temperature = excluded.enclosure_temperature,
+                container_type = excluded.container_type,
+                enclosure_vol_water_total = excluded.enclosure_vol_water_total,
+                enclosure_light_duration = excluded.enclosure_light_duration,
+                enclosure_dawn_dusk = excluded.enclosure_dawn_dusk,
+                breeding_parents = excluded.breeding_parents,
+                termination_date = excluded.termination_date,
+                termination_reason = excluded.termination_reason,
+                data = excluded.data,
+                updated_at = excluded.updated_at
             """, (
                 dish_id,
                 dish_data.get('cross_id'),

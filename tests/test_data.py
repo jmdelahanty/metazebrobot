@@ -79,6 +79,56 @@ class TestFishSubjectData:
         assert len(data_manager.get_fish_occupancy_history(fish_id)) == 0
 
 
+class TestDishUpsert:
+    """save_fish_dish updates in place instead of delete-and-reinsert."""
+
+    def _dish_row(self, dish_id):
+        with data_manager.get_connection() as conn:
+            return conn.execute(
+                "SELECT * FROM dishes WHERE dish_id = ?", (dish_id,)
+            ).fetchone()
+
+    def _resave(self, dish_id, **changes):
+        dish_data = data_manager.load_single_dish(dish_id)
+        dish_data.update(changes)
+        assert data_manager.save_fish_dish(dish_data)
+
+    def test_resave_preserves_created_at(self, client, seed_dish):
+        with data_manager.get_connection() as conn:
+            conn.execute(
+                "UPDATE dishes SET created_at = '2020-01-01 00:00:00' WHERE dish_id = ?",
+                (seed_dish,),
+            )
+            conn.commit()
+        self._resave(seed_dish)
+        assert self._dish_row(seed_dish)["created_at"] == "2020-01-01 00:00:00"
+
+    def test_resave_preserves_unlisted_columns(self, client, seed_dish):
+        with data_manager.get_connection() as conn:
+            conn.execute(
+                "UPDATE dishes SET enclosure_in_beaker = 1 WHERE dish_id = ?",
+                (seed_dish,),
+            )
+            conn.commit()
+        self._resave(seed_dish)
+        assert self._dish_row(seed_dish)["enclosure_in_beaker"] == 1
+
+    def test_resave_applies_listed_columns(self, client, seed_dish):
+        self._resave(seed_dish, genotype="Tg(elavl3:jRGECO1b)")
+        assert self._dish_row(seed_dish)["genotype"] == "Tg(elavl3:jRGECO1b)"
+
+    def test_resave_keeps_child_rows(self, client, seed_dish):
+        fish_id = data_manager.create_fish_subject(dish_id=seed_dish)
+        unit_id = data_manager.create_housing_unit(
+            dish_id=seed_dish, position_label="upsert-test"
+        )
+        self._resave(seed_dish)
+        assert data_manager.get_fish_subject(fish_id)["dish_id"] == seed_dish
+        assert any(
+            u["unit_id"] == unit_id for u in data_manager.get_housing_units(seed_dish)
+        )
+
+
 class TestHousingUnitData:
     """data_manager housing unit methods."""
 

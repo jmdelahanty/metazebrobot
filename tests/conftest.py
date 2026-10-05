@@ -30,6 +30,7 @@ def tmp_db_path(tmp_path_factory) -> Path:
             species TEXT DEFAULT 'Danio rerio',
             sex TEXT DEFAULT 'unknown',
             date_created TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             status TEXT DEFAULT 'active',
             cross_id TEXT,

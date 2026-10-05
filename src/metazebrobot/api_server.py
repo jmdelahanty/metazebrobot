@@ -5551,11 +5551,21 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         # 1. Create parent dish
         with data_manager.get_connection() as conn:
             conn.execute(
-                """INSERT OR REPLACE INTO dishes
+                """INSERT INTO dishes
                    (dish_id, data, genotype, species, cross_id, status,
                     dish_population_type, date_created, dof, responsible,
                     fish_count, container_type, room)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(dish_id) DO UPDATE SET
+                   data = excluded.data, genotype = excluded.genotype,
+                   species = excluded.species, cross_id = excluded.cross_id,
+                   status = excluded.status,
+                   dish_population_type = excluded.dish_population_type,
+                   date_created = excluded.date_created, dof = excluded.dof,
+                   responsible = excluded.responsible,
+                   fish_count = excluded.fish_count,
+                   container_type = excluded.container_type,
+                   room = excluded.room""",
                 (
                     dish_id,
                     json.dumps({"dish_id": dish_id, "fish_count": 20}),
