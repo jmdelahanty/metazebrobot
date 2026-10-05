@@ -34,7 +34,7 @@
 - [x] Dorsal-view expression pattern images on screening form
 - [x] Offline fallback message when catalog unavailable
 - [x] Larger atlas-thumb CSS class for brain images
-- [x] Full-genotype reference image design documented in `docs/genotype_reference_images_design.md`
+- [x] Full-genotype reference image design documented in `docs/archive/genotype_reference_images_design.md`
 - [x] Genotype Reference panel reads curated exact-genotype PNG metadata
 - [x] Read-only References page lists curated exact-genotype references
 - [x] References page supports manual genotype reference PNG/JPEG upload

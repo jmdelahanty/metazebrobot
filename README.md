@@ -1,221 +1,168 @@
 # MetaZebrobot
 
-A laboratory inventory management system for zebrafish research materials and dishes.
+Colony and experiment metadata for zebrafish research: dishes, screening,
+daily care, individual fish, and the PyRAT crosses they came from, served to
+the acquisition and analysis tools that record and process experiments.
 
 ## Overview
 
 MetaZebrobot is meant to start tracking metadata for my work at Janelia in the Johnson and Ahrens labs. There's a lot more information we can use to better understand our fish behavior and neural data if we just simply look at them I think. So this is a project to integrate literally as much metadata about my projects as I can so every experiment is completely documented from the fish being born down to the fish being studied in a particular place, time, condition, etc...
 
-## Features
+## What it does today
 
-- **Agarose Solution Management**: Track agarose bottles and prepared solutions
-- **Fish Water Management**: Monitor fish water batches and derivatives
-- **Poly-L-Serine Management**: Track poly-l-serine bottles and aliquots
-- **Fish Dish Tracking**: Monitor experimental fish dishes with quality checks
-  and optional daily care images
-- **PyRAT API Integration**: Query tanks/crossings from PyRAT and enrich
-  crossing performance from authenticated frontend detail endpoints
+MetaZebrobot is a FastAPI web app (the main interface) plus an older PySide6
+desktop app, both backed by one SQLite database.
 
-## Project Structure
+**Web workflows** (page-by-page map: [`docs/web_pages.md`](docs/web_pages.md))
 
-The project follows a Model-View-Controller (MVC) architecture:
+- **Dishes**: create dishes from a PyRAT crossing (genotype, parents, dates and
+  background filled in automatically), edit counts, transfer fish between
+  dishes, terminate, and print QR-code labels that scanners can use to jump
+  straight to a dish.
+- **Screening**: log screening steps (indicators, pigment, counts, allocation
+  outcomes), split fish into derived dishes, and compare against parsed
+  transgene tags, mapzebrain atlas matches, and curated genotype reference
+  images (including composites generated from OME-TIFFs).
+- **Daily care**: feeding, water changes, mortality, and optional care images,
+  per dish or per well for well plates. Recorded deaths feed the current fish
+  count automatically.
+- **Individual fish**: register fish, assign them to wells or other housing
+  units, keep their occupancy history, and attach images.
+- **Lineage and provenance**: every transfer and split is recorded, so a dish's
+  full history back to its cross can be shown as a graph.
+- **PyRAT browsers**: open tanks with age warnings, and crossings with raised
+  counts and performance pulled from PyRAT.
+- **Guided tour**: a walkthrough that creates and then removes sample data.
+
+**Desktop app** (`metazebrobot` entry point): tabs for agarose, fish water,
+poly-L-serine, fish dishes, and PyRAT tanks/crossings. Most new work happens in
+the web app.
+
+## How it fits with other systems
+
+MetaZebrobot is the source of truth for dish and fish records. Other systems
+read from it rather than keeping their own copies:
+
+```mermaid
+flowchart LR
+    PyRAT[(PyRAT<br/>animal facility)] -->|crosses, tanks| MZ[MetaZebrobot]
+    MZ -->|dish + fish identity,<br/>snapshot at record start| Citrus[Citrus<br/>acquisition]
+    MZ -->|dish + fish identity| Orange[Orange<br/>acquisition]
+    MZ -->|re-read at intake| Palette[Palette<br/>processing]
+    Citrus -->|recordings| Palette
+    Orange -->|recordings| Palette
+```
+
+How dish and fish identity, record revisions, and the endpoints these systems
+use are defined: [`docs/zebrobot_snapshot.md`](docs/zebrobot_snapshot.md) and
+[`docs/identity_and_provenance_contract.md`](docs/identity_and_provenance_contract.md).
+
+## Running it
+
+The environment is managed with [Pixi](https://pixi.sh); run everything through
+`pixi run`.
+
+### Configuration
+
+Create a local `config.json` (see `config.example.json`) pointing at your SQLite
+database. It's user-specific and not committed. Uploaded images are stored on
+disk beside the database (`screening_images/`, `care_images/`, `fish_images/`,
+`dish_images/`), with filenames recorded in SQLite.
+
+### Web/API server
+
+```bash
+pixi run python -m metazebrobot.api_server --db-path /path/to/zebrobot.db --port 8000
+```
+
+Then open `http://127.0.0.1:8000/`. The server binds to localhost; add
+`--lab-network` only if you intentionally want other machines on the LAN to
+connect. The schema is created and migrated automatically on startup, so back
+up the database before running a new version against it.
+
+For a persistent install, `deploy/metazebrobot-api.service` is an example
+systemd unit (see [`API_SERVICE_GUIDE.md`](API_SERVICE_GUIDE.md), which also
+covers PyRAT credentials for systemd and an optional nginx front end).
+
+### Desktop app
+
+```bash
+pixi run metazebrobot
+```
+
+### Tests
+
+```bash
+pixi run python -m pytest
+```
+
+`tests/test_consumer_contract.py` is the API drift check. After an intentional,
+additive API change, regenerate the pinned schema with
+`pixi run python scripts/export_consumer_openapi.py` and commit it.
+
+## Design notes
+
+Design notes and reference docs in `docs/`, by topic:
+
+| Topic | Docs |
+|-------|------|
+| Identity, provenance, consumers | [`zebrobot_snapshot.md`](docs/zebrobot_snapshot.md), [`identity_and_provenance_contract.md`](docs/identity_and_provenance_contract.md), [`api/consumer_openapi.json`](docs/api/consumer_openapi.json) |
+| Fish, screening, counts | [`fish_count_and_screening_accuracy.md`](docs/fish_count_and_screening_accuracy.md), [`fish_tracking_api.md`](docs/fish_tracking_api.md), [`dish_lineage_graph.md`](docs/dish_lineage_graph.md) |
+| PyRAT and crosses | [`cross_parent_background_design.md`](docs/cross_parent_background_design.md), [`crossing_performance_caveats.md`](docs/crossing_performance_caveats.md), [`pyrat_cross_date_fields.md`](docs/pyrat_cross_date_fields.md), [`strain_parser_edge_cases.md`](docs/strain_parser_edge_cases.md) |
+| Web UI and data model | [`web_pages.md`](docs/web_pages.md), [`schema.sql`](docs/schema.sql) |
+
+What's planned next: [`docs/next_steps.md`](docs/next_steps.md).
+
+## Project structure
 
 ```
 metazebrobot/
-├── src/
-│   ├── metazebrobot/
-│   │   ├── cli.py                  # Application entry point
-│   │   ├── config/                 # Packaged JSON + image assets
-│   │   ├── models/                 # Data models
-│   │   ├── controllers/            # Business logic
-│   │   ├── views/                  # UI components
-│   │   ├── data/                   # Data access layer
-│   │   └── utils/                  # Utility functions
-├── bin/                            # Utility scripts
-├── docs/                           # Design notes and web/API documentation
-├── tests/                          # Test directory
-├── config.example.json             # Example user config
-├── pyrat_credentials_tool.py       # PyRAT credential setup / clear tool
-├── pyrat_query_tool.py             # PyRAT API tank query tool
-├── get_all_user_ids.py             # PyRAT user mapping tool
-└── migrate_to_nosql.py             # JSON -> SQLite migration
+├── src/metazebrobot/
+│   ├── api_server.py         # FastAPI web UI + JSON API
+│   ├── consumer_contract.py  # Pinned consumer API schema extraction
+│   ├── cli.py                # Desktop app entry point
+│   ├── templates/, static/   # Web UI (Jinja2 + HTMX)
+│   ├── models/               # Data models
+│   ├── controllers/          # Business logic
+│   ├── views/                # Desktop UI (PySide6)
+│   ├── data/                 # SQLite access layer and migrations
+│   ├── utils/                # PyRAT clients, strain parser, labels, ...
+│   └── config/               # Packaged JSON + image assets
+├── docs/                     # Design notes; docs/api/ holds the pinned API schema
+├── deploy/                   # systemd unit, nginx setup, backup scripts
+├── scripts/                  # Maintenance and inspection scripts
+├── tests/                    # pytest suite
+└── config.example.json       # Example user config
 ```
 
-## Installation
+## PyRAT integration
 
-### Prerequisites
+MetaZebrobot integrates with [PyRAT](https://www.scionics.com/pyrat.html), which Janelia relies on for animal management.
 
-- Python 3.11+
-- PySide6 (Qt for Python)
-- Pydantic
-- Rich (for console output)
-- Requests (for API integration)
-
-### Setup
-
-Docs for this will show up maybe one day. For now, I don't think anyone else would want to use this thing or rely on it. Frankly, people shouldn't! Its at your discretion...
-
-## Development
-
-### Running Tests
-
-Not currently doing, but want to add pytest at some point...
-
-```
-pytest
-```
-
-### PyRAT API Integration
-
-MetaZebrobot integrates with [PyRAT](https://www.scionics.com/pyrat.html), which Janelia relies on for animal management. The integration includes several features:
-
-#### Credential Setup
-
-Store PyRAT API tokens and optional frontend username/password in the system keyring:
+Store PyRAT API tokens (and optional frontend username/password, used for
+crossing performance details) in the system keyring:
 
 ```bash
-python pyrat_credentials_tool.py --setup-credentials
+pixi run python pyrat_credentials_tool.py --setup-credentials
 ```
 
-The query tool still supports `--setup-credentials`, but the dedicated credentials tool is now the primary setup path.
+For systemd deployments, credentials can instead come from environment
+variables (`PYRAT_BASE_URL`, `PYRAT_CLIENT_TOKEN`, `PYRAT_USER_TOKEN`, and
+optionally `PYRAT_FRONTEND_USERNAME` / `PYRAT_FRONTEND_PASSWORD`);
+`scripts/inspect_pyrat_keyring.py --env-format` prints stored keyring values in
+a format suitable for a protected `EnvironmentFile`.
 
-For systemd deployments, PyRAT credentials can also be provided through
-environment variables (`PYRAT_BASE_URL`, `PYRAT_CLIENT_TOKEN`,
-`PYRAT_USER_TOKEN`, and optionally `PYRAT_FRONTEND_USERNAME` /
-`PYRAT_FRONTEND_PASSWORD`). `scripts/inspect_pyrat_keyring.py --env-format`
-prints the stored keyring values in a format suitable for a protected
-`EnvironmentFile`.
+Standalone tools:
 
-#### Tank Query Tool
+- `pyrat_query_tool.py`: query tanks by responsible person, rack, status,
+  strain, or age; age-status reporting and JSON export.
+  `pixi run python pyrat_query_tool.py --responsible "delahantyj"`
+- `get_all_user_ids.py`: build the username → PyRAT user ID mapping used to
+  scope the web UI's PyRAT pages to the current user.
 
-The `pyrat_query_tool.py` script provides a flexible way to query the PyRAT API for tank information:
-
-```bash
-# Use stored credentials from the system keyring
-python pyrat_query_tool.py --responsible "delahantyj"
-
-# Get all tanks for a specific user
-python pyrat_query_tool.py --base-url "https://pyrataquatics.janelia.org/aquatic/" --client-token "client-token" --user-token "user-token" --responsible "delahantyj"
-
-# Get tanks in a specific rack
-python pyrat_query_tool.py --base-url "https://pyrataquatics.janelia.org/aquatic/" --client-token "client-token" --user-token "user-token" --rack "M08"
-
-# Filter by age
-python pyrat_query_tool.py --base-url "https://pyrataquatics.janelia.org/aquatic/" --client-token "client-token" --user-token "user-token" --min-age-days 90 --max-age-days 180
-
-# Save results to a JSON file
-python pyrat_query_tool.py --output tanks.json
-```
-
-Features:
-- **User Mapping**: Maintains a local cache of user ID mappings to avoid repeated lookups
-- **Age Analysis**: Calculates and categorizes tank ages (OK, WARNING, URGENT)
-- **Flexible Filtering**: Filter by responsible person, location, status, strain, and age
-- **Detailed Reporting**: Generates summary statistics and detailed tank listings
-- **Export**: Save query results as JSON for further analysis
-
-#### User ID Mapping Tool
-
-The `get_all_user_ids.py` script creates a mapping between usernames and user IDs:
-
-```bash
-python get_all_user_ids.py https://pyrataquatics.janelia.org/aquatic/ "client-token" "user-token" --output user_mapping.json
-```
-
-### Shoddy analysis notebook
+## Shoddy analysis notebook
 
 The analysis notebook is pretty bad, but its a start I guess. Density matters for fish health. We all knew this. The next steps are to integrate some things with freely swimming behavior batteries to monitor the fish health over time and use these metrics to choose fish for behavior in our rigs and under the scopes. I'm guessing, in the end, it won't actually offer much of a useful pre-screening beyond what we currently do (look at the dish and pick one that's swimming). But my interest in knowing what my animals are like before I plop them into a weird situation is strong and my stubbornness about doing things like this may be even stronger.
-
-### Adding New Features
-
-1. Create or update model classes in the `models` directory
-2. Implement business logic in the `controllers` directory
-3. Create UI components in the `views` directory
-4. Update the `main_window.py` to integrate new components
-
-## Configuration
-
-Create a local `config.json` (see `config.example.json`) to point the app at your
-SQLite database. This file is user-specific and should not be committed.
-
-## Web/API Server (FastAPI)
-
-The FastAPI server powers both the browser-based dish workflows and the JSON
-HTTP endpoints while the SQLite file stays local to the host.
-
-For local testing from this repo, use Pixi:
-
-```
-pixi run python -m metazebrobot.api_server --db-path ./zebrobot.db --port 8000
-```
-
-Then open:
-
-- `http://127.0.0.1:8000/`
-- `http://127.0.0.1:8000/dishes/new`
-- `http://127.0.0.1:8000/care/`
-- `http://127.0.0.1:8000/pyrat/crossings/`
-
-If you prefer a plain Python environment instead of Pixi:
-
-```
-python3 -m pip install -e . fastapi uvicorn
-METAZEBROBOT_DB_PATH=/path/to/zebrobot.db \
-python3 -m metazebrobot.api_server --port 8000
-```
-
-Add `--lab-network` only if you explicitly want other machines on the LAN to
-connect.
-
-Example routes:
-
-- `GET /`
-- `GET /dishes/new`
-- `GET /dishes/`
-- `GET /screening/`
-- `GET /care/`
-- `GET /fish/`
-- `GET /references/`
-- `GET /pyrat/tanks/`
-- `GET /pyrat/crossings/`
-- `GET /health`
-- `GET /dishes?status=active&limit=200&offset=0`
-- `GET /dishes/{dish_id}?include_checks=true`
-
-See `docs/web_pages.md` for the current page-by-page capability map.
-
-### systemd service (Ubuntu)
-
-An example unit file is provided at `deploy/metazebrobot-api.service`. Copy it to
-`/etc/systemd/system/`, edit the `User`, `WorkingDirectory`,
-`METAZEBROBOT_DB_PATH`, and `ExecStart` flags as needed, then enable it:
-
-```
-sudo cp deploy/metazebrobot-api.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now metazebrobot-api.service
-```
-
-The checked-in unit binds to `127.0.0.1`. If you intentionally want LAN access,
-update `ExecStart` to add `--lab-network`.
-
-## Data Structure
-
-The application uses a SQLite database (`zebrobot.db`) for core data:
-
-- **Dishes, crosses, materials, quality checks**: stored in SQLite tables
-- **JSON blobs** are retained in the DB for flexible record storage
-- **Uploaded images** are stored on disk beside the SQLite database
-  (`screening_images/`, `fish_images/`, `dish_images/`, `care_images/`) with
-  paths/filenames stored in SQLite
-- **PyRAT data** query results can still be exported to JSON for analysis
-
-The `migrate_to_nosql.py` script can migrate legacy JSON directories into the
-SQLite database.
-
-## License
-
-[MIT License](LICENSE)
 
 ## Contributors
 
