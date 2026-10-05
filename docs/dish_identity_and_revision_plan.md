@@ -1,6 +1,11 @@
 # Dish Identity and Record Revision Plan
 
-Status: implemented on branch `dish-identity-revision` (2026-10-05); not yet deployed.
+Status: **historical design record.** Implemented and deployed 2026-10-05
+(`main` at `aaad667`, production `/nvme1/zebrobot.db` migrated 15:55 EDT;
+pre-migration backup `/nvme1/zebrobot.db.backup.pre_dish_uuid_20261005_155159`).
+The current contract is `docs/zebrobot_snapshot.md` (meaning) and
+`docs/api/consumer_openapi.json` (shapes); if this document disagrees with
+them, they win.
 
 Goal: give consumers (Citrus, Orange via Palette) an immutable, globally
 unique handle for every dish, and a way to detect that a dish or fish record

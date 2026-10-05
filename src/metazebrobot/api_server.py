@@ -20,7 +20,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFi
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .controllers.fish_dish_controller import FishDishController
 from .data.data_manager import data_manager
@@ -201,6 +201,62 @@ class CitrusSnapshotResponse(BaseModel):
     sex: str = "unknown"
     line_strain: Optional[str] = None
     parents: List[CrossParentSnapshot] = Field(default_factory=list)
+
+
+class DishDetailResponse(BaseModel):
+    """Full dish row. Declares the identity fields consumers pin; every
+    other dishes column (and the parsed ``data`` JSON) passes through."""
+
+    model_config = ConfigDict(extra="allow")
+
+    dish_id: str
+    dish_uuid: Optional[str] = None
+    revision: Optional[int] = None
+    updated_at: Optional[str] = None
+    cross_id: Optional[str] = None
+    status: Optional[str] = None
+    dpf: Optional[int] = None
+
+
+class FishSubjectResponse(BaseModel):
+    fish_id: str
+    dish_id: str
+    dish_uuid: Optional[str] = None
+    subject_label: Optional[str] = None
+    sex: Optional[str] = None
+    genotype: Optional[str] = None
+    species: Optional[str] = None
+    created_at: Optional[str] = None
+    notes: Optional[str] = None
+    current_unit_id: Optional[str] = None
+    revision: Optional[int] = None
+    updated_at: Optional[str] = None
+
+
+class FishListResponse(BaseModel):
+    items: List[FishSubjectResponse] = Field(default_factory=list)
+
+
+class ApiErrorDetail(BaseModel):
+    """Structured error: ``error`` code plus identifiers or ``message``."""
+
+    model_config = ConfigDict(extra="allow")
+
+    error: str
+    message: Optional[str] = None
+
+
+class ApiErrorResponse(BaseModel):
+    detail: ApiErrorDetail
+
+
+_NOT_FOUND_RESPONSE = {
+    404: {"model": ApiErrorResponse, "description": "Record not found (dish_not_found / fish_not_found)"},
+}
+_DATABASE_ERROR_RESPONSE = {
+    503: {"model": ApiErrorResponse, "description": "Lookup failed (database_error)"},
+}
+_LOOKUP_ERROR_RESPONSES = {**_NOT_FOUND_RESPONSE, **_DATABASE_ERROR_RESPONSE}
 
 
 def _clean_optional(value: Optional[str]) -> Optional[str]:
@@ -3824,7 +3880,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         except sqlite3.Error as exc:
             raise _database_error(exc) from exc
 
-    @app.get("/acquisition/dishes", response_model=AcquisitionDishesResponse)
+    @app.get(
+        "/acquisition/dishes",
+        response_model=AcquisitionDishesResponse,
+        responses=_DATABASE_ERROR_RESPONSE,
+    )
     def list_acquisition_dishes(
         status: str = Query(default="active", pattern="^(active|inactive|all)$"),
         cross_id: Optional[str] = Query(default=None),
@@ -3995,7 +4055,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "items": items,
         }
 
-    @app.get("/dishes/{dish_id}/citrus-snapshot", response_model=CitrusSnapshotResponse)
+    @app.get(
+        "/dishes/{dish_id}/citrus-snapshot",
+        response_model=CitrusSnapshotResponse,
+        responses=_LOOKUP_ERROR_RESPONSES,
+    )
     def get_dish_citrus_snapshot(dish_id: str) -> Dict[str, Any]:
         """Return a no-PII dish/cross snapshot for Citrus H5 metadata."""
         db_path = _require_db_path()
@@ -4109,14 +4173,22 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         except sqlite3.Error as exc:
             raise _database_error(exc) from exc
 
-    @app.get("/dishes/by-uuid/{dish_uuid}")
+    @app.get(
+        "/dishes/by-uuid/{dish_uuid}",
+        response_model=DishDetailResponse,
+        responses=_LOOKUP_ERROR_RESPONSES,
+    )
     def get_dish_by_uuid_api(
         dish_uuid: str,
         include_checks: bool = Query(default=False),
     ) -> Dict[str, Any]:
         return _load_dish_detail("dish_uuid", dish_uuid, include_checks)
 
-    @app.get("/dishes/{dish_id}")
+    @app.get(
+        "/dishes/{dish_id}",
+        response_model=DishDetailResponse,
+        responses=_LOOKUP_ERROR_RESPONSES,
+    )
     def get_dish_api(
         dish_id: str,
         include_checks: bool = Query(default=False),
@@ -5074,7 +5146,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     # Fish subject tracking
     # ------------------------------------------------------------------
 
-    @app.get("/dishes/{dish_id}/fish")
+    @app.get(
+        "/dishes/{dish_id}/fish",
+        response_model=FishListResponse,
+        responses=_LOOKUP_ERROR_RESPONSES,
+    )
     def list_fish_for_dish(dish_id: str) -> Dict[str, Any]:
         """List all fish subjects registered to a dish."""
         db_path = _require_db_path()
@@ -5119,7 +5195,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         fish = data_manager.get_fish_subject(fish_id)
         return fish
 
-    @app.get("/fish/{fish_id}")
+    @app.get(
+        "/fish/{fish_id}",
+        response_model=FishSubjectResponse,
+        responses=_LOOKUP_ERROR_RESPONSES,
+    )
     def get_fish(fish_id: str) -> Dict[str, Any]:
         """Fetch a single fish subject by UUID."""
         _require_db_path()

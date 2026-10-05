@@ -118,6 +118,30 @@ should be retried. A connection failure (service down or tunnel closed) has
 no HTTP status. When recording a failed lookup, keep the HTTP status and
 `detail.error` (if present) in the snapshot `errors[]` entry.
 
+## Contract and stability
+
+This document is the single source for what the consumer-facing fields mean.
+Field-level shapes are generated from the code, not written by hand:
+
+- `docs/api/consumer_openapi.json`: the OpenAPI slice for
+  `/dishes/{dish_id}/citrus-snapshot`, `/acquisition/dishes`,
+  `/dishes/{dish_id}`, `/dishes/by-uuid/{dish_uuid}`,
+  `/dishes/{dish_id}/fish`, and `/fish/{fish_id}`, including their
+  404/503 error models.
+- `tests/test_consumer_contract.py` fails if the code and that file
+  disagree, and asserts the identity fields explicitly.
+- `pixi run python scripts/export_consumer_openapi.py --check` verifies it
+  and prints its sha256. Downstream contracts pin a MetaZebrobot commit plus
+  this digest instead of copying field lists.
+
+Stability promise for response `schema_version` 2:
+
+- Changes are additive only (new optional fields).
+- Removing, renaming, or changing the meaning or type of an existing field,
+  or changing the error shape, ships as a new `schema_version`, never as an
+  edit to v2.
+- `dish_uuid` and `fish_id` never change for a given record.
+
 ## Snapshot JSON schema (required fields)
 
 Store a single JSON object with the following fields:

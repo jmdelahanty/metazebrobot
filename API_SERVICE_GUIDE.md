@@ -215,9 +215,8 @@ Key settings:
 | `/crosses` | GET | List crosses (params: has_active_dishes, limit, offset) |
 | `/crosses/{cross_id}` | GET | Get single cross (param: include_dishes) |
 
-JSON dish and fish responses include `dish_uuid`, `revision`, and
-`updated_at`. JSON read errors use `{"detail": {"error": "dish_not_found" |
-"fish_not_found" | "database_error", ...}}`. See
-`docs/zebrobot_snapshot.md` (Identity and change detection, API errors).
+Consumer-facing JSON endpoints (Citrus, Orange, Palette) are pinned in
+`docs/api/consumer_openapi.json`; their meaning is documented in
+`docs/zebrobot_snapshot.md`.
 
 See `docs/web_pages.md` for a page-by-page capability map.
