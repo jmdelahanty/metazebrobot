@@ -17,7 +17,11 @@ from metazebrobot.api_server import (
     _screening_indicator_suggestions,
     _upsert_cross_parent_provenance,
 )
-from metazebrobot.utils.cross_provenance import normalize_cross_children, parse_parent_background
+from metazebrobot.utils.cross_provenance import (
+    normalize_cross_children,
+    parse_parent_background,
+    summarize_cross_background,
+)
 
 
 class TestNaturalSortKey:
@@ -279,9 +283,27 @@ class TestCrossParentProvenance:
 
         assert count == 2
         assert summary["background_summary"] == "WIK + Casper_HHMI + casper"
-        assert summary["has_mixed_background"] == 1
+        # casper on a WIK background is not a mix of wild-type backgrounds
+        assert summary["has_mixed_background"] == 0
         assert display["parents"][0]["generation"] == "F1"
         assert display["summary"]["background_strains"] == ["WIK"]
+
+
+class TestMixedBackground:
+    def test_two_wild_type_backgrounds_are_mixed(self):
+        rows = [
+            {"parsed_background_strains": ["AB"], "parsed_mutant_alleles": ["casper"]},
+            {"parsed_background_strains": ["WIK"]},
+        ]
+        assert summarize_cross_background(rows)["has_mixed_background"] is True
+
+    def test_casper_on_one_background_is_not_mixed(self):
+        rows = [
+            {"parsed_background_strains": ["AB"], "parsed_line_labels": ["Casper_HHMI"],
+             "parsed_mutant_alleles": ["casper"]},
+            {"parsed_background_strains": []},
+        ]
+        assert summarize_cross_background(rows)["has_mixed_background"] is False
 
 
 class TestCrossChildren:
@@ -354,6 +376,17 @@ class TestCrossChildren:
         only_children = {"crossing_id": 17697, "tanks": {"children": self.PAYLOAD["tanks"]["children"]}}
         _upsert_cross_parent_provenance(conn, "17697", only_children)
         assert len(self._children(conn)) == 2
+
+    def test_backfill_corrects_old_mixed_flags(self):
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO cross_background_summaries (cross_id, background_strains, has_mixed_background) "
+            "VALUES ('1', '[\"AB\"]', 1), ('2', '[\"AB\", \"WIK\"]', 0)"
+        )
+        _backfill_cross_parent_provenance(conn)
+        flags = dict(conn.execute(
+            "SELECT cross_id, has_mixed_background FROM cross_background_summaries").fetchall())
+        assert flags == {"1": 0, "2": 1}
 
     def test_backfill_indexes_children_for_already_processed_crosses(self):
         conn = self._conn()

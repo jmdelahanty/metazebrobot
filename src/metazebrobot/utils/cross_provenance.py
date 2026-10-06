@@ -192,5 +192,7 @@ def summarize_cross_background(parent_rows: List[Dict[str, Any]]) -> Dict[str, A
         "line_labels": line_labels,
         "mutant_backgrounds": mutant_backgrounds,
         "transgenes": transgenes,
-        "has_mixed_background": len(backgrounds) > 1 or bool(backgrounds and (line_labels or mutant_backgrounds)),
+        # Mixed means more than one wild-type background (e.g. AB x WIK). A
+        # pigment mutant such as casper on an AB background is not a mix.
+        "has_mixed_background": len(backgrounds) > 1,
     }

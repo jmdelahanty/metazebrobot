@@ -2686,6 +2686,54 @@ class TestCrossLevelFish:
         assert "Casper_HHMI" in page_resp.text
         assert f'href="/crosses/{cross_id}/lineage/"' in page_resp.text
 
+    def test_cross_provenance_shows_record_derived_parent_heritage(self, client):
+        import metazebrobot.api_server as api_server
+
+        target = f"{90000 + uuid.uuid4().int % 9000}"
+        producing = str(int(target) + 1)
+        api_server._cache_cross_rows([
+            {
+                "crossing_id": producing,
+                "date_of_set_up": "2025-12-22T08:00:00",
+                "tanks": {
+                    "parents": [
+                        {"tank_id": 6485, "strain_name": "AB Casper_HHMI", "strain_id": 14},
+                        {"tank_id": 6486, "strain_name": "AB Casper_HHMI", "strain_id": 14},
+                    ],
+                    "children": [
+                        {"tank_id": 8130, "strain_name": "Casper_HHMI [AB-C] DEC25",
+                         "strain_id": 1532, "date_of_birth": "2025-12-23T00:00:00"},
+                    ],
+                },
+            },
+            {
+                "crossing_id": target,
+                "date_of_set_up": "2026-09-27T08:07:28",
+                "strain_name": "Tg(gfap:b-ARK)",
+                "tanks": {
+                    "parents": [
+                        {"tank_id": 8130, "strain_name": "Casper_HHMI [AB-C] DEC25",
+                         "number_of_female": 2, "generation": "F1", "strain_id": 1532},
+                        {"tank_id": 6728, "strain_name": "Tg(gfap:b-ARK)",
+                         "number_of_male": 2, "generation": "F3", "strain_id": 786},
+                    ],
+                },
+            },
+        ])
+
+        payload = client.get(f"/crosses/{target}/provenance").json()
+        female = payload["parents"][0]["heritage"]
+        assert female["producing_cross"]["cross_id"] == producing
+        assert female["producing_cross"]["cross_type"] == "incross"
+        assert [b["value"] for b in payload["parent_provenance"]["background_from_parentage"]] == ["AB", "casper"]
+        assert payload["parents"][1]["heritage"]["producing_cross"] is None
+
+        page = client.get(f"/crosses/{target}/provenance/").text
+        assert "Background from parentage" in page
+        assert f'href="/crosses/{producing}/provenance/"' in page
+        assert "incross" in page
+        assert "2025-12-23" in page
+
     def test_cross_api_serves_cached_cross_without_pyrat(self, client, seed_cross_dishes, monkeypatch):
         import metazebrobot.api_server as api_server
 

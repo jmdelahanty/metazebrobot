@@ -52,6 +52,7 @@ from .utils.cross_provenance import (
     normalize_cross_parents,
     summarize_cross_background,
 )
+from .utils.tank_heritage import derive_tank_heritage
 
 logger = logging.getLogger(__name__)
 
@@ -1433,6 +1434,15 @@ def _upsert_cross_children(
 def _backfill_cross_parent_provenance(conn: sqlite3.Connection) -> Tuple[int, int]:
     """Populate parent provenance tables from already-cached crosses.data."""
     _ensure_cross_parent_provenance_schema(conn)
+    # "Mixed" means more than one wild-type background; rows summarized before
+    # that rule (casper on one background counted as mixed) are corrected here.
+    conn.execute("""
+        UPDATE cross_background_summaries
+        SET has_mixed_background = CASE
+            WHEN json_array_length(COALESCE(background_strains, '[]')) > 1 THEN 1 ELSE 0 END
+        WHERE has_mixed_background IS NOT
+            (CASE WHEN json_array_length(COALESCE(background_strains, '[]')) > 1 THEN 1 ELSE 0 END)
+    """)
     try:
         rows = conn.execute("SELECT cross_id, data FROM crosses").fetchall()
     except sqlite3.OperationalError:
@@ -1641,7 +1651,16 @@ def _load_cross_parent_provenance(conn: sqlite3.Connection, cross_id: str) -> Di
             "line_labels": _json_list(row["parsed_line_labels"]),
             "mutant_backgrounds": _json_list(row["parsed_mutant_alleles"]),
             "confidence": row["confidence"],
+            "heritage": derive_tank_heritage(conn, row["tank_id"]) if row["tank_id"] else None,
         })
+
+    # Backgrounds the parents' own origins prove (records only, no labels).
+    from_parentage: Dict[str, List[str]] = {}
+    for parent in parents:
+        heritage = parent.get("heritage") or {}
+        for item in heritage.get("backgrounds", []) + heritage.get("mutant_backgrounds", []):
+            sources = from_parentage.setdefault(item["value"], [])
+            sources.extend(src for src in item["sources"] if src not in sources)
 
     summary = None
     if summary_row:
@@ -1653,7 +1672,14 @@ def _load_cross_parent_provenance(conn: sqlite3.Connection, cross_id: str) -> Di
             "has_mixed_background": bool(summary_row["has_mixed_background"]),
         }
 
-    return {"parents": parents, "summary": summary}
+    return {
+        "parents": parents,
+        "summary": summary,
+        "background_from_parentage": [
+            {"value": value, "sources": sources}
+            for value, sources in sorted(from_parentage.items())
+        ],
+    }
 
 
 def _load_cross_prefill(

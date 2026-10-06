@@ -39,7 +39,17 @@
     {% if background_summary %}
     <table>
         <tbody>
-            <tr><th>Summary</th><td>{{ background_summary.background_summary or "raw" }}</td></tr>
+            {% set from_parentage = parent_provenance.background_from_parentage if parent_provenance else [] %}
+            <tr>
+                <th>Background from parentage</th>
+                <td>
+                    {% if from_parentage %}
+                    {% for item in from_parentage %}<span title="{{ item.sources | join('; ') }}">{{ item.value }}</span>{% if not loop.last %}, {% endif %}{% endfor %}
+                    <br><small>Derived from the crosses that produced each parent tank.</small>
+                    {% else %}-{% endif %}
+                </td>
+            </tr>
+            <tr><th>From strain names</th><td>{{ background_summary.background_summary or "raw" }}</td></tr>
             <tr><th>Backgrounds</th><td>{{ background_summary.background_strains | join(", ") if background_summary.background_strains else "-" }}</td></tr>
             <tr><th>Line Labels</th><td>{{ background_summary.line_labels | join(", ") if background_summary.line_labels else "-" }}</td></tr>
             <tr><th>Mutant Backgrounds</th><td>{{ background_summary.mutant_backgrounds | join(", ") if background_summary.mutant_backgrounds else "-" }}</td></tr>
@@ -62,8 +72,11 @@
                 <th>Tank</th>
                 <th>Strain</th>
                 <th>Generation</th>
-                <th>Parsed Background</th>
-                <th>Confidence</th>
+                <th>Born</th>
+                <th>From cross</th>
+                <th>Background (records)</th>
+                <th>From name only</th>
+                <th>Label check</th>
             </tr>
         </thead>
         <tbody>
@@ -74,14 +87,28 @@
                 <td>{{ parent.location_display or parent.tank_label or parent.tank_id or "-" }}</td>
                 <td>{{ parent.raw_strain_name or "-" }}</td>
                 <td>{{ parent.generation or "-" }}</td>
+                {% set h = parent.heritage or {} %}
+                {% set pc = h.producing_cross %}
+                <td>{{ (h.tank or {}).date_of_birth[:10] if (h.tank or {}).date_of_birth else "-" }}</td>
                 <td>
-                    {% set pieces = [] %}
-                    {% for item in parent.background_strains or [] %}{% set _ = pieces.append(item) %}{% endfor %}
-                    {% for item in parent.line_labels or [] %}{% set _ = pieces.append(item) %}{% endfor %}
-                    {% for item in parent.mutant_backgrounds or [] %}{% set _ = pieces.append(item) %}{% endfor %}
-                    {{ pieces | join(", ") if pieces else "raw" }}
+                    {% if pc %}
+                    <a href="/crosses/{{ pc.cross_id }}/provenance/">{{ pc.cross_id }}</a>
+                    {% if pc.cross_type %}<br><small>{{ pc.cross_type }}</small>{% endif %}
+                    {% else %}<small>not found</small>{% endif %}
                 </td>
-                <td>{{ parent.confidence or "raw" }}</td>
+                <td>
+                    {% set derived = (h.backgrounds or []) + (h.mutant_backgrounds or []) %}
+                    {% if derived %}{% for item in derived %}<span title="{{ item.sources | join('; ') }}">{{ item.value }}</span>{% if not loop.last %}, {% endif %}{% endfor %}{% else %}-{% endif %}
+                </td>
+                <td>
+                    {% set named = ((h.name_only or {}).backgrounds or []) + ((h.name_only or {}).mutant_backgrounds or []) %}
+                    {{ named | join(", ") if named else "-" }}
+                </td>
+                <td>
+                    {% if h.flags %}<span title="{{ h.flags | join('; ') }}">⚠ {{ h.flags | length }} mismatch{{ "es" if h.flags | length > 1 }}</span>
+                    {% elif h.label %}{% set checked = (h.label_checks or {}).values() | select("sameas", true) | list %}{{ "✓ matches records" if checked else "not checkable" }}
+                    {% else %}-{% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
