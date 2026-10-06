@@ -154,6 +154,14 @@ uses the derived values instead of parsing names only.
 
 ## Open questions
 
+- *Danionella* and bracketed line tags (2026-10-06). `WT D. cerebrum [Utah]`,
+  `WT D. translucida`, `WT D. dracula`, and tags such as `[Parisian]` on
+  `Tg(HuC:H2B-GCaMP6s) [Parisian]` currently yield no background: the
+  vocabulary is zebrafish-only (AB, WIK, casper, ...). What `[Utah]` and
+  `[Parisian]` denote is not yet known; until it is, these stay unparsed
+  rather than guessed. They are most of the parent tanks left without any
+  background after records and strain ancestry.
+
 - Window and frequency for the all-owner crossing sync (PyRAT load vs.
   completeness).
 - Whether sibling vs. unrelated incrosses matter (tank lineage can tell; strain

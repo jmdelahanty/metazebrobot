@@ -53,6 +53,7 @@ from .utils.cross_provenance import (
     summarize_cross_background,
 )
 from .utils.tank_heritage import derive_tank_heritage
+from .utils.strain_ancestry import ensure_strain_ancestry_schema
 from .utils.tank_origins import ensure_tank_origins_schema
 
 logger = logging.getLogger(__name__)
@@ -1310,6 +1311,7 @@ def _ensure_cross_parent_provenance_schema(conn: sqlite3.Connection) -> None:
         ON cross_children(tank_id)
     """)
     ensure_tank_origins_schema(conn)
+    ensure_strain_ancestry_schema(conn)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS cross_background_summaries (
             cross_id TEXT PRIMARY KEY,
@@ -1674,9 +1676,25 @@ def _load_cross_parent_provenance(conn: sqlite3.Connection, cross_id: str) -> Di
             "has_mixed_background": bool(summary_row["has_mixed_background"]),
         }
 
+    # Inferred only where records were silent: strain ancestry, then names.
+    inferred: Dict[str, List[str]] = {}
+    for parent in parents:
+        heritage = parent.get("heritage") or {}
+        ancestry = heritage.get("strain_ancestry") or {}
+        for item in ancestry.get("backgrounds", []) + ancestry.get("mutant_backgrounds", []):
+            if item["value"] not in from_parentage:
+                inferred.setdefault(item["value"], []).append("strain ancestry")
+        name_only = heritage.get("name_only") or {}
+        for value in name_only.get("backgrounds", []) + name_only.get("mutant_backgrounds", []):
+            if value not in from_parentage and "strain name" not in inferred.get(value, []):
+                inferred.setdefault(value, []).append("strain name")
+
     return {
         "parents": parents,
         "summary": summary,
+        "inferred_background": [
+            {"value": value, "sources": sources} for value, sources in sorted(inferred.items())
+        ],
         "background_from_parentage": [
             {"value": value, "sources": sources}
             for value, sources in sorted(from_parentage.items())

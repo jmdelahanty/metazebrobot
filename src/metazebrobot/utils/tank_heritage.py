@@ -18,6 +18,7 @@ import sqlite3
 from typing import Any, Dict, List, Optional
 
 from .cross_provenance import parse_parent_background
+from .strain_ancestry import strain_ancestry_backgrounds
 from .tank_origins import origin_chain
 
 MAX_GENERATIONS = 4
@@ -206,6 +207,14 @@ def derive_tank_heritage(conn: sqlite3.Connection, tank_id: Any) -> Dict[str, An
     generations_traced = 0
     if producing:
         generations_traced = _collect_ancestry(conn, producing, 1, backgrounds, mutants, set())
+    # Last resort, still kept apart from records: what the strain's PyRAT
+    # pedigree names as ancestors (cached by scripts/resolve_strain_ancestry.py).
+    ancestry = {"fetched": False, "backgrounds": [], "mutant_backgrounds": []}
+    if tank.get("strain_id") is not None:
+        ancestry = strain_ancestry_backgrounds(conn, tank["strain_id"])
+        ancestry["backgrounds"] = [b for b in ancestry["backgrounds"] if b["value"] not in backgrounds]
+        ancestry["mutant_backgrounds"] = [
+            m for m in ancestry["mutant_backgrounds"] if m["value"] not in mutants]
     own = parse_parent_background(tank.get("strain_name") or "")
     name_only = {
         "backgrounds": sorted(set(own["background_strains"]) - set(backgrounds)),
@@ -247,6 +256,7 @@ def derive_tank_heritage(conn: sqlite3.Connection, tank_id: Any) -> Dict[str, An
         "backgrounds": [{"value": k, "sources": v} for k, v in sorted(backgrounds.items())],
         "mutant_backgrounds": [{"value": k, "sources": v} for k, v in sorted(mutants.items())],
         "generations_traced": generations_traced,
+        "strain_ancestry": ancestry,
         "name_only": name_only,
         "label": label,
         "label_checks": checks,

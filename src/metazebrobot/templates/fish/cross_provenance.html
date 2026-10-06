@@ -49,6 +49,15 @@
                     {% else %}-{% endif %}
                 </td>
             </tr>
+            {% set inferred = parent_provenance.inferred_background if parent_provenance else [] %}
+            {% if inferred %}
+            <tr>
+                <th>Inferred (not from records)</th>
+                <td>
+                    {% for item in inferred %}{{ item.value }} <small>({{ item.sources | join(", ") }})</small>{% if not loop.last %}, {% endif %}{% endfor %}
+                </td>
+            </tr>
+            {% endif %}
             <tr><th>From strain names</th><td>{{ background_summary.background_summary or "raw" }}</td></tr>
             <tr><th>Backgrounds</th><td>{{ background_summary.background_strains | join(", ") if background_summary.background_strains else "-" }}</td></tr>
             <tr><th>Line Labels</th><td>{{ background_summary.line_labels | join(", ") if background_summary.line_labels else "-" }}</td></tr>
@@ -75,7 +84,7 @@
                 <th>Born</th>
                 <th>From cross</th>
                 <th>Background (records)</th>
-                <th>From name only</th>
+                <th>Inferred</th>
                 <th>Label check</th>
             </tr>
         </thead>
@@ -101,8 +110,12 @@
                     {% if derived %}{% for item in derived %}<span title="{{ item.sources | join('; ') }}">{{ item.value }}</span>{% if not loop.last %}, {% endif %}{% endfor %}{% else %}-{% endif %}
                 </td>
                 <td>
+                    {% set anc = h.strain_ancestry or {} %}
+                    {% set from_ancestry = (anc.backgrounds or []) + (anc.mutant_backgrounds or []) %}
                     {% set named = ((h.name_only or {}).backgrounds or []) + ((h.name_only or {}).mutant_backgrounds or []) %}
-                    {{ named | join(", ") if named else "-" }}
+                    {% for item in from_ancestry %}<span title="{{ item.sources | join('; ') }}">{{ item.value }}</span> <small>(strain ancestry)</small>{% if not loop.last or named %}, {% endif %}{% endfor %}
+                    {% for value in named %}{% if value not in from_ancestry | map(attribute="value") | list %}{{ value }} <small>(name)</small>{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}
+                    {% if not from_ancestry and not named %}-{% endif %}
                 </td>
                 <td>
                     {% if h.flags %}<span title="{{ h.flags | join('; ') }}">⚠ {{ h.flags | length }} mismatch{{ "es" if h.flags | length > 1 }}</span>
