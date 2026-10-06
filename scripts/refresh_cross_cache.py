@@ -22,13 +22,9 @@ Back up the database first, or point --db-path at a copy to preview.
 import argparse
 import sqlite3
 import sys
-import time
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Dict, List
-
-import requests
-import urllib3
+from typing import Any, Dict
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -40,61 +36,8 @@ from metazebrobot.api_server import (  # noqa: E402
     _ensure_cross_parent_provenance_schema,
 )
 from metazebrobot.data.data_manager import data_manager  # noqa: E402
-from metazebrobot.utils.pyrat_credentials import get_pyrat_api_credentials  # noqa: E402
-
-BATCH_SIZE = 50
-PAGE_SIZE = 200
-
-
-class PyratCrossings:
-    def __init__(self, pause: float):
-        credentials = get_pyrat_api_credentials()
-        if not credentials:
-            raise SystemExit("PyRAT API credentials are not configured.")
-        self.url = f"{credentials['base_url']}api/v3/tanks/crossings"
-        self.auth = (credentials["client_token"], credentials["user_token"])
-        self.pause = pause
-        self.requests = 0
-
-    def get(self, params: Dict[str, Any]) -> requests.Response:
-        if self.requests:
-            time.sleep(self.pause)
-        self.requests += 1
-        response = requests.get(
-            self.url,
-            auth=self.auth,
-            headers={"Accept": "application/json"},
-            params={"k": CROSSING_FIELDS, "tk": CROSSING_TANK_FIELDS, **params},
-            verify=False,
-            timeout=60,
-        )
-        response.raise_for_status()
-        return response
-
-    def by_ids(self, crossing_ids: List[int]) -> List[Dict[str, Any]]:
-        crossings: List[Dict[str, Any]] = []
-        for start in range(0, len(crossing_ids), BATCH_SIZE):
-            batch = crossing_ids[start:start + BATCH_SIZE]
-            crossings.extend(self.get({"crossing_id": batch, "l": len(batch)}).json())
-        return crossings
-
-    def recorded_since(self, since: date) -> List[Dict[str, Any]]:
-        crossings: List[Dict[str, Any]] = []
-        offset = 0
-        while True:
-            response = self.get({
-                "date_of_record_from": since.isoformat(),
-                "s": ["crossing_id:asc"],
-                "l": PAGE_SIZE,
-                "o": offset,
-            })
-            page = response.json()
-            crossings.extend(page)
-            total = int(response.headers.get("X-Total-Count") or 0)
-            offset += len(page)
-            if not page or offset >= total:
-                return crossings
-
+from metazebrobot.utils.pyrat_api_client import PAGE_SIZE, PyratApiClient  # noqa: E402
+from metazebrobot.utils.tank_origins import record_search_days  # noqa: E402
 
 def counts(conn: sqlite3.Connection) -> Dict[str, int]:
     q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
@@ -121,7 +64,6 @@ def main() -> int:
     if not args.refetch_cached and not args.sync_months:
         parser.error("choose --refetch-cached and/or --sync-months N")
 
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     data_manager.database_path = Path(args.db_path)
     with data_manager.get_connection() as conn:
         _ensure_cross_parent_provenance_schema(conn)
@@ -130,15 +72,15 @@ def main() -> int:
         cached_ids = sorted(int(r[0]) for r in conn.execute("SELECT cross_id FROM crosses")
                             if str(r[0]).isdigit())
 
-    pyrat = PyratCrossings(pause=args.pause)
+    pyrat = PyratApiClient(CROSSING_FIELDS, CROSSING_TANK_FIELDS, pause=args.pause)
     fetched: Dict[Any, Dict[str, Any]] = {}
     if args.refetch_cached:
-        for crossing in pyrat.by_ids(cached_ids):
+        for crossing in pyrat.crossings_by_ids(cached_ids):
             fetched[crossing.get("crossing_id")] = crossing
         print(f"Re-fetched {len(fetched)} of {len(cached_ids)} cached crossings")
     if args.sync_months:
         since = date.today() - timedelta(days=round(args.sync_months * 30.44))
-        window = pyrat.recorded_since(since)
+        window = pyrat.crossings_recorded(since)
         print(f"Fetched {len(window)} crossings recorded since {since} (all owners)")
         for crossing in window:
             fetched[crossing.get("crossing_id")] = crossing
@@ -148,6 +90,10 @@ def main() -> int:
         _cache_cross_rows(rows[start:start + PAGE_SIZE])
 
     with data_manager.get_connection() as conn:
+        if args.sync_months:
+            # Later targeted searches (resolve_tank_origins) skip these days.
+            record_search_days(conn, since, date.today())
+            conn.commit()
         after = counts(conn)
     print(f"PyRAT requests: {pyrat.requests}")
     print(f"{'':22}{'before':>8}{'after':>8}")

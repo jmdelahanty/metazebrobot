@@ -18,6 +18,9 @@ import sqlite3
 from typing import Any, Dict, List, Optional
 
 from .cross_provenance import parse_parent_background
+from .tank_origins import origin_chain
+
+MAX_GENERATIONS = 4
 
 MONTHS = {
     "JAN": "01", "FEB": "02", "MAR": "03", "APR": "04", "MAY": "05", "JUN": "06",
@@ -96,11 +99,13 @@ def _cohort_month(date_of_birth: Optional[str]) -> Optional[str]:
 
 
 def _producing_cross(conn: sqlite3.Connection, tank_id: str) -> Optional[Dict[str, Any]]:
+    """The cross that produced a tank's fish, following recorded splits."""
+    chain = origin_chain(conn, tank_id)
     row = conn.execute(
         "SELECT c.cross_id, x.data FROM cross_children c "
         "LEFT JOIN crosses x ON x.cross_id = c.cross_id "
         "WHERE c.tank_id = ? ORDER BY c.updated_at DESC LIMIT 1",
-        (tank_id,),
+        (chain["origin_tank_id"],),
     ).fetchone()
     if not row:
         return None
@@ -134,6 +139,8 @@ def _producing_cross(conn: sqlite3.Connection, tank_id: str) -> Optional[Dict[st
         "date_of_set_up": data.get("date_of_set_up"),
         "parents": parents,
         "cross_type": cross_type,
+        "origin_tank_id": chain["origin_tank_id"],
+        "via_splits": chain["splits"],
     }
 
 
@@ -144,11 +151,51 @@ def _add(found: Dict[str, List[str]], values: List[str], source: str) -> None:
             sources.append(source)
 
 
+def _collect_ancestry(
+    conn: sqlite3.Connection,
+    producing: Dict[str, Any],
+    generation: int,
+    backgrounds: Dict[str, List[str]],
+    mutants: Dict[str, List[str]],
+    seen_crosses: set,
+) -> int:
+    """Add parents' backgrounds, then their producing crosses', up to MAX_GENERATIONS.
+
+    Returns how many generations back the walk reached.
+    """
+    if producing["cross_id"] in seen_crosses:
+        return generation - 1
+    seen_crosses.add(producing["cross_id"])
+    if generation == 1:
+        source = f"parents in cross {producing['cross_id']}"
+    else:
+        source = f"generation {generation} (cross {producing['cross_id']})"
+    deepest = generation
+    for parent in producing["parents"]:
+        _add(backgrounds, parent["background_strains"], source)
+        _add(mutants, parent["mutant_backgrounds"], source)
+        if generation < MAX_GENERATIONS and parent["tank_id"]:
+            earlier = _producing_cross(conn, str(parent["tank_id"]))
+            if earlier:
+                deepest = max(deepest, _collect_ancestry(
+                    conn, earlier, generation + 1, backgrounds, mutants, seen_crosses))
+    return deepest
+
+
 def derive_tank_heritage(conn: sqlite3.Connection, tank_id: Any) -> Dict[str, Any]:
-    """Heritage for one tank, one generation deep, from the cache only."""
+    """Heritage for one tank from the cache only (no PyRAT calls)."""
     tank_id = str(tank_id)
     tank = _tank_record(conn, tank_id)
     producing = _producing_cross(conn, tank_id)
+    if "date_of_birth" not in tank:
+        try:
+            row = conn.execute(
+                "SELECT date_of_birth FROM tank_origins WHERE tank_id = ?", (tank_id,)
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = None
+        if row and row["date_of_birth"]:
+            tank["date_of_birth"] = row["date_of_birth"]
     label = parse_strain_label(tank.get("strain_name"))
 
     # Record-derived values (parents of the producing cross) are the answer.
@@ -156,11 +203,9 @@ def derive_tank_heritage(conn: sqlite3.Connection, tank_id: Any) -> Dict[str, An
     # cohorts *is* the label -- are kept separate and never merged in.
     backgrounds: Dict[str, List[str]] = {}
     mutants: Dict[str, List[str]] = {}
+    generations_traced = 0
     if producing:
-        source = f"parents in cross {producing['cross_id']}"
-        for parent in producing["parents"]:
-            _add(backgrounds, parent["background_strains"], source)
-            _add(mutants, parent["mutant_backgrounds"], source)
+        generations_traced = _collect_ancestry(conn, producing, 1, backgrounds, mutants, set())
     own = parse_parent_background(tank.get("strain_name") or "")
     name_only = {
         "backgrounds": sorted(set(own["background_strains"]) - set(backgrounds)),
@@ -201,6 +246,7 @@ def derive_tank_heritage(conn: sqlite3.Connection, tank_id: Any) -> Dict[str, An
         "producing_cross": producing,
         "backgrounds": [{"value": k, "sources": v} for k, v in sorted(backgrounds.items())],
         "mutant_backgrounds": [{"value": k, "sources": v} for k, v in sorted(mutants.items())],
+        "generations_traced": generations_traced,
         "name_only": name_only,
         "label": label,
         "label_checks": checks,

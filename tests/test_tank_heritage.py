@@ -89,7 +89,11 @@ class TestDeriveTankHeritage:
         assert h["producing_cross"]["cross_type"] == "incross"
         assert h["cohort_month"] == "2026-03"
         assert [b["value"] for b in h["backgrounds"]] == ["AB"]
-        assert h["backgrounds"][0]["sources"] == ["parents in cross 17697"]
+        assert h["backgrounds"][0]["sources"] == [
+            "parents in cross 17697",
+            "generation 2 (cross 17211)",  # the DEC25 parents' own AB Casper incross
+        ]
+        assert h["generations_traced"] == 2
         assert [m["value"] for m in h["mutant_backgrounds"]] == ["casper"]
         assert h["label_checks"] == {"incross": True, "cohort_month": True, "backgrounds": True}
         assert h["flags"] == []

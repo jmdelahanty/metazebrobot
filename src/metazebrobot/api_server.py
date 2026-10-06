@@ -53,6 +53,7 @@ from .utils.cross_provenance import (
     summarize_cross_background,
 )
 from .utils.tank_heritage import derive_tank_heritage
+from .utils.tank_origins import ensure_tank_origins_schema
 
 logger = logging.getLogger(__name__)
 
@@ -1308,6 +1309,7 @@ def _ensure_cross_parent_provenance_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_cross_children_tank_id
         ON cross_children(tank_id)
     """)
+    ensure_tank_origins_schema(conn)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS cross_background_summaries (
             cross_id TEXT PRIMARY KEY,
