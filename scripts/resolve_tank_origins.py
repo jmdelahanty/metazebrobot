@@ -30,23 +30,9 @@ from metazebrobot.api_server import (  # noqa: E402
     _ensure_cross_parent_provenance_schema,
 )
 from metazebrobot.data.data_manager import data_manager  # noqa: E402
+from metazebrobot.utils.cross_sync import heritage_counts, unplaced_parent_tanks  # noqa: E402
 from metazebrobot.utils.pyrat_api_client import PyratApiClient  # noqa: E402
 from metazebrobot.utils.tank_origins import resolve_tank_origins  # noqa: E402
-
-
-def counts(conn):
-    q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
-    return {
-        "crosses": q("SELECT COUNT(*) FROM crosses"),
-        "parent tanks": q("SELECT COUNT(DISTINCT tank_id) FROM cross_parents"),
-        "parent tanks placed": q("""
-            SELECT COUNT(DISTINCT p.tank_id) FROM cross_parents p
-            WHERE EXISTS (SELECT 1 FROM cross_children c WHERE c.tank_id = p.tank_id)
-               OR EXISTS (SELECT 1 FROM tank_origins o WHERE o.tank_id = p.tank_id
-                          AND o.status = 'split')
-        """),
-        "tank_origins": q("SELECT COUNT(*) FROM tank_origins"),
-    }
 
 
 def main() -> int:
@@ -72,17 +58,13 @@ def main() -> int:
         elif args.tank_id:
             tanks = args.tank_id
         else:
-            tanks = [r[0] for r in conn.execute("""
-                SELECT DISTINCT p.tank_id FROM cross_parents p
-                WHERE p.tank_id IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM cross_children c WHERE c.tank_id = p.tank_id)
-            """)]
-        before = counts(conn)
+            tanks = unplaced_parent_tanks(conn)
+        before = heritage_counts(conn)
 
         client = PyratApiClient(CROSSING_FIELDS, CROSSING_TANK_FIELDS, pause=args.pause)
         stats = resolve_tank_origins(conn, client, _cache_cross_rows, tanks,
                                      max_generations=args.max_generations)
-        after = counts(conn)
+        after = heritage_counts(conn)
 
     print(f"Starting tanks: {len(tanks)}; PyRAT requests: {client.requests}")
     print("Resolver:", ", ".join(f"{k}={v}" for k, v in stats.items()))

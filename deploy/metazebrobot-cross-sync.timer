@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the MetaZebrobot crossing cache sync nightly
+
+[Timer]
+# After the 02:00 database backup (deploy/BACKUP_CRONTAB_GUIDE.md).
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

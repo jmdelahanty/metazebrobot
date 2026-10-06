@@ -1,0 +1,18 @@
+[Unit]
+Description=MetaZebrobot nightly PyRAT crossing cache + tank origin sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=delahantyj
+Group=ahrens
+WorkingDirectory=/home/delahantyj@hhmi.org/gitrepos/metazebrobot
+Environment=METAZEBROBOT_DB_PATH=/nvme1/zebrobot.db
+Environment=PATH=/home/delahantyj@hhmi.org/.pixi/bin:/usr/bin:/bin
+# PyRAT credentials (same file as metazebrobot-api); "-" = optional.
+EnvironmentFile=-/etc/metazebrobot/pyrat.env
+ExecStart=/home/delahantyj@hhmi.org/.pixi/bin/pixi run python scripts/sync_cross_cache.py
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h

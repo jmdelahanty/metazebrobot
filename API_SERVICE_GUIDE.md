@@ -141,6 +141,53 @@ sudo bash -lc 'set -a; . /etc/metazebrobot/pyrat.env; set +a; cd /home/delahanty
 
 ---
 
+## Nightly Cross-Cache Sync
+
+`metazebrobot-cross-sync.timer` runs `scripts/sync_cross_cache.py` nightly at
+02:30 (after the 02:00 backup, up to 10 min random delay; `Persistent=true`
+catches up a run missed while the machine was off). Each run:
+
+1. re-fetches all owners' PyRAT crossings recorded in the last 30 days into
+   the local crossing cache (new crosses, status changes, newly raised
+   children), and
+2. resolves parent tanks that still have no producing cross (new tanks, and
+   "not found" results older than 30 days) through tank splits and
+   date-of-birth crossing searches, up to 3 generations back.
+
+It only reads PyRAT and only writes cache tables; it is idempotent and holds
+`/nvme1/zebrobot.db.cross-sync.lock` so runs never overlap (exit code 75 if
+one is already running). See `docs/tank_heritage_design.md` for the design.
+It uses the same `/etc/metazebrobot/pyrat.env` credentials as the API service
+(see above); the unit reads that file if present.
+
+Install and enable:
+
+```bash
+sudo cp deploy/metazebrobot-cross-sync.service deploy/metazebrobot-cross-sync.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now metazebrobot-cross-sync.timer
+```
+
+Check it:
+
+```bash
+systemctl list-timers metazebrobot-cross-sync.timer      # next/last run
+sudo systemctl start metazebrobot-cross-sync.service      # run once now (blocks until done)
+systemctl status metazebrobot-cross-sync.service          # last result
+sudo journalctl -u metazebrobot-cross-sync -n 50          # summary / errors
+```
+
+Each run logs a one-screen summary (PyRAT requests, crosses and placed parent
+tanks before/after). A failed run shows as `failed` in `systemctl status` and
+keeps its traceback in the journal. To preview against a copy instead:
+
+```bash
+sqlite3 -readonly /nvme1/zebrobot.db ".backup /tmp/zebrobot-copy.db"
+pixi run python scripts/sync_cross_cache.py --db-path /tmp/zebrobot-copy.db
+```
+
+---
+
 ## Troubleshooting
 
 ### Service won't start
