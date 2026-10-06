@@ -2196,6 +2196,48 @@ class TestDishCreation:
         assert "responsible_id" not in seen_params
         assert "date_of_record_from" not in seen_params
 
+    def test_every_crossing_fetch_requests_heritage_tank_fields(self, client, monkeypatch):
+        """All crossing fetches share one field list, so none caches sparse parents."""
+        import requests
+        import metazebrobot.api_server as api_server
+
+        seen = []
+
+        def fake_fetch_pyrat(endpoint, params=None):
+            seen.append(("fetch", endpoint, params))
+            return []
+
+        class FakeResponse:
+            status_code = 200
+            ok = True
+
+            def json(self):
+                return []
+
+        def fake_get(*args, **kwargs):
+            seen.append(("requests", args[0] if args else kwargs.get("url"), kwargs["params"]))
+            return FakeResponse()
+
+        monkeypatch.setattr(api_server, "_fetch_pyrat", fake_fetch_pyrat)
+        monkeypatch.setattr(api_server, "get_pyrat_frontend_credentials", lambda: None)
+        monkeypatch.setattr(api_server, "get_pyrat_api_credentials", lambda: {
+            "base_url": "https://example.invalid/aquatic/",
+            "client_token": "client-token",
+            "user_token": "user-token",
+        })
+        monkeypatch.setattr(requests, "get", fake_get)
+
+        client.get("/pyrat/crossings/")
+        client.get("/pyrat/crossings/table")
+        client.get("/dishes/new", params={"cross_id": f"PYRAT_{uuid.uuid4().hex[:8]}"})
+        client.post("/dishes/new/refresh-crosses", data={"all_crosses": "true"})
+
+        crossing_calls = [s for s in seen if "crossings" in str(s[1])]
+        assert len(crossing_calls) >= 4
+        for _, _, params in crossing_calls:
+            assert params["k"] == api_server.CROSSING_FIELDS
+            assert params["tk"] == api_server.CROSSING_TANK_FIELDS
+
     def test_refresh_recent_crosses_filters_by_current_user(self, client, monkeypatch):
         import requests
         import metazebrobot.api_server as api_server

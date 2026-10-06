@@ -47,7 +47,11 @@ from .utils.pyrat_frontend_client import (
     enrich_crossings_with_frontend_details,
     get_pyrat_frontend_credentials,
 )
-from .utils.cross_provenance import normalize_cross_parents, summarize_cross_background
+from .utils.cross_provenance import (
+    normalize_cross_children,
+    normalize_cross_parents,
+    summarize_cross_background,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -586,6 +590,23 @@ def _pyrat_user_id(username: str) -> Optional[int]:
     except Exception:
         pass
     return None
+
+
+# Fields requested from api/v3/tanks/crossings. Every crossing fetch writes the
+# same local cache, so every fetch asks for the same parent/child tank fields;
+# otherwise a cross only ever fetched by a sparse path never gets parent strain,
+# generation, or date of birth (see docs/tank_heritage_design.md).
+CROSSING_FIELDS = [
+    "crossing_id", "status", "date_of_record", "date_of_set_up", "date_of_raise",
+    "responsible_id", "responsible_fullname",
+    "strain_id", "strain_name", "strain_name_with_id", "description", "tanks",
+]
+CROSSING_TANK_FIELDS = [
+    "tank_id", "tank_label", "status",
+    "strain_id", "strain_name", "strain_name_with_id", "generation", "date_of_birth",
+    "number_of_male", "number_of_female", "number_of_unknown", "alive_count",
+    "location_rack_name", "location_room_name", "tank_position",
+]
 
 
 def _fetch_pyrat(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
@@ -1267,6 +1288,26 @@ def _ensure_cross_parent_provenance_schema(conn: sqlite3.Connection) -> None:
         ON cross_parents(tank_id)
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS cross_children (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cross_id TEXT NOT NULL,
+            tank_id TEXT NOT NULL,
+            tank_label TEXT,
+            strain_id TEXT,
+            strain_name TEXT,
+            generation TEXT,
+            date_of_birth TEXT,
+            raw_payload TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (cross_id) REFERENCES crosses(cross_id),
+            UNIQUE(cross_id, tank_id)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_cross_children_tank_id
+        ON cross_children(tank_id)
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS cross_background_summaries (
             cross_id TEXT PRIMARY KEY,
             background_summary TEXT,
@@ -1288,6 +1329,7 @@ def _upsert_cross_parent_provenance(
 ) -> None:
     """Normalize and persist PyRAT parent/background provenance for one cross."""
     _ensure_cross_parent_provenance_schema(conn)
+    _upsert_cross_children(conn, cross_id, cross_payload)
     parent_rows = normalize_cross_parents(cross_payload)
     if not parent_rows:
         return
@@ -1352,6 +1394,42 @@ def _upsert_cross_parent_provenance(
     )
 
 
+def _upsert_cross_children(
+    conn: sqlite3.Connection,
+    cross_id: str,
+    cross_payload: Dict[str, Any],
+) -> None:
+    """Persist a crossing's child tanks (the tank -> producing-cross index).
+
+    A payload without a children list leaves stored children untouched; an
+    explicit empty list clears them.
+    """
+    child_rows = normalize_cross_children(cross_payload)
+    if child_rows is None:
+        return
+    conn.execute("DELETE FROM cross_children WHERE cross_id = ?", (cross_id,))
+    for row in child_rows:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO cross_children (
+                cross_id, tank_id, tank_label, strain_id, strain_name,
+                generation, date_of_birth, raw_payload, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                cross_id,
+                row["tank_id"],
+                row.get("tank_label"),
+                str(row["strain_id"]) if row.get("strain_id") is not None else None,
+                row.get("strain_name"),
+                row.get("generation"),
+                row.get("date_of_birth"),
+                json.dumps(row.get("raw_payload") or {}),
+            ),
+        )
+
+
 def _backfill_cross_parent_provenance(conn: sqlite3.Connection) -> Tuple[int, int]:
     """Populate parent provenance tables from already-cached crosses.data."""
     _ensure_cross_parent_provenance_schema(conn)
@@ -1368,15 +1446,17 @@ def _backfill_cross_parent_provenance(conn: sqlite3.Connection) -> Tuple[int, in
             """
             SELECT
                 (SELECT COUNT(*) FROM cross_parents WHERE cross_id = ?) AS parent_count,
-                (SELECT COUNT(*) FROM cross_background_summaries WHERE cross_id = ?) AS summary_count
+                (SELECT COUNT(*) FROM cross_background_summaries WHERE cross_id = ?) AS summary_count,
+                (SELECT COUNT(*) FROM cross_children WHERE cross_id = ?) AS child_count
             """,
-            (str(row["cross_id"]), str(row["cross_id"])),
+            (str(row["cross_id"]), str(row["cross_id"]), str(row["cross_id"])),
         ).fetchone()
-        if existing and existing[0] and existing[1]:
-            continue
         try:
             payload = json.loads(row["data"] or "{}")
         except (TypeError, ValueError):
+            continue
+        children_missing = bool(normalize_cross_children(payload)) and not existing[2]
+        if existing and existing[0] and existing[1] and not children_missing:
             continue
         before = conn.total_changes
         _upsert_cross_parent_provenance(conn, str(row["cross_id"]), payload)
@@ -1613,16 +1693,8 @@ def _load_cross_prefill(
                 params={
                     "crossing_id": cross_id,
                     "l": 1,
-                    "k": [
-                        "crossing_id", "status", "date_of_record", "date_of_set_up",
-                        "responsible_fullname", "strain_name", "strain_name_with_id", "tanks",
-                    ],
-                    "tk": [
-                        "tank_id", "tank_label", "status", "strain_name",
-                        "number_of_male", "number_of_female", "number_of_unknown",
-                        "alive_count", "date_of_birth", "generation",
-                        "location_rack_name", "location_room_name", "tank_position",
-                    ],
+                    "k": CROSSING_FIELDS,
+                    "tk": CROSSING_TANK_FIELDS,
                 },
             )
         except HTTPException as exc:
@@ -3213,10 +3285,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         params = {
             "l": 50 if not all_crosses else 200,
             "s": ["date_of_record:desc"],
-            "k": [
-                "crossing_id", "status", "date_of_record",
-                "responsible_fullname", "strain_name", "strain_name_with_id",
-            ],
+            "k": CROSSING_FIELDS,
+            "tk": CROSSING_TANK_FIELDS,
         }
         # Default sync is scoped to the current user. "All crosses" intentionally
         # drops the responsible_id filter so an exact or broad PyRAT query can
@@ -4384,15 +4454,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     params={
                         "crossing_id": cross_id,
                         "l": 1,
-                        "k": [
-                            "crossing_id", "status", "strain_name", "strain_name_with_id",
-                            "responsible_fullname", "date_of_record", "date_of_set_up", "tanks",
-                        ],
-                        "tk": [
-                            "tank_id", "tank_label", "strain_name", "generation",
-                            "number_of_male", "number_of_female",
-                            "location_rack_name", "tank_position",
-                        ],
+                        "k": CROSSING_FIELDS,
+                        "tk": CROSSING_TANK_FIELDS,
                     },
                     verify=False,
                     timeout=10,
@@ -5975,13 +6038,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             params = {
                 "l": 200,
                 "s": ["date_of_record:desc"],
-                "k": [
-                    "crossing_id", "status", "date_of_record", "date_of_set_up", "date_of_raise",
-                    "strain_name", "description", "tanks",
-                ],
-                "tk": [
-                    "tank_id", "tank_label", "status",
-                ],
+                "k": CROSSING_FIELDS,
+                "tk": CROSSING_TANK_FIELDS,
             }
             if responsible_id:
                 params["responsible_id"] = responsible_id
@@ -6024,13 +6082,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             params = {
                 "l": 200,
                 "s": ["date_of_record:desc"],
-                "k": [
-                    "crossing_id", "status", "date_of_record", "date_of_set_up", "date_of_raise",
-                    "strain_name", "description", "tanks",
-                ],
-                "tk": [
-                    "tank_id", "tank_label", "status",
-                ],
+                "k": CROSSING_FIELDS,
+                "tk": CROSSING_TANK_FIELDS,
             }
             if responsible_id:
                 params["responsible_id"] = responsible_id

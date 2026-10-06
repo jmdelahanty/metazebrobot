@@ -1,7 +1,11 @@
+import json
 import sqlite3
 from types import SimpleNamespace
 
 from metazebrobot.api_server import (
+    CROSSING_FIELDS,
+    CROSSING_TANK_FIELDS,
+    _backfill_cross_parent_provenance,
     _cross_prefill_complete,
     _cross_prefill_from_payload,
     _ensure_cross_parent_provenance_schema,
@@ -13,7 +17,7 @@ from metazebrobot.api_server import (
     _screening_indicator_suggestions,
     _upsert_cross_parent_provenance,
 )
-from metazebrobot.utils.cross_provenance import parse_parent_background
+from metazebrobot.utils.cross_provenance import normalize_cross_children, parse_parent_background
 
 
 class TestNaturalSortKey:
@@ -278,6 +282,97 @@ class TestCrossParentProvenance:
         assert summary["has_mixed_background"] == 1
         assert display["parents"][0]["generation"] == "F1"
         assert display["summary"]["background_strains"] == ["WIK"]
+
+
+class TestCrossChildren:
+    """cross_children indexes tanks back to the cross that produced them."""
+
+    PAYLOAD = {
+        "crossing_id": 17697,
+        "tanks": {
+            "parents": [
+                {"tank_id": 8129, "strain_name": "Casper_HHMI [AB-C] DEC25", "generation": "F1"},
+                {"tank_id": 8130, "strain_name": "Casper_HHMI [AB-C] DEC25", "generation": "F1"},
+            ],
+            "children": [
+                {"tank_id": 8547, "strain_id": 1574, "strain_name": "Casper_HHMI [AB-C IC] MAR26",
+                 "generation": "F1", "date_of_birth": "2026-03-10T00:00:00"},
+                {"tank_id": 8548, "strain_id": 1574, "strain_name": "Casper_HHMI [AB-C IC] MAR26",
+                 "generation": "F1", "date_of_birth": "2026-03-10T00:00:00"},
+            ],
+        },
+    }
+
+    def _conn(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE crosses (cross_id TEXT PRIMARY KEY, data TEXT)")
+        _ensure_cross_parent_provenance_schema(conn)
+        return conn
+
+    def _children(self, conn, cross_id="17697"):
+        return [dict(r) for r in conn.execute(
+            "SELECT tank_id, strain_id, strain_name, generation, date_of_birth "
+            "FROM cross_children WHERE cross_id = ? ORDER BY tank_id", (cross_id,))]
+
+    def test_normalize_distinguishes_missing_from_empty(self):
+        assert normalize_cross_children({"tanks": {"parents": []}}) is None
+        assert normalize_cross_children({}) is None
+        assert normalize_cross_children({"tanks": {"children": []}}) == []
+
+    def test_upsert_indexes_children_idempotently(self):
+        conn = self._conn()
+        _upsert_cross_parent_provenance(conn, "17697", self.PAYLOAD)
+        _upsert_cross_parent_provenance(conn, "17697", self.PAYLOAD)
+
+        children = self._children(conn)
+        assert [c["tank_id"] for c in children] == ["8547", "8548"]
+        assert children[0] == {
+            "tank_id": "8547", "strain_id": "1574", "strain_name": "Casper_HHMI [AB-C IC] MAR26",
+            "generation": "F1", "date_of_birth": "2026-03-10T00:00:00",
+        }
+        producing = conn.execute(
+            "SELECT cross_id FROM cross_children WHERE tank_id = '8547'").fetchall()
+        assert [r["cross_id"] for r in producing] == ["17697"]
+
+    def test_payload_without_children_keeps_stored_children(self):
+        conn = self._conn()
+        _upsert_cross_parent_provenance(conn, "17697", self.PAYLOAD)
+        sparse = {"crossing_id": 17697, "tanks": {"parents": self.PAYLOAD["tanks"]["parents"]}}
+        _upsert_cross_parent_provenance(conn, "17697", sparse)
+        assert len(self._children(conn)) == 2
+
+    def test_explicit_empty_children_clears_them(self):
+        conn = self._conn()
+        _upsert_cross_parent_provenance(conn, "17697", self.PAYLOAD)
+        cleared = {"crossing_id": 17697, "tanks": {**self.PAYLOAD["tanks"], "children": []}}
+        _upsert_cross_parent_provenance(conn, "17697", cleared)
+        assert self._children(conn) == []
+
+    def test_children_indexed_even_without_parents(self):
+        conn = self._conn()
+        only_children = {"crossing_id": 17697, "tanks": {"children": self.PAYLOAD["tanks"]["children"]}}
+        _upsert_cross_parent_provenance(conn, "17697", only_children)
+        assert len(self._children(conn)) == 2
+
+    def test_backfill_indexes_children_for_already_processed_crosses(self):
+        conn = self._conn()
+        conn.execute("INSERT INTO crosses (cross_id, data) VALUES ('17697', ?)",
+                     (json.dumps(self.PAYLOAD),))
+        _upsert_cross_parent_provenance(conn, "17697", self.PAYLOAD)
+        conn.execute("DELETE FROM cross_children")  # as on a DB from before cross_children
+
+        _backfill_cross_parent_provenance(conn)
+
+        assert len(self._children(conn)) == 2
+
+
+class TestCrossingFetchFields:
+    def test_tank_fields_include_heritage_fields(self):
+        for field in ("strain_id", "strain_name", "generation", "date_of_birth"):
+            assert field in CROSSING_TANK_FIELDS
+        for field in ("date_of_raise", "strain_id", "tanks"):
+            assert field in CROSSING_FIELDS
 
 
 class TestCrossingDisplayHelpers:

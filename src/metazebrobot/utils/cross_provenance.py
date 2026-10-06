@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..data.data_manager import DataManager
 
@@ -101,6 +101,40 @@ def parent_tanks_from_cross(cross_payload: Dict[str, Any]) -> List[Dict[str, Any
     if not parents:
         parents = (cross_payload.get("tanks") or {}).get("parents") or []
     return [parent for parent in parents if isinstance(parent, dict)]
+
+
+def child_tanks_from_cross(cross_payload: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """Return child tanks, or None when the payload carries no children list.
+
+    None (not []) means "unknown", so callers can keep previously stored
+    children instead of erasing them after a sparse fetch.
+    """
+    children = (cross_payload.get("tanks") or {}).get("children")
+    if children is None:
+        return None
+    return [child for child in children if isinstance(child, dict)]
+
+
+def normalize_cross_children(cross_payload: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """Normalize a crossing's child tanks: the only PyRAT link from a tank to
+    the cross that produced it (tank history does not name the crossing)."""
+    children = child_tanks_from_cross(cross_payload)
+    if children is None:
+        return None
+    rows = []
+    for child in children:
+        if child.get("tank_id") is None:
+            continue
+        rows.append({
+            "tank_id": str(child["tank_id"]),
+            "tank_label": child.get("tank_label"),
+            "strain_id": child.get("strain_id"),
+            "strain_name": child.get("strain_name") or child.get("strain_name_with_id"),
+            "generation": child.get("generation"),
+            "date_of_birth": child.get("date_of_birth"),
+            "raw_payload": child,
+        })
+    return rows
 
 
 def normalize_cross_parents(cross_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
