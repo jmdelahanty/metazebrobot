@@ -108,7 +108,7 @@ Design notes and reference docs in `docs/`, by topic:
 |-------|------|
 | Identity, provenance, consumers | [`zebrobot_snapshot.md`](docs/zebrobot_snapshot.md), [`identity_and_provenance_contract.md`](docs/identity_and_provenance_contract.md), [`api/consumer_openapi.json`](docs/api/consumer_openapi.json) |
 | Fish, screening, counts | [`fish_count_and_screening_accuracy.md`](docs/fish_count_and_screening_accuracy.md), [`fish_tracking_api.md`](docs/fish_tracking_api.md), [`dish_lineage_graph.md`](docs/dish_lineage_graph.md) |
-| PyRAT and crosses | [`cross_parent_background_design.md`](docs/cross_parent_background_design.md), [`crossing_performance_caveats.md`](docs/crossing_performance_caveats.md), [`pyrat_cross_date_fields.md`](docs/pyrat_cross_date_fields.md), [`strain_parser_edge_cases.md`](docs/strain_parser_edge_cases.md) |
+| PyRAT and crosses | [`tank_heritage_design.md`](docs/tank_heritage_design.md), [`cross_parent_background_design.md`](docs/cross_parent_background_design.md), [`crossing_performance_caveats.md`](docs/crossing_performance_caveats.md), [`pyrat_cross_date_fields.md`](docs/pyrat_cross_date_fields.md), [`strain_parser_edge_cases.md`](docs/strain_parser_edge_cases.md) |
 | Web UI and data model | [`web_pages.md`](docs/web_pages.md), [`schema.sql`](docs/schema.sql) |
 
 What's planned next: [`docs/next_steps.md`](docs/next_steps.md).

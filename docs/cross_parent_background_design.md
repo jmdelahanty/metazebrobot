@@ -1,5 +1,10 @@
 # Cross Parent Strain and Background Design
 
+Status (2026-10-06): steps 1–5 of the implementation sequence are built; 6–7
+are not. Parent strain data is often missing from the cache, and tank-level
+heritage (incross, cohort, producing cross) is designed in
+[`tank_heritage_design.md`](tank_heritage_design.md).
+
 ## Motivation
 
 MetaZebrobot can now create local dishes from PyRAT crosses that are not
@@ -180,14 +185,16 @@ These can be materialized later, but they should be derived from
 
 ## Implementation Sequence
 
-1. Preserve raw parent payloads from PyRAT crossings more deliberately in
+1. ✅ Preserve raw parent payloads from PyRAT crossings more deliberately in
    `crosses.data`.
-2. Add `cross_parents` with startup migration and backfill from cached
+2. ✅ Add `cross_parents` with startup migration and backfill from cached
    `crosses.data`.
-3. Add conservative background parser tests for known local strings such as
+3. ✅ Add conservative background parser tests for known local strings such as
    `WIK Casper_HHMI`.
-4. Populate `cross_parents` during exact cross lookup and PyRAT crossing sync.
-5. Display parent background summary on new-dish and cross-lineage pages.
+4. ✅ Populate `cross_parents` during exact cross lookup and PyRAT crossing sync.
+   Some sync paths don't request parent strain fields, so most cached parents
+   have no strain; fixed by step 1 of `tank_heritage_design.md`.
+5. ✅ Display parent background summary on new-dish and cross-lineage pages.
 6. Add manual curation UI only after the raw/parsed model is stable.
 7. Add analytics/export fields derived from `cross_parents`.
 
