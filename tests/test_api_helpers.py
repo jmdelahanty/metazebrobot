@@ -495,3 +495,31 @@ class TestCrossingDisplayHelpers:
         assert prepared[0]["performance_display"] == "100%"
         assert prepared[0]["performance_ratio_display"] == "2 / 2"
         assert prepared[0]["local_dish_count"] == 1
+
+
+class TestLabCalendarDate:
+    """dpf uses the lab's (America/New_York) calendar, not the host's."""
+
+    def test_us_evening_utc_instant_is_previous_lab_day(self):
+        from datetime import date, datetime, timezone
+        from metazebrobot.api_server import lab_calendar_date
+
+        # 2026-07-22T00:06Z is 2026-07-21 20:06 EDT (Palette's example).
+        assert lab_calendar_date(datetime(2026, 7, 22, 0, 6, tzinfo=timezone.utc)) == date(2026, 7, 21)
+        # Naive instants are taken as UTC.
+        assert lab_calendar_date(datetime(2026, 7, 22, 0, 6)) == date(2026, 7, 21)
+
+    def test_dst_boundaries(self):
+        from datetime import date, datetime, timezone
+        from metazebrobot.api_server import lab_calendar_date
+
+        # Spring forward 2026-03-08 and fall back 2026-11-01 (EST is UTC-5).
+        assert lab_calendar_date(datetime(2026, 3, 8, 4, 59, tzinfo=timezone.utc)) == date(2026, 3, 7)
+        assert lab_calendar_date(datetime(2026, 3, 8, 5, 0, tzinfo=timezone.utc)) == date(2026, 3, 8)
+        assert lab_calendar_date(datetime(2026, 11, 2, 4, 59, tzinfo=timezone.utc)) == date(2026, 11, 1)
+        assert lab_calendar_date(datetime(2026, 11, 2, 5, 0, tzinfo=timezone.utc)) == date(2026, 11, 2)
+
+    def test_lab_timezone_is_new_york(self):
+        from metazebrobot.api_server import LAB_TIMEZONE
+
+        assert str(LAB_TIMEZONE) == "America/New_York"

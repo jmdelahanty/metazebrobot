@@ -11,11 +11,12 @@ import re
 import sqlite3
 import subprocess
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -66,6 +67,23 @@ logger = logging.getLogger(__name__)
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_BUSY_TIMEOUT_MS = 250
+
+# The lab's calendar (dof, dpf, ...) is US East Coast wall-clock time; see
+# docs/zebrobot_snapshot.md "Dates and times". Explicit so a server or
+# container set to UTC can't shift ages by a day after 20:00 EDT.
+LAB_TIMEZONE = ZoneInfo("America/New_York")
+
+
+def lab_calendar_date(instant: Optional[datetime] = None) -> date:
+    """Lab-local calendar date of ``instant`` (default: now).
+
+    Naive instants are taken as UTC; aware ones are converted.
+    """
+    if instant is None:
+        return datetime.now(LAB_TIMEZONE).date()
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone(LAB_TIMEZONE).date()
 _USER_MAPPING_PATH = os.path.expanduser("~/.pyrat_user_mapping.json")
 DEFAULT_OME_STAGING_ROOT = Path("/groups/ahrens/ahrenslab/jeremy/screening_staging")
 _REFERENCE_DISPLAY_ROLES = {"composite", "channel", "brightfield", "other", "reference"}
@@ -2353,8 +2371,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         If ref_date is not provided, defaults to today.
         """
         try:
-            dof = datetime.strptime(dof_str, "%Y%m%d")
-            today = ref_date or datetime.now()
+            dof = datetime.strptime(dof_str, "%Y%m%d").date()
+            # ref_date values are lab calendar dates (termination, screening);
+            # "today" is the lab's calendar date, not the host's.
+            today = ref_date.date() if ref_date else lab_calendar_date()
             return (today - dof).days
         except (ValueError, TypeError):
             return None

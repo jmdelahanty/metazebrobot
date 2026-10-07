@@ -277,6 +277,21 @@ class TestVersionEndpoint:
         assert body["consumer_schema_sha256"] == digest(CONSUMER_OPENAPI_PATH.read_text())
 
 
+class TestServedDpfUsesLabCalendar:
+    def test_snapshot_dpf_follows_lab_date_not_host_clock(self, client, seed_full_dish, monkeypatch):
+        from datetime import date
+
+        with data_manager.get_connection() as conn:
+            conn.execute("UPDATE dishes SET dof = '20260714', status = 'active' WHERE dish_id = ?",
+                         (seed_full_dish,))
+            conn.commit()
+        # Pretend the lab calendar says 2026-07-21 (i.e. 20:06 EDT, 00:06Z next day).
+        monkeypatch.setattr(api_server, "lab_calendar_date", lambda instant=None: date(2026, 7, 21))
+
+        snapshot = client.get(f"/dishes/{seed_full_dish}/citrus-snapshot").json()
+        assert snapshot["dpf"] == 7
+
+
 class TestCrossesEndpoint:
     def test_cross_list_has_explicit_openapi_schema(self, client):
         response = client.get("/openapi.json")

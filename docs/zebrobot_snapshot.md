@@ -133,9 +133,11 @@ by its kind:
 
 - `dof` is PyRAT `date_of_set_up` + 1 day (`dof_source = pyrat_setup_plus_1`),
   PyRAT `date_of_record`, or entered by hand: always a lab wall-clock day.
-- The served `dpf` is `dof` against the server's local (America/New_York)
-  "today", so it changes at local midnight; it is the dish's age at request
-  time, not at a recording. Compute `dpf_at_acquisition` yourself (above).
+- The served `dpf` is the lab's (America/New_York) calendar date at request
+  time minus `dof`, fixed in code (`LAB_TIMEZONE`) rather than taken from the
+  host's timezone, so it changes at New York midnight. It is the dish's age at
+  request time, not at a recording; compute `dpf_at_acquisition` yourself
+  (above), or store the served value when querying at record start.
 - `updated_at` looks like local time but is UTC: `2026-10-02 16:28:20` is
   12:28 EDT. Parse it as UTC.
 - To get a lab-local calendar day from a UTC instant, convert to
