@@ -4,19 +4,21 @@ summary: "Strain-name forms the transgene parser can't fully decompose."
 owner: metazebrobot
 status: current
 kind: reference
-verified_against: null
+verified_against: 384a366
 ---
 
 # Strain Name Parser: Known Edge Cases
 
-The `strain_parser.parse_strain_name()` utility extracts transgenic indicator components from PyRAT strain name strings. It handles the common `Tg(promoter:reporter)` notation well, but some strain names in PyRAT use inconsistent or complex notation that the parser cannot fully decompose. These cases are flagged for user review.
+The `utils/strain_parser.parse_strain_name()` utility extracts transgenic indicator components from PyRAT strain name strings. It is a thin wrapper over `DataManager.parse_genotype()`, the same parser that fills `dish_transgenes`, so both share one construct classifier (each row also carries normalized `promoter_norm`, `reporter_norm`, `fluorophore`, `construct_role`, and sensor/effector fields). It handles the common `Tg(promoter:reporter)` notation well, but some strain names in PyRAT use inconsistent or complex notation that the parser cannot fully decompose.
+
+The parser does not flag problem rows itself. In the desktop app its output seeds the crossing's transgenic indicator dialog (only when the crossing has no saved indicators yet), where the user reviews and corrects every row before saving.
 
 This parser is intentionally about transgenic indicator constructs, not the
 full biological provenance of a cross. Parent wild-type backgrounds and mutant
-line labels such as `AB`, `WIK`, `TU`, `nacre`, or `Casper_HHMI` should be
-modeled separately from transgene parsing. See
-`docs/cross_parent_background_design.md` for the proposed cross-parent
-background model.
+line labels such as `AB`, `WIK`, `TU`, `nacre`, or `Casper_HHMI` are modeled
+separately from transgene parsing, by `utils/cross_provenance.py`. See
+`docs/cross_parent_background_design.md` for the cross-parent background
+model.
 
 ## What Parses Cleanly
 
@@ -26,6 +28,7 @@ Standard notation with one or more semicolon-separated constructs:
 |---|---|
 | `Tg(gfap:TRPV1-T2A-GFP); Tg(elavl3:jRGECO1b)` | tg, gfap, TRPV1-T2A-GFP + tg, elavl3, jRGECO1b |
 | `Et(1121A:GAL4FF)` | other, 1121A, GAL4FF |
+| `(UAS:jRGECO1b)` | tg, UAS, jRGECO1b (no prefix defaults to `tg`) |
 | `TgBAC(gng8:nfsB-2a-GFP-CAAX)c375` | tg, gng8, nfsB-2a-GFP-CAAX |
 | `Casper_HHMI` | (no constructs — correctly ignored) |
 
@@ -58,23 +61,34 @@ The `::` and bracket notation causes the first-colon split to land in the wrong 
 
 ```
 (UAS:jRGECO1b)
-  -> [?] UAS : jRGECO1b
+  -> [tg] UAS : jRGECO1b
 
 (5XUAS:TEMPO)
-  -> [?] 5XUAS : TEMPO
+  -> [tg] 5XUAS : TEMPO
 ```
 
-These parse correctly into promoter and reporter, but `modification_type` is `None` because there's no prefix. The `?` flags these for the user to classify.
+These parse correctly into promoter and reporter. With no prefix, `modification_type` defaults to `tg` (`Tg` and `TgBAC` map to `tg`, `Et` and any other prefix to `other`). The default is usually right but is an assumption; the user can reclassify during review.
+
+### Parenthesized text that is not a construct
+
+Any `word(...)` or bare `(...)` block is treated as a construct, so mutant allele notation produces a spurious row:
+
+```
+mitfa(w2)
+  -> [other] w2 : (no reporter)
+```
+
+The user should delete such rows during review. Mutant alleles belong to the parent background model, not to transgene parsing.
 
 ### Multi-construct strings with mixed separators
 
 ```
 Tg(elavl3:Gal4-VP16; Rh1:DsRed-Express), (UAS:H2B-jRGECO1a)
   -> [tg] elavl3 : Gal4-VP16; Rh1:DsRed-Express
-  -> [?] UAS : H2B-jRGECO1a
+  -> [tg] UAS : H2B-jRGECO1a
 ```
 
-The first construct contains an internal semicolon that gets absorbed into the reporter, same as the first edge case above. The second construct parses fine.
+The first construct contains an internal semicolon that gets absorbed into the reporter, same as the first edge case above. The second construct parses fine (as `tg`, per the bare-construct default).
 
 ## Fields That Always Require User Input
 

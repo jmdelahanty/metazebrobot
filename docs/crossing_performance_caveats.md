@@ -4,7 +4,7 @@ summary: "How crossing performance (raised / requested) is calculated and where 
 owner: metazebrobot
 status: current
 kind: reference
-verified_against: null
+verified_against: 384a366
 ---
 
 # Crossing Performance Metrics — Known Limitations
@@ -14,15 +14,45 @@ verified_against: null
 Performance for a crossing is calculated as:
 
 ```
-performance = raised_count / requested_groups
+performance = raised_count / performance_target_count
 ```
 
-- **`raised_count`**: The number of child tanks associated with the crossing in PyRAT (i.e., `len(child_tanks)` from the API response).
-- **`requested_groups`**: Parsed from the free-text `description` field of the crossing using regex (e.g., "3 groups", "one group").
+- **`raised_count`** (numerator): `raised_tanks`, else `really_raised_tanks`,
+  else `len(tanks.children)`.
+- **`performance_target_count`** (denominator): `crossing_tanks` when it is
+  present and non-zero, else `requested_groups`.
+- **`requested_groups`**: Parsed from the free-text `description` field of the
+  crossing using regex (e.g., "3 groups").
 
-These values are displayed as a percentage in the UI (e.g., "100%", "50%") and color-coded green/orange/red.
+`raised_tanks`, `really_raised_tanks`, and `crossing_tanks` only exist on the
+authenticated `backend/v1/tanks/crossings/{crossing_id}/details` response, so
+they are only available when PyRAT frontend credentials are configured and
+`enrich_crossings_with_frontend_details()` (`utils/pyrat_frontend_client.py`)
+has run. Numerator and denominator fall back independently, so a row can mix an
+authoritative count with a fallback one (for example `raised_tanks /
+requested_groups`).
+
+The logic lives in two places that must be kept in step:
+
+- Desktop: computed properties on `PyRATCrossing` (`models/pyrat_crossing.py`).
+  The crossings tab enriches from `backend/v1` when frontend credentials are
+  configured. The detail panel color-codes performance green (>= 100%), orange
+  (>= 50%), or red; "N/A" when there is no denominator.
+- Web (`/pyrat/crossings/`): `_prepare_crossings_for_display()` in
+  `api_server.py`. The first page load uses `api/v3/tanks/crossings` merged
+  with detail fields previously cached in the local `crosses` table by
+  `_cache_cross_rows`, so counts can be stale. The HTMX table partial
+  (`/pyrat/crossings/table`) then re-enriches from `backend/v1` on load and
+  every 5 minutes when frontend credentials are configured. Rows without a
+  denominator show "-" (no color coding).
+
+The two `requested_groups` parsers differ: the desktop model accepts spelled-out
+numbers and intervening words ("one group", "2 additional groups"), while the
+web helper only matches a digit directly before "group"/"grp" ("3 groups").
 
 ## Verified UI/API Mismatch On April 9, 2026
+
+These are live PyRAT observations; they cannot be re-checked from the code.
 
 Crossing `17907` was checked against both the live PyRAT HTML page and the live
 `api/v3/tanks/crossings` response on April 9, 2026. A later check of the newer
@@ -56,16 +86,20 @@ Implications:
 
 Conclusion:
 
-- MetaZebrobot's current `raised_count / requested_groups` calculation is only a
-  local approximation of PyRAT performance.
+- A `len(tanks.children) / requested_groups` calculation from the older API is
+  only a local approximation of PyRAT performance.
 - It should not be treated as a faithful reproduction of the PyRAT UI metric.
-- If MetaZebrobot needs closer parity with PyRAT, it should prefer the newer
-  authenticated crossing-detail endpoint over `api/v3/tanks/crossings`.
+- For closer parity with PyRAT, MetaZebrobot prefers the newer authenticated
+  crossing-detail endpoint over `api/v3/tanks/crossings` (implemented; see the
+  mapping below).
 
 ## Recommended Mapping To Match PyRAT
 
-Based on live checks from April 9, 2026, MetaZebrobot should treat the PyRAT
+Based on live checks from April 9, 2026, MetaZebrobot treats the PyRAT
 crossing-detail payload as the authoritative source for performance-like values.
+This mapping is implemented (see "How MetaZebrobot Currently Calculates
+Performance" above, where numerator and denominator fall back independently
+rather than as the paired steps listed here).
 
 Recommended mapping:
 
@@ -104,7 +138,9 @@ Observed examples:
 
 ### 1. `raised_count` from the older crossing API does not match the PyRAT UI in all cases
 
-MetaZebrobot currently derives `raised_count` from `tanks.children`, but live
+When no `backend/v1` detail counts are available (no frontend credentials, a
+failed detail fetch, or a crossing never enriched and cached), MetaZebrobot
+falls back to deriving `raised_count` from `tanks.children`, but live
 verification on crossing `17907` showed that PyRAT can display a non-zero
 performance numerator even when `tanks.children` is empty. This means:
 
@@ -121,17 +157,17 @@ performance numerator even when `tanks.children` is empty. This means:
 
 The number of requested groups is extracted from the crossing's description field via pattern matching (e.g., "3 groups", "two additional groups"). This is fragile:
 
-- If the description doesn't follow the expected pattern, `requested_groups` returns `None` and performance shows as "N/A".
+- If the description doesn't follow the expected pattern, `requested_groups` returns `None` and, without `crossing_tanks`, performance shows as "N/A" (desktop) or "-" (web).
+- The desktop and web parsers accept different phrasings (see above), so the same description can yield a value in one and `None` in the other.
 - Descriptions may be entered inconsistently across users.
 - Edits to descriptions after the fact can change the parsed value.
-- It should now be treated as a fallback only when `crossing_tanks` is not
-  available.
+- It is used only as a fallback when `crossing_tanks` is not available.
 
 ### 3. Crossing status does not guarantee metric parity
 
 The crossing workflow in PyRAT follows: **recorded → set-up → raised** (or **discarded**). If users don't advance crossings through these stages — particularly marking them as "raised" and associating child tanks — the data will not reflect actual outcomes.
 
-However, the `17907` check showed a `set-up` crossing with `date_of_raise = null`
+However, the `17907` check (observed live) showed a `set-up` crossing with `date_of_raise = null`
 while the PyRAT UI still displayed performance `2 / 2`. So even the visible
 status progression is not enough to infer how the UI produced that metric.
 
@@ -161,10 +197,11 @@ explicit about which one is authoritative for performance-like metrics.
   successfully produced fish that PyRAT's older API does not expose via
   `tanks.children`.
 - **Performance values from the authenticated crossing-detail endpoint are much
-  closer to PyRAT ground truth.** They should be preferred whenever available.
-- **Aggregate statistics (average performance, total raised)** will remain
-  inaccurate as long as they are based on `len(child_tanks)` and parsed
-  description text.
+  closer to PyRAT ground truth.** They are preferred whenever available.
+- **Aggregate statistics (average performance, total raised)** in the desktop
+  crossings tab use the same per-crossing fallbacks, so they are only as
+  accurate as the mix of detail counts versus `len(child_tanks)` and parsed
+  description text behind them.
 - **"N/A" performance** should mean neither the authoritative counts nor the
   fallback requested-group parsing were available. It does not mean the crossing
   failed.
@@ -172,8 +209,10 @@ explicit about which one is authoritative for performance-like metrics.
 ## Potential Improvements
 
 - Validate with aquatics staff whether the "raised" workflow is being followed consistently.
-- Prefer the authenticated crossing-detail endpoint if the goal is to mirror the
-  PyRAT UI's raised/crossing counts.
+- Make sure frontend credentials are configured wherever crossings are viewed,
+  so the authenticated crossing-detail counts are used rather than fallbacks.
+- Share one `requested_groups` parser between the desktop model and the web
+  helper.
 - Consider adding a manual override or confirmation field for performance if the
   PyRAT UI metric remains unavailable via API.
 - Track which crossings have been verified vs. inferred.

@@ -4,7 +4,7 @@ summary: "Which PyRAT crossing date fields MetaZebrobot uses for dish dates, and
 owner: metazebrobot
 status: current
 kind: investigation
-verified_against: null
+verified_against: 384a366
 ---
 
 # PyRAT Crossing Date Fields Investigation
@@ -32,7 +32,10 @@ This appeared inconsistent with the visible PyRAT UI date.
 
 ## Live PyRAT API observations
 
-Checked on 2026-05-18 against live PyRAT.
+Checked on 2026-05-18 against live PyRAT. These are live observations and
+cannot be re-checked from the code. (MetaZebrobot's shared `CROSSING_FIELDS`
+request list in `api_server.py` does not ask `api/v3` for the detail-only
+fields below, consistent with the rejection noted here.)
 
 ### `api/v3/tanks/crossings`
 
@@ -90,7 +93,9 @@ remained `2026-05-11`. This has not been confirmed.
 
 ## MetaZebrobot behavior at time of investigation
 
-MetaZebrobot dish prefill currently uses this precedence:
+This is still the behavior as of commit `384a366`
+(`_cross_prefill_from_payload()` in `api_server.py`). MetaZebrobot dish prefill
+uses this precedence:
 
 ```text
 if PyRAT date_of_set_up exists:
@@ -102,8 +107,16 @@ else:
     dof_source = pyrat_record_date
 ```
 
+Only the date part of each PyRAT timestamp is used (no timezone conversion);
+the chosen `dof_source` is stored on the dish and shown under the DOF field.
+
 For crossing `18178`, this caused new dishes to prefill from `2026-05-07` rather
 than the `2026-05-11` date visible in the PyRAT table.
+
+Where the payload comes from matters for the correction below: the new-dish
+prefill reads the locally cached `crosses.data` payload first (filling any gaps
+from the most recent existing dish for that cross), and only fetches
+`api/v3/tanks/crossings` when the local prefill is incomplete.
 
 As a local operational correction, the cached `crosses.data.date_of_set_up` for
 crossing `18178` was patched to `2026-05-11T00:00:00`, and existing dish rows for
@@ -115,7 +128,12 @@ dof = 20260512
 ```
 
 This was a local cache/data correction only. It does not resolve the upstream
-field-semantics question.
+field-semantics question, and the cache patch is not durable: any later fetch
+of crossing `18178` (the PyRAT crossings page, the new-dish live fallback, or
+`scripts/refresh_cross_cache.py --refetch-cached`) goes through `_cache_cross_rows`, which merges
+the fresh PyRAT payload over the cached one, so PyRAT's `2026-05-07` value
+returns. Whether the patch is still in place has not been re-checked. The
+patched dish rows are not affected by cache refreshes.
 
 ## Question for PyRAT/company maintainers
 
