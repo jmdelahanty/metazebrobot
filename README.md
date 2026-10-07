@@ -108,7 +108,13 @@ additive API change, regenerate the pinned schema with
 
 [`docs/README.md`](docs/README.md) indexes the design notes and reference
 docs: what each is for, and whether it has been checked against the current
-code. It is generated from each doc's frontmatter by `scripts/docs_index.py`.
+code. It is generated from each doc's frontmatter by `scripts/docs_index.py`,
+which runs the shared generator from agent-contracts (`docs-contract/`) at a
+pinned commit; it needs an agent-contracts checkout next to this repo or at
+`$AGENT_CONTRACTS_DIR`. Not indexed there: the
+[API service guide](API_SERVICE_GUIDE.md), the pinned consumer API schema
+[`docs/api/consumer_openapi.json`](docs/api/consumer_openapi.json), and the
+database schema [`docs/schema.sql`](docs/schema.sql).
 
 ## Project structure
 

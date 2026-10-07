@@ -1,166 +1,72 @@
 #!/usr/bin/env python
-"""Generate docs/README.md (the docs index) from each doc's frontmatter.
+"""Generate or check docs/README.md with the shared docs-contract generator.
 
-Every Markdown doc under docs/ (except README.md files) starts with flat
-frontmatter:
+The frontmatter schema and the generator live in agent-contracts
+(docs-contract/README.md, docs-contract/docs_index.py); this repo doesn't keep
+its own copy. This wrapper runs the generator at a pinned agent-contracts
+commit, read from a local checkout with ``git show`` so the checkout's own
+state doesn't matter. Re-pin by changing DOCS_CONTRACT_COMMIT.
 
-    ---
-    title: "Tank Heritage and Background Design"
-    summary: "One line: what the doc is for."
-    owner: metazebrobot
-    status: current            # current | archive
-    kind: design               # reference | design | investigation | plan
-    verified_against: a56e219  # commit it was last checked against the code, or null
-    verified_scope: "..."      # optional: which part was checked, if not all
-    ---
-
-The index groups current docs by kind, shows each one's review state, lists
-docs that need review, and lists the archive. It is generated, so it can't
-drift from the docs: tests/test_docs_index.py runs --check.
+The checkout is found via $AGENT_CONTRACTS_DIR, else a sibling directory named
+agent-contracts or contracts.
 
     pixi run python scripts/docs_index.py          # rewrite docs/README.md
-    pixi run python scripts/docs_index.py --check  # exit 1 if stale or invalid
+    pixi run python scripts/docs_index.py --check  # exit 1 if stale, 2 if invalid
+
+Other arguments (e.g. --list-unadopted) pass through to the generator.
 """
 
-import argparse
-import re
+import os
+import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Optional
 
-DOCS = Path(__file__).resolve().parents[1] / "docs"
-INDEX = DOCS / "README.md"
-REQUIRED = ("title", "summary", "owner", "status", "kind", "verified_against")
-STATUSES = ("current", "archive")
-KINDS = ("reference", "design", "investigation", "plan")
-KIND_HEADINGS = {
-    "reference": "Reference: how things work now",
-    "design": "Design",
-    "investigation": "Investigations",
-    "plan": "Plans",
-}
-FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DOCS = REPO_ROOT / "docs"
+REPO_NAME = "MetaZebrobot"
+DOCS_CONTRACT_COMMIT = "46a2c5e2b0df3283d74b2ca72514bbc48c7e61f9"
+GENERATOR_PATH = "docs-contract/docs_index.py"
 
 
-def parse_frontmatter(text: str) -> Dict[str, object]:
-    """Flat ``key: value`` frontmatter; quoted strings and null supported."""
-    match = FRONTMATTER.match(text)
-    if not match:
-        raise ValueError("missing frontmatter")
-    meta: Dict[str, object] = {}
-    for line in match.group(1).splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        key, sep, value = line.partition(":")
-        if not sep:
-            raise ValueError(f"not a key: value line: {line!r}")
-        value = value.split(" #", 1)[0].strip()
-        if value == "null":
-            meta[key.strip()] = None
-        else:
-            meta[key.strip()] = value[1:-1] if value[:1] == value[-1:] == '"' else value
-    return meta
+def find_agent_contracts() -> Optional[Path]:
+    candidates = [os.environ.get("AGENT_CONTRACTS_DIR")]
+    candidates += [str(REPO_ROOT.parent / name) for name in ("agent-contracts", "contracts")]
+    for candidate in candidates:
+        if candidate and (Path(candidate) / ".git").exists():
+            return Path(candidate)
+    return None
 
 
-def load_docs() -> List[Dict[str, object]]:
-    docs, errors = [], []
-    for path in sorted(DOCS.rglob("*.md")):
-        if path.name == "README.md":
-            continue
-        rel = path.relative_to(DOCS).as_posix()
-        try:
-            meta = parse_frontmatter(path.read_text())
-        except ValueError as exc:
-            errors.append(f"{rel}: {exc}")
-            continue
-        missing = [key for key in REQUIRED if key not in meta]
-        if missing:
-            errors.append(f"{rel}: missing {', '.join(missing)}")
-        if meta.get("status") not in STATUSES:
-            errors.append(f"{rel}: status must be one of {STATUSES}")
-        if meta.get("kind") not in KINDS:
-            errors.append(f"{rel}: kind must be one of {KINDS}")
-        if meta.get("status") == "archive" and not rel.startswith("archive/"):
-            errors.append(f"{rel}: archived docs belong in docs/archive/")
-        if meta.get("verified_scope") and not meta.get("verified_against"):
-            errors.append(f"{rel}: verified_scope needs verified_against")
-        docs.append({**meta, "path": rel})
-    if errors:
-        raise ValueError("\n".join(errors))
-    return docs
+def pinned_generator() -> str:
+    """Source of the shared generator at the pinned commit; raises LookupError."""
+    checkout = find_agent_contracts()
+    if checkout is None:
+        raise LookupError("no agent-contracts checkout: set AGENT_CONTRACTS_DIR or clone it next to this repo")
+    result = subprocess.run(
+        ["git", "-C", str(checkout), "show", f"{DOCS_CONTRACT_COMMIT}:{GENERATOR_PATH}"],
+        capture_output=True, text=True)
+    if result.returncode != 0:
+        raise LookupError(f"{checkout} lacks agent-contracts {DOCS_CONTRACT_COMMIT[:7]}; "
+                          f"run `git -C {checkout} fetch origin`")
+    return result.stdout
 
 
-def review_state(doc: Dict[str, object]) -> str:
-    commit = doc.get("verified_against")
-    if not commit:
-        return "needs review"
-    scope = doc.get("verified_scope")
-    return f"checked at `{commit}`" + (f" ({scope})" if scope else "")
-
-
-def render(docs: List[Dict[str, object]]) -> str:
-    current = [d for d in docs if d["status"] == "current"]
-    archive = [d for d in docs if d["status"] == "archive"]
-    out = [
-        "# MetaZebrobot docs",
-        "",
-        "<!-- Generated by scripts/docs_index.py from each doc's frontmatter. Don't edit by hand. -->",
-        "",
-        "Docs index for people and agents. Each doc's frontmatter records its",
-        "owner, status, kind, and the commit at which it was last checked against",
-        "the code (`verified_against`, optionally limited to `verified_scope`).",
-        "\"Needs review\" means nobody has checked it against the current code;",
-        "treat it as background, not ground truth.",
-        "",
-        "Also: the top-level [README](../README.md),",
-        "[API service guide](../API_SERVICE_GUIDE.md), the pinned consumer API",
-        "schema [`api/consumer_openapi.json`](api/consumer_openapi.json), and the",
-        "database schema [`schema.sql`](schema.sql).",
-    ]
-    for kind in KINDS:
-        group = [d for d in current if d["kind"] == kind]
-        if not group:
-            continue
-        out += ["", f"## {KIND_HEADINGS[kind]}", "", "| Doc | What it's for | Review |", "|---|---|---|"]
-        for d in group:
-            out.append(f"| [{d['title']}]({d['path']}) | {d['summary']} | {review_state(d)} |")
-
-    pending = [d for d in current if not d.get("verified_against")]
-    # Absent verified_scope means the whole doc (agent-contracts docs-contract).
-    partial = [d for d in current if d.get("verified_against") and d.get("verified_scope")]
-    out += ["", "## Review backlog", ""]
-    if pending or partial:
-        out += [f"- [{d['title']}]({d['path']}): needs review" for d in pending]
-        out += [f"- [{d['title']}]({d['path']}): checked only for {d['verified_scope']}"
-                for d in partial]
-    else:
-        out.append("Nothing pending.")
-
-    out += ["", "## Archive", "",
-            "Past plans and investigations, kept for context and not maintained",
-            "([about the archive](archive/README.md)).", ""]
-    out += [f"- [{d['title']}]({d['path']}): {d['summary']}" for d in archive]
-    return "\n".join(out) + "\n"
+def run(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-", "--docs-dir", str(DOCS), "--repo", REPO_NAME, *args],
+        input=pinned_generator(), capture_output=True, text=True)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--check", action="store_true", help="Exit 1 if docs/README.md is stale")
-    args = parser.parse_args()
     try:
-        text = render(load_docs())
-    except ValueError as exc:
-        print(f"Invalid doc frontmatter:\n{exc}", file=sys.stderr)
-        return 2
-    if args.check:
-        if not INDEX.exists() or INDEX.read_text() != text:
-            print("STALE: docs/README.md doesn't match doc frontmatter; re-run without --check.")
-            return 1
-        print("OK: docs/README.md matches doc frontmatter")
-        return 0
-    INDEX.write_text(text)
-    print(f"Wrote {INDEX.relative_to(DOCS.parent)}")
-    return 0
+        result = run(*sys.argv[1:])
+    except LookupError as exc:
+        print(f"docs_index: {exc}", file=sys.stderr)
+        return 3
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    return result.returncode
 
 
 if __name__ == "__main__":
