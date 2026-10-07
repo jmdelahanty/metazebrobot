@@ -118,6 +118,29 @@ should be retried. A connection failure (service down or tunnel closed) has
 no HTTP status. When recording a failed lookup, keep the HTTP status and
 `detail.error` (if present) in the snapshot `errors[]` entry.
 
+## Dates and times
+
+The lab and the MetaZebrobot server are on the US East Coast:
+**America/New_York** (EST/EDT). Two conventions are in use, so read each field
+by its kind:
+
+| Kind | Fields | Timezone | Format |
+|------|--------|----------|--------|
+| Calendar days | `dof`, `date_created`, `cross_setup_date`, `termination_date`, `screening_date_finalized` | Lab-local (America/New_York) | `YYYYMMDD`, no time or offset |
+| PyRAT datetimes | `date_of_set_up`, `date_of_record`, `date_of_birth`, ... (passed through from PyRAT) | Facility-local (America/New_York), observed rather than documented by PyRAT | `YYYY-MM-DDTHH:MM:SS`, no offset |
+| Record timestamps | `updated_at`, `created_at`, `cross.cache_updated_at` | **UTC** (SQLite `CURRENT_TIMESTAMP`) | `YYYY-MM-DD HH:MM:SS`, no offset |
+| Explicit UTC | `started_at_utc` (`/version`), consumers' `*_utc` fields | UTC | ISO 8601 with `Z` |
+
+- `dof` is PyRAT `date_of_set_up` + 1 day (`dof_source = pyrat_setup_plus_1`),
+  PyRAT `date_of_record`, or entered by hand: always a lab wall-clock day.
+- The served `dpf` is `dof` against the server's local (America/New_York)
+  "today", so it changes at local midnight; it is the dish's age at request
+  time, not at a recording. Compute `dpf_at_acquisition` yourself (above).
+- `updated_at` looks like local time but is UTC: `2026-10-02 16:28:20` is
+  12:28 EDT. Parse it as UTC.
+- To get a lab-local calendar day from a UTC instant, convert to
+  `America/New_York` first (Python: `instant.astimezone(ZoneInfo("America/New_York")).date()`).
+
 ## Contract and stability
 
 This document is the single source for what the consumer-facing fields mean.
@@ -196,7 +219,10 @@ Store a single JSON object with the following fields:
 These values are computed at acquisition time and are not fetched from the API:
 
 - `dpf_at_acquisition` (int)
-  - Compute as: `session_start_utc.date() - dof_date` (UTC dates).
+  - Compute as: (the session start instant converted to **America/New_York**,
+    then its calendar date) − `dof`. Do **not** take the date from the UTC
+    instant: a session started after 20:00 EDT (00:00 UTC) would come out one
+    day too old. See [Dates and times](#dates-and-times).
   - If `dof` is missing or invalid, set `dpf_at_acquisition=null` and add `"dpf"` to `missing`.
   - If the computed value is negative, set `dpf_at_acquisition=null` and add an error entry.
 
