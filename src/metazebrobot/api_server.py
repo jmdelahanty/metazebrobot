@@ -31,6 +31,10 @@ from .models.fish_dish import (
     DISH_TRANSFER_REASON_OPTIONS,
     DISH_COUNT_REASON_LABELS,
     DISH_COUNT_REASON_OPTIONS,
+    FEED_TYPE_LABELS,
+    FEED_TYPE_OPTIONS,
+    feed_type_options_text,
+    normalize_feed_type,
     TERMINATION_REASON_OPTIONS,
     normalize_termination_reason,
     next_numbered_dish_number,
@@ -2279,6 +2283,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
     # Jinja2 templates & static files
     templates = Jinja2Templates(directory=str(_PACKAGE_DIR / "templates"))
+    # Canonical feed types display as labels; older free-text values pass through.
+    templates.env.filters["feed_type_label"] = lambda value: FEED_TYPE_LABELS.get(value, value)
     app.mount("/static", StaticFiles(directory=str(_PACKAGE_DIR / "static")), name="static")
     # Serve indicator reference images from config/images/
     _config_images_dir = _PACKAGE_DIR / "config" / "images"
@@ -5100,6 +5106,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "has_units": has_units,
             "now": now,
             "transgenes": transgenes,
+            "feed_type_options": FEED_TYPE_OPTIONS,
         })
 
     @app.get("/care/{dish_id}/checks-table", response_class=HTMLResponse)
@@ -5150,6 +5157,16 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             if not row:
                 raise HTTPException(status_code=404, detail="Dish not found")
 
+        canonical_feed_type = normalize_feed_type(feed_type)
+        if (feed_type or "").strip() and canonical_feed_type is None:
+            return templates.TemplateResponse(request, "care/_checks_table.html", {
+                "dish_id": dish_id,
+                "checks": data_manager.get_dish_quality_checks(dish_id),
+                "unit_level": False,
+                "flash_message": f"Unknown feed type '{feed_type}'. Choose one of: {feed_type_options_text()}.",
+                "flash_level": "error",
+            })
+
         image_filename = None
         if care_image is not None and care_image.filename:
             allowed = {"image/jpeg", "image/png"}
@@ -5180,7 +5197,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         check_data = {
             "check_time": check_time,
             "fed": fed,
-            "feed_type": feed_type or None,
+            "feed_type": canonical_feed_type,
             "water_changed": water_changed,
             "vol_water_changed": vol_water_changed,
             "num_dead": num_dead,
@@ -5205,12 +5222,26 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         check_time = form.get("check_time", datetime.now().strftime("%Y%m%dT%H:%M:%S"))
 
         units = data_manager.get_housing_units_with_fish(dish_id)
+        invalid = sorted({
+            str(form.get(f"feed_type_{u['unit_id']}")) for u in units
+            if (form.get(f"feed_type_{u['unit_id']}") or "").strip()
+            and normalize_feed_type(form.get(f"feed_type_{u['unit_id']}")) is None
+        })
+        if invalid:
+            return templates.TemplateResponse(request, "care/_checks_table.html", {
+                "dish_id": dish_id,
+                "checks": [],
+                "unit_level": True,
+                "flash_message": (f"Unknown feed type {', '.join(repr(v) for v in invalid)}. "
+                                  f"Choose one of: {feed_type_options_text()}. Nothing was saved."),
+                "flash_level": "error",
+            })
         saved = 0
         for u in units:
             uid = u["unit_id"]
             fed = form.get(f"fed_{uid}") == "on"
             water = form.get(f"water_changed_{uid}") == "on"
-            feed_type = form.get(f"feed_type_{uid}") or None
+            feed_type = normalize_feed_type(form.get(f"feed_type_{uid}"))
             vol_str = form.get(f"vol_water_changed_{uid}")
             vol = int(vol_str) if vol_str else None
             dead_str = form.get(f"num_dead_{uid}")
@@ -5766,11 +5797,18 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         check_time = body.get("check_time")
         if not check_time:
             raise HTTPException(status_code=422, detail="check_time is required")
+        feed_type = normalize_feed_type(body.get("feed_type"))
+        if (body.get("feed_type") or "").strip() and feed_type is None:
+            raise HTTPException(status_code=422, detail={
+                "error": "invalid_feed_type",
+                "feed_type": body.get("feed_type"),
+                "allowed": [option["value"] for option in FEED_TYPE_OPTIONS],
+            })
         success = data_manager.log_housing_unit_check(
             unit_id=unit_id,
             check_time=check_time,
             fed=body.get("fed"),
-            feed_type=body.get("feed_type"),
+            feed_type=feed_type,
             water_changed=body.get("water_changed"),
             vol_water_changed=body.get("vol_water_changed"),
             num_dead=body.get("num_dead", 0),

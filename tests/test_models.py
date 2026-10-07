@@ -359,3 +359,20 @@ class TestPyRATCrossingPerformance:
         assert crossing.performance_target_count == 2
         assert crossing.performance == 0.5
         assert crossing.performance_ratio_display == "1 / 2"
+
+
+class TestFeedTypes:
+    def test_normalizes_values_and_labels(self):
+        from metazebrobot.models.fish_dish import normalize_feed_type
+
+        assert normalize_feed_type("paramecia") == "paramecia"
+        assert normalize_feed_type(" Rotifers ") == "rotifers"
+        assert normalize_feed_type("brine shrimp") == "brine_shrimp"
+        assert normalize_feed_type("BRINE_SHRIMP") == "brine_shrimp"
+
+    def test_blank_and_unknown(self):
+        from metazebrobot.models.fish_dish import normalize_feed_type
+
+        assert normalize_feed_type("") is None
+        assert normalize_feed_type(None) is None
+        assert normalize_feed_type("dry food") is None

@@ -47,8 +47,11 @@
         <div class="grid">
             <label>
                 Feed type for all
-                <input type="text" id="all-feed-type" placeholder="e.g. paramecia"
-                       onchange="document.querySelectorAll('.unit-feed-type').forEach(el => { if (!el.value) el.value = this.value })">
+                <select id="all-feed-type"
+                        onchange="document.querySelectorAll('.unit-feed-type').forEach(el => { if (!el.value) el.value = this.value })">
+                    <option value="">-</option>
+                    {% for option in feed_type_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+                </select>
             </label>
         </div>
     </details>
@@ -79,7 +82,12 @@
                     {% endif %}
                 </td>
                 <td><input type="checkbox" class="unit-fed" name="fed_{{ u.unit_id }}"></td>
-                <td><input type="text" class="unit-feed-type" name="feed_type_{{ u.unit_id }}" style="min-width:5rem"></td>
+                <td>
+                    <select class="unit-feed-type" name="feed_type_{{ u.unit_id }}" style="min-width:7rem">
+                        <option value="">-</option>
+                        {% for option in feed_type_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+                    </select>
+                </td>
                 <td><input type="checkbox" class="unit-water" name="water_changed_{{ u.unit_id }}"></td>
                 <td><input type="number" name="vol_water_changed_{{ u.unit_id }}" min="0" style="width:5rem"></td>
                 <td><input type="number" name="num_dead_{{ u.unit_id }}" min="0" value="0" style="width:4rem"></td>
@@ -117,7 +125,10 @@
         </label>
         <label>
             Feed Type
-            <input type="text" name="feed_type" placeholder="e.g. paramecia">
+            <select name="feed_type">
+                <option value="">-</option>
+                {% for option in feed_type_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+            </select>
         </label>
     </div>
 

@@ -28,7 +28,7 @@
             <td>{{ c.check_time }}</td>
             {% if unit_level %}<td>{{ c.unit_id.split(":")[-1] if c.unit_id else "-" }}</td>{% endif %}
             <td>{{ "Yes" if c.fed else "No" }}</td>
-            <td>{{ c.feed_type or "-" }}</td>
+            <td>{{ c.feed_type | feed_type_label if c.feed_type else "-" }}</td>
             <td>{{ "Yes" if c.water_changed else "No" }}</td>
             <td>{{ c.vol_water_changed if c.vol_water_changed else "-" }}</td>
             <td>{{ c.num_dead if c.num_dead else "0" }}</td>

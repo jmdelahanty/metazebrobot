@@ -8,10 +8,12 @@ import logging
 from datetime import datetime, timedelta
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QLineEdit, QCheckBox, QSpinBox, QPushButton,
+    QLabel, QLineEdit, QCheckBox, QSpinBox, QPushButton, QComboBox,
     QDateEdit, QTimeEdit, QGroupBox
 )
 from PySide6.QtCore import Signal, Qt, QDate, QTime
+
+from ...models.fish_dish import FEED_TYPE_OPTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +96,11 @@ class QualityCheckDialog(QDialog):
         self.fed = QCheckBox()
         form_layout.addRow("Fed:", self.fed)
         
-        self.feed_type = QLineEdit()
+        self.feed_type = QComboBox()
+        self.feed_type.addItem("-", None)
+        for option in FEED_TYPE_OPTIONS:
+            self.feed_type.addItem(option["label"], option["value"])
         self.feed_type.setEnabled(False)  # Initially disabled
-        self.feed_type.setPlaceholderText("e.g., paramecia, dry food")
         form_layout.addRow("Feed Type:", self.feed_type)
         
         # Connect fed checkbox to enable/disable feed type
@@ -185,7 +189,7 @@ class QualityCheckDialog(QDialog):
         """Clear all input fields."""
         self.set_current_time()  # Reset to current time
         self.fed.setChecked(False)
-        self.feed_type.clear()
+        self.feed_type.setCurrentIndex(0)
         self.water_changed.setChecked(False)
         self.vol_water_changed.setValue(0)
         self.num_dead.setValue(0)
@@ -210,7 +214,7 @@ class QualityCheckDialog(QDialog):
         return {
             "check_time": iso_datetime,
             "fed": self.fed.isChecked(),
-            "feed_type": self.feed_type.text() if self.fed.isChecked() else None,
+            "feed_type": self.feed_type.currentData() if self.fed.isChecked() else None,
             "water_changed": self.water_changed.isChecked(),
             "vol_water_changed": self.vol_water_changed.value() if self.water_changed.isChecked() else None,
             "num_dead": self.num_dead.value(),

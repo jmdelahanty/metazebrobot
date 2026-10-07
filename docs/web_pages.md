@@ -53,6 +53,10 @@ This is the current operator-facing page map for the FastAPI web UI.
 - Simple containers use a dish-level check form for feeding, feed type, water
   change, water volume changed, mortality, notes, and an optional JPEG/PNG care
   image.
+- Feed type is a fixed choice: paramecia, rotifers, or brine shrimp (stored as
+  `paramecia`, `rotifers`, `brine_shrimp`; defined in `models/fish_dish.py`).
+  Other values are rejected by the form, the per-unit grid, and the
+  `POST /units/{unit_id}/checks` API.
 - Care images are stored under `care_images/{dish_id}/`, linked from the
   `quality_checks.image_filename` field, and displayed as thumbnails in recent
   check history.

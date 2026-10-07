@@ -142,6 +142,40 @@ def dish_count_reason_options_text() -> str:
     return ", ".join(DISH_COUNT_REASON_CATEGORIES)
 
 
+FEED_TYPE_PARAMECIA = "paramecia"
+FEED_TYPE_ROTIFERS = "rotifers"
+FEED_TYPE_BRINE_SHRIMP = "brine_shrimp"
+FEED_TYPE_CATEGORIES = (
+    FEED_TYPE_PARAMECIA,
+    FEED_TYPE_ROTIFERS,
+    FEED_TYPE_BRINE_SHRIMP,
+)
+FEED_TYPE_LABELS = {
+    FEED_TYPE_PARAMECIA: "Paramecia",
+    FEED_TYPE_ROTIFERS: "Rotifers",
+    FEED_TYPE_BRINE_SHRIMP: "Brine shrimp",
+}
+FEED_TYPE_OPTIONS = tuple(
+    {"value": feed_type, "label": FEED_TYPE_LABELS[feed_type]}
+    for feed_type in FEED_TYPE_CATEGORIES
+)
+_FEED_TYPE_ALIASES = {feed_type.casefold(): feed_type for feed_type in FEED_TYPE_CATEGORIES}
+_FEED_TYPE_ALIASES.update({label.casefold(): feed_type for feed_type, label in FEED_TYPE_LABELS.items()})
+
+
+def normalize_feed_type(feed_type: Optional[str]) -> Optional[str]:
+    """Return the canonical stored feed type, or None if blank or unrecognized."""
+    normalized = (feed_type or "").strip()
+    if not normalized:
+        return None
+    return _FEED_TYPE_ALIASES.get(normalized.casefold())
+
+
+def feed_type_options_text() -> str:
+    """Human-readable list of allowed feed types."""
+    return ", ".join(FEED_TYPE_CATEGORIES)
+
+
 def next_numbered_dish_number(cross_id: str, dish_ids: Iterable[str]) -> int:
     """Return one greater than the largest plain numeric suffix for a cross."""
     prefix = f"{cross_id}_"

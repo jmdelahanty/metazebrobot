@@ -1096,6 +1096,58 @@ class TestDailyCare:
         assert resp.status_code == 200
         assert "Saved 1 unit checks" in resp.text
 
+    def test_feed_type_is_a_fixed_choice(self, client, seed_dish):
+        form = client.get(f"/care/{seed_dish}").text
+        for value, label in (("paramecia", "Paramecia"), ("rotifers", "Rotifers"),
+                             ("brine_shrimp", "Brine shrimp")):
+            assert f'<option value="{value}">{label}</option>' in form
+        assert 'name="feed_type" placeholder' not in form  # no free text
+
+    def test_dish_check_stores_canonical_feed_type(self, client, seed_dish):
+        resp = client.post(f"/care/{seed_dish}/check", data={
+            "check_time": "20260404T09:00:00", "fed": "true", "feed_type": "Brine shrimp",
+        })
+        assert "Check saved" in resp.text
+        assert "Brine shrimp" in resp.text  # history shows the label
+        with data_manager.get_connection() as conn:
+            stored = conn.execute(
+                "SELECT feed_type FROM quality_checks WHERE dish_id = ? AND check_time = ?",
+                (seed_dish, "20260404T09:00:00"),
+            ).fetchone()[0]
+        assert stored == "brine_shrimp"
+
+    def test_unknown_feed_type_is_rejected(self, client, seed_dish):
+        resp = client.post(f"/care/{seed_dish}/check", data={
+            "check_time": "20260404T10:00:00", "fed": "true", "feed_type": "dry food",
+        })
+        assert "Unknown feed type" in resp.text
+        with data_manager.get_connection() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM quality_checks WHERE dish_id = ? AND check_time = ?",
+                (seed_dish, "20260404T10:00:00"),
+            ).fetchone()[0] == 0
+
+    def test_unit_checks_reject_unknown_feed_type_and_save_nothing(self, client, seed_dish):
+        client.post(f"/dishes/{seed_dish}/units",
+                    json={"unit_kind": "well", "count": 2, "label_format": "well_plate"})
+        good, bad = f"{seed_dish}:A1", f"{seed_dish}:A2"
+        resp = client.post(f"/care/{seed_dish}/unit-checks", data={
+            "check_time": "20260404T11:00:00",
+            f"fed_{good}": "on", f"feed_type_{good}": "rotifers",
+            f"fed_{bad}": "on", f"feed_type_{bad}": "flakes",
+        })
+        assert "Unknown feed type" in resp.text and "Nothing was saved" in resp.text
+        assert client.get(f"/units/{good}/checks").json()["items"] == []
+
+    def test_unit_check_api_rejects_unknown_feed_type(self, client, seed_dish):
+        unit_id = client.post(f"/dishes/{seed_dish}/units",
+                              json={"position_label": "feed-api"}).json()["unit_id"]
+        resp = client.post(f"/units/{unit_id}/checks",
+                           json={"check_time": "2026-04-04T09:00:00", "fed": True, "feed_type": "flakes"})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "invalid_feed_type"
+        assert resp.json()["detail"]["allowed"] == ["paramecia", "rotifers", "brine_shrimp"]
+
     def test_care_form_shows_units(self, client, seed_dish):
         # Create wells
         client.post(
