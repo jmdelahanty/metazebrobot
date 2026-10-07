@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Heritage - Tank {{ tank_id }}{% endblock %}
+
+{% block content %}
+{% set h = heritage %}
+{% set t = h.tank %}
+{% set pc = h.producing_cross %}
+<style>
+.heritage-graph-shell { overflow-x: auto; border: 1px solid var(--pico-muted-border-color); border-radius: 8px; padding: 0.5rem; }
+.heritage-graph text { font-size: 12px; fill: var(--pico-color); }
+.heritage-graph a, .heritage-graph a text { text-decoration: none; }
+.heritage-graph .node-title { font-weight: 600; font-size: 13px; }
+.heritage-graph .tank rect { fill: var(--pico-card-background-color); stroke: #1f7a5a; stroke-width: 1.5; rx: 8; }
+.heritage-graph .tank.subject rect { stroke: #b65f24; stroke-width: 3; }
+.heritage-graph .tank.unknown rect { stroke-dasharray: 4 3; }
+.heritage-graph .cross rect { fill: var(--pico-secondary-background); stroke: #6b5fa8; stroke-width: 1.5; rx: 18; }
+.heritage-graph .cross text { fill: #fff; }
+.heritage-graph path.edge { fill: none; stroke: #8a8f98; stroke-width: 1.5; }
+.heritage-graph path.edge.split { stroke: #b65f24; stroke-dasharray: 6 4; }
+.heritage-legend span { margin-right: 1.25rem; }
+</style>
+
+<hgroup>
+    <h2>Heritage - Tank {{ tank_id }}</h2>
+    <p>{{ t.strain_name or "unknown strain" }}{% if t.generation %} · {{ t.generation }}{% endif %}{% if t.date_of_birth %} · born {{ t.date_of_birth[:10] }}{% endif %}</p>
+</hgroup>
+
+<section>
+    <table>
+        <tbody>
+            <tr>
+                <th>Produced by</th>
+                <td>
+                    {% if pc %}
+                    cross <a href="/crosses/{{ pc.cross_id }}/provenance/">{{ pc.cross_id }}</a>
+                    ({{ pc.cross_type or "cross type unknown" }}{% if pc.date_of_set_up %}, set up {{ pc.date_of_set_up[:10] }}{% endif %})
+                    {% for split in pc.via_splits %}<br><small>split from tank <a href="/tanks/{{ split.from_tank_id }}/heritage/">{{ split.from_tank_id }}</a>{% if split.date %} on {{ split.date }}{% endif %}</small>{% endfor %}
+                    {% else %}
+                    <em>not found in PyRAT records (imported line, founder, or not yet resolved)</em>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr><th>Cohort</th><td>{{ h.cohort_month or "-" }}</td></tr>
+            <tr>
+                <th>Background (records)</th>
+                <td>
+                    {% set derived = h.backgrounds + h.mutant_backgrounds %}
+                    {% if derived %}{% for item in derived %}{{ item.value }}{% if not loop.last %}, {% endif %}{% endfor %}
+                    <br><small>{{ h.generations_traced }} generation{{ "s" if h.generations_traced != 1 }} traced</small>
+                    {% else %}-{% endif %}
+                </td>
+            </tr>
+            {% set anc = h.strain_ancestry %}
+            {% set anc_items = anc.backgrounds + anc.mutant_backgrounds %}
+            {% set named = h.name_only.backgrounds + h.name_only.mutant_backgrounds %}
+            {% if anc_items or named %}
+            <tr>
+                <th>Inferred (not from records)</th>
+                <td>
+                    {% for item in anc_items %}{{ item.value }} <small>(strain ancestry)</small>{% if not loop.last or named %}, {% endif %}{% endfor %}
+                    {% for value in named %}{% if value not in anc_items | map(attribute="value") | list %}{{ value }} <small>(name)</small>{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}
+                </td>
+            </tr>
+            {% endif %}
+            <tr>
+                <th>Label check</th>
+                <td>
+                    {% if h.flags %}{% for flag in h.flags %}⚠ {{ flag }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+                    {% elif h.label %}{{ "✓ label matches records" if (h.label_checks.values() | select("sameas", true) | list) else "label present, not checkable from records" }}
+                    {% else %}<small>no aquatics label</small>{% endif %}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+<section>
+    <h3>Lineage</h3>
+    {% if graph.nodes | length > 1 %}
+    <div class="heritage-graph-shell">
+        <svg class="heritage-graph" viewBox="0 0 {{ graph.width }} {{ graph.height }}"
+             width="{{ graph.width }}" height="{{ graph.height }}" role="img"
+             aria-label="Lineage graph for tank {{ tank_id }}">
+            <defs>
+                <marker id="heritage-arrow" markerWidth="10" markerHeight="10" refX="9" refY="3"
+                        orient="auto" markerUnits="strokeWidth">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#8a8f98"></path>
+                </marker>
+            </defs>
+            {% for edge in graph.edges %}
+            <path class="edge {{ edge.kind }}" d="{{ edge.path }}" marker-end="url(#heritage-arrow)">{% if edge.label %}<title>{{ edge.label }}</title>{% endif %}</path>
+            {% endfor %}
+            {% for node in graph.nodes %}
+            {% if node.kind == "cross" %}
+            <a href="/crosses/{{ node.cross_id }}/provenance/">
+                <g class="cross">
+                    <rect x="{{ node.x }}" y="{{ node.y }}" width="{{ node.width }}" height="{{ node.height }}"></rect>
+                    <text class="node-title" x="{{ node.x + 14 }}" y="{{ node.y + 20 }}">cross {{ node.cross_id }}</text>
+                    <text x="{{ node.x + 14 }}" y="{{ node.y + 36 }}">{{ node.cross_type or "type unknown" }}{% if node.date_of_set_up %} · {{ node.date_of_set_up }}{% endif %}</text>
+                </g>
+            </a>
+            {% else %}
+            <a href="/tanks/{{ node.tank_id }}/heritage/">
+                <g class="tank {{ node.role }} {{ 'unknown' if node.origin == 'unknown' }}">
+                    <rect x="{{ node.x }}" y="{{ node.y }}" width="{{ node.width }}" height="{{ node.height }}"></rect>
+                    <text class="node-title" x="{{ node.x + 12 }}" y="{{ node.y + 20 }}">tank {{ node.tank_id }}{% if node.generation %} · {{ node.generation }}{% endif %}</text>
+                    <text x="{{ node.x + 12 }}" y="{{ node.y + 38 }}">{{ (node.strain_name or "unknown strain")[:30] }}{{ "…" if node.strain_name and node.strain_name | length > 30 }}</text>
+                    <text x="{{ node.x + 12 }}" y="{{ node.y + 56 }}">{% if node.date_of_birth %}born {{ node.date_of_birth }}{% endif %}{% if node.origin == "unknown" %} · origin unknown{% elif node.origin == "not expanded" %} · more →{% endif %}</text>
+                    <title>{{ node.strain_name or "" }}</title>
+                </g>
+            </a>
+            {% endif %}
+            {% endfor %}
+        </svg>
+    </div>
+    <p class="heritage-legend">
+        <span>▭ tank</span><span>⬭ cross</span><span style="color:#b65f24">- - split into a new tank <small>(hover for date)</small></span>
+        <span><small>Click a node to open it.{% if graph.truncated %} Showing {{ graph.generations }} generations;
+        <a href="?generations={{ [graph.generations + 1, 6] | min }}">show more</a>.{% endif %}</small></span>
+    </p>
+    {% else %}
+    <p><em>No recorded ancestry for this tank in the cached PyRAT data.</em></p>
+    {% endif %}
+</section>
+
+<section>
+    <h3>Where each background came from</h3>
+    {% set derived = h.backgrounds + h.mutant_backgrounds %}
+    {% if derived or anc_items %}
+    <table>
+        <thead><tr><th>Background</th><th>Source</th><th>Evidence</th></tr></thead>
+        <tbody>
+            {% for item in derived %}
+            <tr><td>{{ item.value }}</td><td>records</td><td><small>{{ item.sources | join("; ") }}</small></td></tr>
+            {% endfor %}
+            {% for item in anc_items %}
+            <tr><td>{{ item.value }}</td><td>strain ancestry (inferred)</td><td><small>{{ item.sources | join("; ") }}</small></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p><em>No background could be derived.</em></p>
+    {% endif %}
+</section>
+{% endblock %}

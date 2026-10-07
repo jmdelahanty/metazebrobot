@@ -1,6 +1,9 @@
 # Tank Heritage and Background Design
 
-Status: design (2026-10-06). Not yet implemented.
+Status (2026-10-06): steps 1–4 below are built and deployed; step 5 is not.
+The view is at `/tanks/{tank_id}/heritage/` (linked from each parent on a
+cross's provenance page). Keeping the cache current: `API_SERVICE_GUIDE.md`,
+"Nightly Cross-Cache Sync".
 
 Goal: for any dish, cross, or PyRAT tank, show where its fish came from — the
 genetic background (AB, WIK, Casper, ...), whether each generation was an
@@ -144,15 +147,27 @@ uses the derived values instead of parsing names only.
 
 ## Build order
 
-1. Complete crossing fetch fields, refetch cached crosses, add all-owner sync and
-   the `cross_children` index. Fixes the blank background page.
-2. Derive incross / cohort / background with sources; parse the label shorthand;
-   flag disagreements. Tests from the cases in "Labels checked against records".
-3. Tank-lineage heritage view.
-4. Strain-ancestry cache and layer.
+1. ✅ Complete crossing fetch fields, refetch cached crosses, add all-owner sync
+   and the `cross_children` index. Fixes the blank background page.
+2. ✅ Derive incross / cohort / background with sources; parse the label
+   shorthand; flag disagreements (2a). Follow splits and search older crosses
+   (`tank_origins`, 2b). Strain ancestry as a separate inferred layer (2c).
+3. ✅ Tank-lineage heritage view (`utils/heritage_graph.py`, server-side SVG,
+   tank on the left and ancestors to the right).
+4. ✅ Strain-ancestry cache, refreshed nightly for strains that need it.
 5. Manual curation (`cross_parent_background_design.md` step 6).
+6. Strain renames and tank strain reassignment: key everything by `strain_id`,
+   keep a name history, re-derive from current names (see open questions).
 
 ## Open questions
+
+- Strain renames (2026-10-06). PyRAT strain names change as information
+  arrives, but cached rows store the name as fetched, and backgrounds/labels
+  are parsed from it, so old crosses keep stale names. Plan: a `strains`
+  table refreshed nightly from `api/v3/strains` (about 9 requests), a
+  `strain_names` history, derivation from the current name by `strain_id`,
+  and "formerly ..." in the UI. A tank reassigned to another strain (new
+  `strain_id`) needs a periodic re-fetch of cached crossings instead.
 
 - *Danionella* and bracketed line tags (2026-10-06). `WT D. cerebrum [Utah]`,
   `WT D. translucida`, `WT D. dracula`, and tags such as `[Parisian]` on

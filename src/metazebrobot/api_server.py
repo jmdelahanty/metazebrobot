@@ -52,6 +52,7 @@ from .utils.cross_provenance import (
     normalize_cross_parents,
     summarize_cross_background,
 )
+from .utils.heritage_graph import build_heritage_graph, layout_heritage_graph
 from .utils.tank_heritage import derive_tank_heritage
 from .utils.strain_ancestry import ensure_strain_ancestry_schema
 from .utils.tank_origins import ensure_tank_origins_schema
@@ -5550,6 +5551,42 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """Read-only page for inspecting PyRAT parent/background provenance."""
         provenance = _load_cross_provenance(cross_id)
         return templates.TemplateResponse(request, "fish/cross_provenance.html", provenance)
+
+    def _load_tank_heritage(tank_id: str, generations: int) -> Dict[str, Any]:
+        db_path = _require_db_path()
+        try:
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                known = conn.execute(
+                    "SELECT 1 FROM cross_parents WHERE tank_id = ? "
+                    "UNION SELECT 1 FROM cross_children WHERE tank_id = ? LIMIT 1",
+                    (tank_id, tank_id),
+                ).fetchone()
+                if not known:
+                    raise _not_found("tank", tank_id=tank_id)
+                heritage = derive_tank_heritage(conn, tank_id)
+                graph = build_heritage_graph(conn, tank_id, generations=generations)
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
+        return {"tank_id": tank_id, "heritage": heritage, "graph": graph}
+
+    @app.get("/tanks/{tank_id}/heritage")
+    def tank_heritage_api(
+        tank_id: str,
+        generations: int = Query(default=3, ge=1, le=6),
+    ) -> Dict[str, Any]:
+        """Record-derived heritage and lineage graph for a cached PyRAT tank."""
+        return _load_tank_heritage(tank_id, generations)
+
+    @app.get("/tanks/{tank_id}/heritage/", response_class=HTMLResponse)
+    def tank_heritage_page(
+        request: Request,
+        tank_id: str,
+        generations: int = Query(default=3, ge=1, le=6),
+    ):
+        """Heritage view: lineage graph plus where each background came from."""
+        data = _load_tank_heritage(tank_id, generations)
+        data["graph"] = layout_heritage_graph(data["graph"])
+        return templates.TemplateResponse(request, "fish/tank_heritage.html", data)
 
     @app.get("/crosses/{cross_id}/fish/", response_class=HTMLResponse)
     def fish_cross_page(request: Request, cross_id: str):

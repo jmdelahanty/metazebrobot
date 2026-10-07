@@ -19,7 +19,6 @@ Back up first, or use --db-path on a copy.
 import argparse
 import sqlite3
 import sys
-import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -29,25 +28,10 @@ from metazebrobot.api_server import _ensure_cross_parent_provenance_schema  # no
 from metazebrobot.utils.strain_ancestry import (  # noqa: E402
     StrainPedigreeClient,
     ensure_strain_ancestry_schema,
+    fetch_strain_ancestry,
     needs_fetch,
-    parse_strain_pedigree,
-    store_strain_ancestry,
+    strains_needing_ancestry,
 )
-from metazebrobot.utils.tank_heritage import derive_tank_heritage  # noqa: E402
-
-
-def unresolved_strain_ids(conn: sqlite3.Connection) -> list:
-    strain_ids = set()
-    tanks = [r[0] for r in conn.execute(
-        "SELECT DISTINCT tank_id FROM cross_parents WHERE tank_id IS NOT NULL")]
-    for tank_id in tanks:
-        heritage = derive_tank_heritage(conn, tank_id)
-        if heritage["backgrounds"] or heritage["mutant_backgrounds"]:
-            continue
-        strain_id = heritage["tank"].get("strain_id")
-        if strain_id is not None:
-            strain_ids.add(str(strain_id))
-    return sorted(strain_ids, key=int)
 
 
 def main() -> int:
@@ -66,24 +50,18 @@ def main() -> int:
     ensure_strain_ancestry_schema(conn)
     conn.commit()
 
-    strain_ids = unresolved_strain_ids(conn) if args.unresolved else args.strain_id
-    todo = [s for s in strain_ids if needs_fetch(conn, s)]
-    print(f"Strains: {len(strain_ids)} selected, {len(todo)} need fetching")
+    if args.unresolved:
+        todo = strains_needing_ancestry(conn)
+    else:
+        todo = [s for s in args.strain_id if needs_fetch(conn, s)]
+    print(f"Strains needing a pedigree fetch: {len(todo)}")
     if not todo:
         return 0
 
     client = StrainPedigreeClient()
-    with_ancestors = 0
-    for index, strain_id in enumerate(todo):
-        if index:
-            time.sleep(args.pause)
-        ancestors = parse_strain_pedigree(client.pedigree(strain_id), strain_id)
-        store_strain_ancestry(conn, strain_id, ancestors)
-        conn.commit()
-        with_ancestors += bool(ancestors)
-
+    stats = fetch_strain_ancestry(conn, client, todo, pause=args.pause)
     print(f"PyRAT pedigree requests: {client.requests}; "
-          f"strains with recorded ancestors: {with_ancestors} of {len(todo)}")
+          f"strains with recorded ancestors: {stats['with_ancestors']} of {stats['fetched']}")
     conn.close()
     return 0
 

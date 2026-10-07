@@ -153,6 +153,12 @@ catches up a run missed while the machine was off). Each run:
 2. resolves parent tanks that still have no producing cross (new tanks, and
    "not found" results older than 30 days) through tank splits and
    date-of-birth crossing searches, up to 3 generations back.
+3. fetches PyRAT strain pedigrees for strains that are new (or older than 90
+   days), named without a recognizable background, and used by a tank whose
+   records give none. This needs PyRAT frontend (web login) credentials in the
+   same file; without them, or if PyRAT's internal pedigree endpoint fails,
+   the step logs a warning and the run still succeeds (`--skip-ancestry`
+   turns it off).
 
 It only reads PyRAT and only writes cache tables; it is idempotent and holds
 `/nvme1/zebrobot.db.cross-sync.lock` so runs never overlap (exit code 75 if

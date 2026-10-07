@@ -17,10 +17,12 @@ from metazebrobot.api_server import (
 )
 from metazebrobot.utils import strain_ancestry
 from metazebrobot.utils.strain_ancestry import (
+    fetch_strain_ancestry,
     needs_fetch,
     parse_strain_pedigree,
     store_strain_ancestry,
     strain_ancestry_backgrounds,
+    strains_needing_ancestry,
 )
 from metazebrobot.utils.tank_heritage import derive_tank_heritage
 
@@ -127,3 +129,61 @@ class TestHeritageUsesAncestryOnlyAsInference:
         assert [b["value"] for b in h["backgrounds"]] == ["AB"]
         assert h["strain_ancestry"]["backgrounds"] == []
         assert h["strain_ancestry"]["mutant_backgrounds"] == []
+
+
+class FakePedigreeClient:
+    def __init__(self, payloads):
+        self.payloads = payloads
+        self.calls = []
+
+    def pedigree(self, strain_id):
+        self.calls.append(str(strain_id))
+        return self.payloads.get(str(strain_id), {"pedigree": {"nodes": []}})
+
+
+class TestNightlyAncestrySelection:
+    def cache(self, conn, payload):
+        TestHeritageUsesAncestryOnlyAsInference().cache(conn, payload)
+
+    def test_selects_only_unfetched_strains_without_record_background(self, conn):
+        # 1145 parent has no record background; 14 (AB Casper) has one.
+        self.cache(conn, {"crossing_id": 1, "tanks": {
+            "parents": [{"tank_id": 10, "strain_name": "Tg(ubi:Switch)", "strain_id": 1145}],
+            "children": [{"tank_id": 11, "strain_name": "Tg(ubi:Switch)", "strain_id": 1145}]}})
+        self.cache(conn, {"crossing_id": 2, "tanks": {
+            "parents": [{"tank_id": 20, "strain_name": "AB Casper_HHMI", "strain_id": 14}],
+            "children": [{"tank_id": 21, "strain_name": "AB Casper_HHMI", "strain_id": 14}]}})
+
+        assert strains_needing_ancestry(conn) == ["1145"]
+
+    def test_fetch_stores_and_then_nothing_is_needed(self, conn):
+        self.cache(conn, {"crossing_id": 1, "tanks": {
+            "parents": [{"tank_id": 10, "strain_name": "Tg(ubi:Switch)", "strain_id": 1145}],
+            "children": [{"tank_id": 11, "strain_name": "Tg(ubi:Switch)", "strain_id": 1145}]}})
+        client = FakePedigreeClient({"1145": PEDIGREE_1145})
+
+        stats = fetch_strain_ancestry(conn, client, strains_needing_ancestry(conn), pause=0)
+
+        assert stats == {"fetched": 1, "with_ancestors": 1}
+        assert client.calls == ["1145"]
+        assert strains_needing_ancestry(conn) == []
+        assert [b["value"] for b in derive_tank_heritage(conn, 11)["strain_ancestry"]["backgrounds"]] == ["AB"]
+
+
+class TestNightlyAncestryStepIsBestEffort:
+    def test_missing_frontend_credentials_skip_without_failing(self, conn, monkeypatch):
+        import importlib.util
+        from pathlib import Path
+
+        spec = importlib.util.spec_from_file_location(
+            "sync_cross_cache", Path(__file__).resolve().parents[1] / "scripts" / "sync_cross_cache.py")
+        script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script)
+
+        monkeypatch.setattr(script, "strains_needing_ancestry", lambda c: ["1145"])
+
+        def no_credentials():
+            raise RuntimeError("PyRAT frontend credentials are not configured.")
+
+        monkeypatch.setattr(script, "StrainPedigreeClient", no_credentials)
+        assert script.sync_strain_ancestry(conn, pause=0) == "skipped (RuntimeError)"

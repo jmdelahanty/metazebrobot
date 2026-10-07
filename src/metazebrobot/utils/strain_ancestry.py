@@ -131,6 +131,59 @@ def strain_ancestry_backgrounds(conn: sqlite3.Connection, strain_id: Any) -> Dic
     }
 
 
+def strains_needing_ancestry(conn: sqlite3.Connection) -> List[str]:
+    """Strains worth a pedigree fetch: not fetched (or stale), named without
+    any recognizable background, and used by at least one cached tank whose
+    records give no background either."""
+    from .tank_heritage import derive_tank_heritage  # avoid import cycle
+
+    ensure_strain_ancestry_schema(conn)
+    tanks_by_strain: Dict[str, List[str]] = {}
+    names: Dict[str, str] = {}
+    for strain_id, name, tank_id in conn.execute("""
+        SELECT DISTINCT json_extract(raw_payload, '$.strain_id'), raw_strain_name, tank_id
+        FROM cross_parents
+        WHERE tank_id IS NOT NULL AND json_extract(raw_payload, '$.strain_id') IS NOT NULL
+        UNION
+        SELECT DISTINCT strain_id, strain_name, tank_id FROM cross_children
+        WHERE strain_id IS NOT NULL
+    """):
+        tanks_by_strain.setdefault(str(strain_id), []).append(str(tank_id))
+        if name:
+            names[str(strain_id)] = name
+
+    needed = []
+    for strain_id, tank_ids in tanks_by_strain.items():
+        if not needs_fetch(conn, strain_id):
+            continue
+        named = parse_parent_background(names.get(strain_id, ""))
+        if named["background_strains"] or named["mutant_backgrounds"]:
+            continue  # the name already says it; ancestry adds little
+        for tank_id in tank_ids:
+            heritage = derive_tank_heritage(conn, tank_id)
+            if not (heritage["backgrounds"] or heritage["mutant_backgrounds"]):
+                needed.append(strain_id)
+                break
+    return sorted(needed, key=lambda s: int(s) if s.isdigit() else 0)
+
+
+def fetch_strain_ancestry(conn: sqlite3.Connection, client: Any, strain_ids: Iterable[Any],
+                          pause: float = 0.5) -> Dict[str, int]:
+    """Fetch and store pedigrees for ``strain_ids`` (one request each)."""
+    import time
+
+    stats = {"fetched": 0, "with_ancestors": 0}
+    for index, strain_id in enumerate(strain_ids):
+        if index:
+            time.sleep(pause)
+        ancestors = parse_strain_pedigree(client.pedigree(strain_id), strain_id)
+        store_strain_ancestry(conn, strain_id, ancestors)
+        conn.commit()
+        stats["fetched"] += 1
+        stats["with_ancestors"] += bool(ancestors)
+    return stats
+
+
 class StrainPedigreeClient:
     """Logged-in PyRAT frontend session for the colony-pedigree report."""
 

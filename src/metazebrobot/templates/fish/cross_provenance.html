@@ -93,7 +93,10 @@
             <tr>
                 <td>{{ parent.parent_index }}</td>
                 <td>{{ parent.role or "unknown" }}</td>
-                <td>{{ parent.location_display or parent.tank_label or parent.tank_id or "-" }}</td>
+                <td>
+                    {{ parent.location_display or parent.tank_label or parent.tank_id or "-" }}
+                    {% if parent.tank_id %}<br><a href="/tanks/{{ parent.tank_id }}/heritage/"><small>Heritage</small></a>{% endif %}
+                </td>
                 <td>{{ parent.raw_strain_name or "-" }}</td>
                 <td>{{ parent.generation or "-" }}</td>
                 {% set h = parent.heritage or {} %}
