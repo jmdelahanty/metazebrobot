@@ -2562,7 +2562,7 @@ packages:
 - pypi: .
   name: metazebrobot
   version: 0.1.0
-  sha256: ba6074540fbb86c5b162e3b26e141119c82473cb4167b90aa4a4b59b4c1d937c
+  sha256: ef8b36a2ce14ca136e870f6e7f0f102f04672fed2480360c12f04ae9c905573b
   requires_dist:
   - pyside6>=6.8.1,<7
   - numpy>=2.2.3,<3
