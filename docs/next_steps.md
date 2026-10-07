@@ -4,12 +4,15 @@ summary: "Completed and upcoming MetaZebrobot work items."
 owner: metazebrobot
 status: current
 kind: plan
-verified_against: null
+verified_against: 384a366
 ---
 
 # Next Steps
 
-## Completed (April 2-4, 2026)
+## Completed
+
+The initial batch was completed April 2-4, 2026; some items below were
+appended later.
 
 ### Screening model redesign
 - [x] `indicator_screened` → `indicators_screened` (list) + `pigment_screened` (bool)
@@ -47,7 +50,7 @@ verified_against: null
 - [x] Genotype Reference panel reads curated exact-genotype PNG metadata
 - [x] Read-only References page lists curated exact-genotype references
 - [x] References page supports manual genotype reference PNG/JPEG upload
-- [x] Fiji OME-TIFF review workflow documented; Bio-Formats `Colorized` mode applies observed channel colors
+- [x] Fiji OME-TIFF review workflow documented (in `docs/archive/genotype_reference_images_design.md`); Bio-Formats `Colorized` mode applies observed channel colors
 - [x] Genotype references support structured composite/channel/transgene metadata
 - [x] Reference Library can generate composite/channel PNG references from a reviewed OME-TIFF path
 - [x] Reference Library can browse Linux staging files to select an OME-TIFF server path
@@ -116,8 +119,8 @@ verified_against: null
 - [x] Scan input handler deduplicated (one handler in base.html, `data-navigate` attribute)
 - [x] Walkthrough cleanup: TOUR_ prefix guard, screening_images directory sweep
 - [x] Reusable `_fetch_pyrat()` helper for PyRAT API calls
-- [x] 7 stale docs updated, identity contract and enclosure design docs
-- [x] 128 tests passing, zero warnings
+- [x] 7 stale docs updated, identity contract and enclosure design docs (enclosure design since moved to `docs/archive/`)
+- [x] 128 tests passing, zero warnings (as of April 2026)
 
 ## Remaining
 
@@ -129,15 +132,21 @@ verified_against: null
 
 ### Citrus integration prep
 - [ ] Coordinate with Citrus on identity assignment API calls
-  (`GET /dishes/{dish_id}/fish`, `POST /dishes/{dish_id}/fish`)
-- [ ] Define H5 snapshot schema_version=2 format — needs per-fish metadata
-  (fish_id, current housing unit, provenance chain)
+  (`GET /dishes/{dish_id}/fish` and `POST /dishes/{dish_id}/fish` exist on
+  the MetaZebrobot side; Citrus adoption is the open part)
+- [ ] Define a per-fish H5 snapshot format — needs per-fish metadata
+  (fish_id, current housing unit, provenance chain). Note: response
+  `schema_version` 2 is already used by the consumer endpoints for dish
+  identity fields (`dish_uuid`, `revision`, `updated_at`; see
+  [zebrobot_snapshot.md](zebrobot_snapshot.md#identity-and-change-detection)),
+  so per-fish metadata would need a later version.
 - [ ] Verify Palette's `_backfill_subject_dish_cross_entities()` handles
   known fish via `INSERT OR IGNORE` / `ON CONFLICT`
 
 ### Future
 - [ ] Design `POST /dishes/{dish_id}/fish/place` batch endpoint
-  (register N fish + create wells + assign in one call)
+  (register N fish + create wells + assign in one call; the existing
+  `POST /dishes/{dish_id}/fish/batch` only batch-registers fish for the web form)
 - [ ] Optional automatic well creation when splitting into well_plate
   (revisit once workflow is clearer)
 - [ ] Palette integration: read-only session count display on fish detail pages

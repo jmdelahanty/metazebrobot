@@ -4,7 +4,7 @@ summary: "Dish lineage as a directed graph built from transfer and screening rec
 owner: metazebrobot
 status: current
 kind: design
-verified_against: null
+verified_against: 384a366
 ---
 
 # Dish Lineage Graph
@@ -20,15 +20,20 @@ The graph is read from existing records:
 - `dishes` creates dish nodes.
 - `screening_step_allocations` creates screening-derived edges when an
   allocation has a `destination_dish_id` or legacy `derived_dish_id`.
-- `dish_transfer_events` creates transfer edges between existing dishes.
+- `dish_transfer_events` creates transfer edges between dishes, including
+  transfers into a new numbered destination dish created by the transfer.
 - `dish_count_events` creates node-local count adjustment annotations.
 - `parent_dish_id` is used only as a fallback edge for older records that do
   not have a matching screening allocation edge.
 
 The current API endpoints are:
 
-- `GET /crosses/{cross_id}/lineage` for JSON `{nodes, edges, summary}`.
-- `GET /crosses/{cross_id}/lineage/` for a compact HTML event table.
+- `GET /crosses/{cross_id}/lineage` for JSON
+  `{cross_id, nodes, edges, count_events, graph, summary}`, where `graph` is
+  the laid-out node/edge geometry for the SVG view.
+- `GET /crosses/{cross_id}/lineage/` for an HTML page with a compact SVG
+  lineage graph, a count-adjustments table, a lineage-events table, and a
+  dishes table.
 
 ## Design Principle
 
@@ -39,7 +44,8 @@ projection of recorded actions, not a separate source of truth.
 
 - Add fish-level edges once individual fish IDs are routinely assigned before
   well-plate work.
-- Add a richer visualization only after the event model is stable.
+- Extend the compact SVG graph into a richer visualization only after the
+  event model is stable.
 
 ## Count Adjustment History
 
@@ -72,14 +78,16 @@ UI behavior:
 
 - The Dishes page **Edit Count** form requires a reason and accepts optional
   notes.
-- Keep the entered number as the intended current physical fish count.
-- Record the previous and new baseline values because the controller may need to
-  adjust `fish_count`, not just `current_fish_count`, to preserve derived-count
-  semantics.
+- The entered number is the intended current physical fish count.
+- The event records the previous and new baseline values because the
+  controller adjusts `fish_count`, not just `current_fish_count`, to preserve
+  derived-count semantics (see
+  [Fish Counts & Screening Accuracy](fish_count_and_screening_accuracy.md#editing-dish-counts)).
 
 Lineage display:
 
-- Show count-adjustment events on `/crosses/{cross_id}/lineage/` as annotations
-  attached to dish nodes, not arrows between dishes.
+- `/crosses/{cross_id}/lineage/` shows count-adjustment events as annotations
+  attached to dish nodes (latest adjustment on the graph node, plus a Count
+  Adjustments table), not arrows between dishes.
 - Keep movement provenance separate: screening allocations and transfers are
   edges; count corrections are node-local audit events.
