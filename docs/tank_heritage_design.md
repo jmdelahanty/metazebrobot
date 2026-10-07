@@ -4,8 +4,7 @@ summary: "Record-derived tank heritage: producing crosses, splits, backgrounds, 
 owner: metazebrobot
 status: current
 kind: design
-verified_against: a56e219
-verified_scope: "whole document"
+verified_against: 384a366
 ---
 
 # Tank Heritage and Background Design
@@ -143,17 +142,24 @@ Records win over ancestry, ancestry over label; a disagreement between
 
 ### Heritage view
 
-A page for a tank, cross, or dish that renders two layers as a Mermaid graph
-(same approach as the dish lineage page):
+As built: `/tanks/{tank_id}/heritage/` (JSON at `/tanks/{tank_id}/heritage`),
+rendered as server-side SVG like the dish lineage page (no client-side graph
+library), pedigree style with the tank on the left and ancestors to the right
+(`utils/heritage_graph.py`):
 
-1. **Tank lineage** (public API): tank ← producing cross ← parent tanks,
-   recursively to a bounded depth, each node showing strain, DOB, generation,
-   incross/outcross, and the label check.
-2. **Strain ancestry** (internal report, labelled as such): the strain's
-   ancestors back to founder backgrounds.
+1. **Tank lineage** (records): tank ← producing cross ← parent tanks,
+   recursively (3 generations by default, `?generations=` up to 6), following
+   recorded splits; tank nodes show strain, DOB and generation, cross nodes
+   show incross/outcross and set-up date. The summary above the graph shows
+   the label check.
+2. **Strain ancestry** (internal report, labelled as inferred): shown as
+   inferred background values and an evidence table, not as a second graph
+   layer.
 
-The cached-cross page and dish pages link to it; the background summary there
-uses the derived values instead of parsing names only.
+Linked from each parent on a cross's provenance page and from the PyRAT tanks
+page's Heritage column; the provenance page's "Background from parentage" uses
+the derived values instead of parsing names only. Dish pages don't link to it
+yet. Page details: [`web_pages.md`](web_pages.md).
 
 ## Build order
 

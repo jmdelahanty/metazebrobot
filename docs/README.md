@@ -17,47 +17,37 @@ database schema [`schema.sql`](schema.sql).
 
 | Doc | What it's for | Review |
 |---|---|---|
-| [Crossing Performance Metrics — Known Limitations](crossing_performance_caveats.md) | How crossing performance (raised / requested) is calculated and where it misleads. | needs review |
-| [Fish Counts & Screening Accuracy](fish_count_and_screening_accuracy.md) | What fish_count and current_fish_count mean, how counts are edited, and screening accuracy expectations. | needs review |
-| [Fish Tracking API](fish_tracking_api.md) | API for individual fish and housing units, and snapshotting fish metadata at acquisition. | needs review |
-| [Identity and Provenance Contract](identity_and_provenance_contract.md) | Which system owns which records across MetaZebrobot, Citrus, Orange and Palette, and how identity flows between them. | checked at `a56e219` (Dish Identity, Versioning, and Recordings Without Citrus) |
-| [Strain Name Parser: Known Edge Cases](strain_parser_edge_cases.md) | Strain-name forms the transgene parser can't fully decompose. | needs review |
-| [Web Page Capabilities](web_pages.md) | Page-by-page map of the operator web UI. | checked at `a56e219` (Daily Care section) |
-| [MetaZebrobot H5 Snapshot Integration](zebrobot_snapshot.md) | Consumer contract for Citrus, Orange and Palette: snapshot fields, identity, errors, dates and times, stability. | checked at `a56e219` (Identity and change detection; API errors; Dates and times; Contract and stability) |
+| [Crossing Performance Metrics — Known Limitations](crossing_performance_caveats.md) | How crossing performance (raised / requested) is calculated and where it misleads. | checked at `384a366` |
+| [Fish Counts & Screening Accuracy](fish_count_and_screening_accuracy.md) | What fish_count and current_fish_count mean, how counts are edited, and screening accuracy expectations. | checked at `384a366` |
+| [Fish Tracking API](fish_tracking_api.md) | API for individual fish and housing units, and snapshotting fish metadata at acquisition. | checked at `384a366` |
+| [Identity and Provenance Contract](identity_and_provenance_contract.md) | Which system owns which records across MetaZebrobot, Citrus, Orange and Palette, and how identity flows between them. | checked at `384a366` |
+| [Strain Name Parser: Known Edge Cases](strain_parser_edge_cases.md) | Strain-name forms the transgene parser can't fully decompose. | checked at `384a366` |
+| [Web Page Capabilities](web_pages.md) | Page-by-page map of the operator web UI. | checked at `384a366` |
+| [MetaZebrobot H5 Snapshot Integration](zebrobot_snapshot.md) | Consumer contract for Citrus, Orange and Palette: snapshot fields, identity, errors, dates and times, stability. | checked at `384a366` |
 
 ## Design
 
 | Doc | What it's for | Review |
 |---|---|---|
-| [Cross Parent Strain and Background Design](cross_parent_background_design.md) | Per-parent strain and background model for PyRAT crosses (cross_parents, background parser). | checked at `a56e219` (status block) |
-| [Dish Lineage Graph](dish_lineage_graph.md) | Dish lineage as a directed graph built from transfer and screening records. | needs review |
-| [Tank Heritage and Background Design](tank_heritage_design.md) | Record-derived tank heritage: producing crosses, splits, backgrounds, strain ancestry and renames, plus the heritage view. | checked at `a56e219` (whole document) |
+| [Cross Parent Strain and Background Design](cross_parent_background_design.md) | Per-parent strain and background model for PyRAT crosses (cross_parents, background parser). | checked at `384a366` |
+| [Dish Lineage Graph](dish_lineage_graph.md) | Dish lineage as a directed graph built from transfer and screening records. | checked at `384a366` |
+| [Tank Heritage and Background Design](tank_heritage_design.md) | Record-derived tank heritage: producing crosses, splits, backgrounds, strain ancestry and renames, plus the heritage view. | checked at `384a366` |
 
 ## Investigations
 
 | Doc | What it's for | Review |
 |---|---|---|
-| [PyRAT Crossing Date Fields Investigation](pyrat_cross_date_fields.md) | Which PyRAT crossing date fields MetaZebrobot uses for dish dates, and why. | needs review |
+| [PyRAT Crossing Date Fields Investigation](pyrat_cross_date_fields.md) | Which PyRAT crossing date fields MetaZebrobot uses for dish dates, and why. | checked at `384a366` |
 
 ## Plans
 
 | Doc | What it's for | Review |
 |---|---|---|
-| [Next Steps](next_steps.md) | Completed and upcoming MetaZebrobot work items. | needs review |
+| [Next Steps](next_steps.md) | Completed and upcoming MetaZebrobot work items. | checked at `384a366` |
 
 ## Review backlog
 
-- [Crossing Performance Metrics — Known Limitations](crossing_performance_caveats.md): needs review
-- [Dish Lineage Graph](dish_lineage_graph.md): needs review
-- [Fish Counts & Screening Accuracy](fish_count_and_screening_accuracy.md): needs review
-- [Fish Tracking API](fish_tracking_api.md): needs review
-- [Next Steps](next_steps.md): needs review
-- [PyRAT Crossing Date Fields Investigation](pyrat_cross_date_fields.md): needs review
-- [Strain Name Parser: Known Edge Cases](strain_parser_edge_cases.md): needs review
-- [Cross Parent Strain and Background Design](cross_parent_background_design.md): checked only for status block
-- [Identity and Provenance Contract](identity_and_provenance_contract.md): checked only for Dish Identity, Versioning, and Recordings Without Citrus
-- [Web Page Capabilities](web_pages.md): checked only for Daily Care section
-- [MetaZebrobot H5 Snapshot Integration](zebrobot_snapshot.md): checked only for Identity and change detection; API errors; Dates and times; Contract and stability
+Nothing pending.
 
 ## Archive
 

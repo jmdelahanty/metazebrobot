@@ -126,8 +126,8 @@ def render(docs: List[Dict[str, object]]) -> str:
             out.append(f"| [{d['title']}]({d['path']}) | {d['summary']} | {review_state(d)} |")
 
     pending = [d for d in current if not d.get("verified_against")]
-    partial = [d for d in current if d.get("verified_against") and d.get("verified_scope")
-               and d.get("verified_scope") != "whole document"]
+    # Absent verified_scope means the whole doc (agent-contracts docs-contract).
+    partial = [d for d in current if d.get("verified_against") and d.get("verified_scope")]
     out += ["", "## Review backlog", ""]
     if pending or partial:
         out += [f"- [{d['title']}]({d['path']}): needs review" for d in pending]
