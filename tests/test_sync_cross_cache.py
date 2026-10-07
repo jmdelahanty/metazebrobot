@@ -46,10 +46,14 @@ CROSS_50 = crossing(50, [], [40])
 
 
 class FakeClient:
-    def __init__(self, recent):
+    def __init__(self, recent, open_tanks=()):
         self.recent = recent
+        self.open_tanks = [str(t) for t in open_tanks]
         self.history_calls = []
         self.search_calls = []
+
+    def open_tank_ids(self):
+        return list(self.open_tanks)
 
     def tank_history(self, tank_id):
         self.history_calls.append(str(tank_id))
@@ -125,3 +129,25 @@ def test_lock_prevents_concurrent_runs(tmp_path):
                 pass
     with exclusive_lock(lock):  # released after the first run finishes
         pass
+
+
+def test_open_tank_that_is_not_a_parent_is_resolved(conn):
+    client = FakeClient([CROSS_300], open_tanks=["77"])
+    result = run_cross_sync(conn, client, cacher(conn), today=TODAY)
+    assert "77" in client.history_calls
+    assert result["open_tanks_unplaced"] == 1
+
+
+def test_open_tanks_already_placed_cost_nothing(conn):
+    run_cross_sync(conn, FakeClient([CROSS_300]), cacher(conn), today=TODAY)  # places 40
+    again = FakeClient([CROSS_300], open_tanks=["40"])
+    result = run_cross_sync(conn, again, cacher(conn), today=TODAY)
+    assert "40" not in again.history_calls
+    assert result["open_tanks_unplaced"] == 0
+
+
+def test_open_tanks_can_be_skipped(conn):
+    client = FakeClient([CROSS_300], open_tanks=["77"])
+    result = run_cross_sync(conn, client, cacher(conn), today=TODAY, include_open_tanks=False)
+    assert result["open_tanks_unplaced"] == 0
+    assert "77" not in client.history_calls

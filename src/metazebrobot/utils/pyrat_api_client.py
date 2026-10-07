@@ -107,5 +107,20 @@ class PyratApiClient:
             if not page or offset >= total:
                 return strains
 
+    def open_tank_ids(self) -> List[str]:
+        """Ids of every open PyRAT tank, all owners (paged)."""
+        tank_ids: List[str] = []
+        offset = 0
+        while True:
+            response = self._get("tanks", {
+                "k": ["tank_id"], "status": "open", "l": PAGE_SIZE, "o": offset,
+            })
+            page = response.json()
+            tank_ids.extend(str(t["tank_id"]) for t in page if t.get("tank_id") is not None)
+            total = int(response.headers.get("X-Total-Count") or 0)
+            offset += len(page)
+            if not page or offset >= total:
+                return tank_ids
+
     def tank_history(self, tank_id: Any) -> List[Dict[str, Any]]:
         return self._get(f"tanks/{tank_id}/history").json()

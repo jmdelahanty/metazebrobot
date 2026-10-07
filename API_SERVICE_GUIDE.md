@@ -150,9 +150,11 @@ catches up a run missed while the machine was off). Each run:
 1. re-fetches all owners' PyRAT crossings recorded in the last 30 days into
    the local crossing cache (new crosses, status changes, newly raised
    children), and
-2. resolves parent tanks that still have no producing cross (new tanks, and
-   "not found" results older than 30 days) through tank splits and
-   date-of-birth crossing searches, up to 3 generations back.
+2. resolves parent tanks that still have no producing cross, plus every open
+   PyRAT tank (so the PyRAT tanks page's Heritage links resolve), through tank
+   splits and date-of-birth crossing searches, up to 3 generations back.
+   Already-resolved tanks cost no requests; "not found" results are retried
+   after 30 days.
 3. refreshes PyRAT strain names (about 9 requests) and, for strains renamed
    since their crossings were cached, re-derives those rows' backgrounds, and
 4. fetches PyRAT strain pedigrees for strains that are new (or older than 90

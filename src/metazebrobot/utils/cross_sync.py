@@ -110,8 +110,11 @@ def run_cross_sync(
     days: int = 30,
     max_generations: int = 3,
     today: Optional[date] = None,
+    include_open_tanks: bool = True,
 ) -> Dict[str, Any]:
-    """Nightly job body: sync the recent window, then resolve unplaced parents.
+    """Nightly job body: sync the recent window, then resolve unplaced parents
+    and (by default) every open PyRAT tank, so the tanks page's heritage links
+    resolve. Tanks already resolved cost no requests (cached in tank_origins).
 
     Raises RuntimeError if fetched crossings did not reach the cache.
     """
@@ -126,12 +129,18 @@ def run_cross_sync(
             f"{len(missing)} fetched crossing(s) were not cached, e.g. {missing[:5]}")
 
     tanks = unplaced_parent_tanks(conn)
+    open_unplaced: List[str] = []
+    if include_open_tanks:
+        placed = {str(r[0]) for r in conn.execute("SELECT DISTINCT tank_id FROM cross_children")}
+        open_unplaced = [t for t in client.open_tank_ids() if t not in placed]
+        tanks = list(dict.fromkeys(tanks + open_unplaced))
     resolver = resolve_tank_origins(conn, client, cache_crossings, tanks,
                                     max_generations=max_generations)
     return {
         "since": since,
         "fetched": len(crossings),
         "unplaced_tanks": len(tanks),
+        "open_tanks_unplaced": len(open_unplaced),
         "resolver": resolver,
         "before": before,
         "after": heritage_counts(conn),

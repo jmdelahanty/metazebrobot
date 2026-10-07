@@ -7,9 +7,10 @@ runs. Idempotent; safe to re-run at any time:
 1. Fetch every owner's crossings recorded in the last --days days (status
    changes and newly raised children land on recent records) and cache them
    through the app's merge + provenance upsert (``_cache_cross_rows``).
-2. Resolve parent tanks that still have no producing cross (new tanks, plus
-   negative results older than RETRY_AFTER_DAYS) via tank history splits and
-   targeted date-of-birth searches.
+2. Resolve parent tanks that still have no producing cross, plus every open
+   PyRAT tank (so the tanks page's heritage links resolve), via tank history
+   splits and targeted date-of-birth searches. Tanks already resolved cost no
+   requests; negative results are retried after RETRY_AFTER_DAYS.
 3. Refresh PyRAT strain names (``strains``/``strain_names``) and re-derive
    backgrounds for cached rows of renamed strains. Best-effort.
 4. Fetch strain ancestry (step 2c) for strains that are new or older than
@@ -64,6 +65,8 @@ def main() -> int:
     parser.add_argument("--max-generations", type=int, default=3)
     parser.add_argument("--pause", type=float, default=0.3, help="Seconds between PyRAT requests")
     parser.add_argument("--lock-file", help="Default: <db-path>.cross-sync.lock")
+    parser.add_argument("--skip-open-tanks", action="store_true",
+                        help="Only resolve unplaced parent tanks, not all open tanks")
     parser.add_argument("--skip-ancestry", action="store_true",
                         help="Do not fetch strain ancestry for new strains")
     args = parser.parse_args()
@@ -84,7 +87,8 @@ def main() -> int:
                 _ensure_cross_parent_provenance_schema(conn)
                 conn.commit()
                 result = run_cross_sync(conn, client, _cache_cross_rows, days=args.days,
-                                        max_generations=args.max_generations)
+                                        max_generations=args.max_generations,
+                                        include_open_tanks=not args.skip_open_tanks)
                 strains = sync_strain_registry(conn, client)
                 ancestry = None if args.skip_ancestry else sync_strain_ancestry(conn, args.pause)
     except SyncLockBusy as exc:
@@ -98,7 +102,8 @@ def main() -> int:
     print(f"Cross-cache sync of {db_path} ({time.monotonic() - started:.0f}s, "
           f"{client.requests} PyRAT requests)")
     print(f"Window: crossings recorded since {result['since']}: {result['fetched']} fetched")
-    print(f"Unplaced parent tanks checked: {result['unplaced_tanks']}")
+    print(f"Tanks checked: {result['unplaced_tanks']} "
+          f"(incl. {result['open_tanks_unplaced']} open tanks without a cached producing cross)")
     print("Resolver:", ", ".join(f"{k}={v}" for k, v in result["resolver"].items()))
     print(f"{'':22}{'before':>8}{'after':>8}")
     for key, before in result["before"].items():
