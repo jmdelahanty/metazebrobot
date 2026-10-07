@@ -1,3 +1,12 @@
+---
+title: "Migrating From Local Crosses to PyRAT-Only Crossings"
+summary: "Risks assessed before replacing local crosses with PyRAT crossings."
+owner: metazebrobot
+status: archive
+kind: investigation
+verified_against: null
+---
+
 # Migrating From Local Crosses to PyRAT-Only Crossings
 
 ## Context

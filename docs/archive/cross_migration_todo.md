@@ -1,3 +1,12 @@
+---
+title: "Cross → PyRAT Migration: Complete"
+summary: "Checklist from the completed move from local crosses to PyRAT-only crossings."
+owner: metazebrobot
+status: archive
+kind: plan
+verified_against: null
+---
+
 # Cross → PyRAT Migration: Complete
 
 Migration from local crosses to PyRAT-only crossings is complete.

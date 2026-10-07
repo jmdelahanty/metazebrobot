@@ -1,3 +1,12 @@
+---
+title: "Processing Suite: Import Receipt Protocol"
+summary: "Import receipt protocol between processing and acquisition machines."
+owner: metazebrobot
+status: archive
+kind: design
+verified_against: null
+---
+
 # Processing Suite: Import Receipt Protocol
 
 This document describes how the processing/import pipeline should signal

@@ -1,3 +1,12 @@
+---
+title: "Genotype Reference Images Design"
+summary: "Design for curated genotype reference images in screening."
+owner: metazebrobot
+status: archive
+kind: design
+verified_against: null
+---
+
 # Genotype Reference Images Design
 
 ## Purpose

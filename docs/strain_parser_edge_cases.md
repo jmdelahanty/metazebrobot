@@ -1,3 +1,12 @@
+---
+title: "Strain Name Parser: Known Edge Cases"
+summary: "Strain-name forms the transgene parser can't fully decompose."
+owner: metazebrobot
+status: current
+kind: reference
+verified_against: null
+---
+
 # Strain Name Parser: Known Edge Cases
 
 The `strain_parser.parse_strain_name()` utility extracts transgenic indicator components from PyRAT strain name strings. It handles the common `Tg(promoter:reporter)` notation well, but some strain names in PyRAT use inconsistent or complex notation that the parser cannot fully decompose. These cases are flagged for user review.

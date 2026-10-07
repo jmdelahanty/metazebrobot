@@ -1,3 +1,13 @@
+---
+title: "Tank Heritage and Background Design"
+summary: "Record-derived tank heritage: producing crosses, splits, backgrounds, strain ancestry and renames, plus the heritage view."
+owner: metazebrobot
+status: current
+kind: design
+verified_against: a56e219
+verified_scope: "whole document"
+---
+
 # Tank Heritage and Background Design
 
 Status (2026-10-06): steps 1–4 below are built and deployed; step 5 is not.

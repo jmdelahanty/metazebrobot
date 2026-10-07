@@ -1,3 +1,12 @@
+---
+title: "Dish Identity and Record Revision Plan"
+summary: "Plan for dish_uuid, revisions and structured errors (implemented 2026-10-05)."
+owner: metazebrobot
+status: archive
+kind: design
+verified_against: null
+---
+
 # Dish Identity and Record Revision Plan
 
 Status: **historical design record.** Implemented and deployed 2026-10-05

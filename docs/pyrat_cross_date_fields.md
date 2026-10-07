@@ -1,3 +1,12 @@
+---
+title: "PyRAT Crossing Date Fields Investigation"
+summary: "Which PyRAT crossing date fields MetaZebrobot uses for dish dates, and why."
+owner: metazebrobot
+status: current
+kind: investigation
+verified_against: null
+---
+
 # PyRAT Crossing Date Fields Investigation
 
 ## Context

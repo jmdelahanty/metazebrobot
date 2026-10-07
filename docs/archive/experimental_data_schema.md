@@ -1,3 +1,12 @@
+---
+title: "Experimental Data Registry Notes"
+summary: "Former session/experiment registry notes; that data now belongs to Palette."
+owner: metazebrobot
+status: archive
+kind: design
+verified_against: null
+---
+
 # Experimental Data Registry Notes
 
 > **Status:** Session and experiment tracking was removed from MetaZebrobot.

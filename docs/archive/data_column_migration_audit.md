@@ -1,3 +1,12 @@
+---
+title: "Dishes `data` JSON Column — Migration Audit"
+summary: "Audit of moving dish fields out of the dishes.data JSON column."
+owner: metazebrobot
+status: archive
+kind: investigation
+verified_against: null
+---
+
 # Dishes `data` JSON Column — Migration Audit
 
 ## Background

@@ -1,3 +1,13 @@
+---
+title: "Cross Parent Strain and Background Design"
+summary: "Per-parent strain and background model for PyRAT crosses (cross_parents, background parser)."
+owner: metazebrobot
+status: current
+kind: design
+verified_against: a56e219
+verified_scope: "status block"
+---
+
 # Cross Parent Strain and Background Design
 
 Status (2026-10-06): steps 1–5 of the implementation sequence are built; 6–7

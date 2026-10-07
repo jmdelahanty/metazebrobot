@@ -1,3 +1,12 @@
+---
+title: "Fish Tracking API"
+summary: "API for individual fish and housing units, and snapshotting fish metadata at acquisition."
+owner: metazebrobot
+status: current
+kind: reference
+verified_against: null
+---
+
 # Fish Tracking API
 
 This document describes the MetaZebrobot API endpoints for individual fish

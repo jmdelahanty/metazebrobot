@@ -1,3 +1,12 @@
+---
+title: "Individual Fish Tracking Plan"
+summary: "Phased plan for individual fish tracking (phases 1-3 built)."
+owner: metazebrobot
+status: archive
+kind: plan
+verified_against: null
+---
+
 # Individual Fish Tracking Plan
 
 Track individual fish from registration through experiments. A UUID assigned in MetaZebrobot flows through the pipeline: MetaZebrobot → Citrus (acquisition) → Palette (ingestion) → Crimson (analysis).

@@ -1,3 +1,12 @@
+---
+title: "Enclosure Rework & Identity Assignment Design"
+summary: "Container type rework and identity assignment design."
+owner: metazebrobot
+status: archive
+kind: design
+verified_against: null
+---
+
 # Enclosure Rework & Identity Assignment Design
 
 ## 1. Container type replaces `in_beaker` — DONE

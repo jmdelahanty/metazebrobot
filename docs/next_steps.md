@@ -1,3 +1,12 @@
+---
+title: "Next Steps"
+summary: "Completed and upcoming MetaZebrobot work items."
+owner: metazebrobot
+status: current
+kind: plan
+verified_against: null
+---
+
 # Next Steps
 
 ## Completed (April 2-4, 2026)

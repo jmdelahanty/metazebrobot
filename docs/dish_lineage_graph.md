@@ -1,3 +1,12 @@
+---
+title: "Dish Lineage Graph"
+summary: "Dish lineage as a directed graph built from transfer and screening records."
+owner: metazebrobot
+status: current
+kind: design
+verified_against: null
+---
+
 # Dish Lineage Graph
 
 Dish lineage is modeled as a directed graph, not a strict tree. A tree is enough

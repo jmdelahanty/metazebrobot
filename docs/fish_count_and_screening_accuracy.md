@@ -1,3 +1,12 @@
+---
+title: "Fish Counts & Screening Accuracy"
+summary: "What fish_count and current_fish_count mean, how counts are edited, and screening accuracy expectations."
+owner: metazebrobot
+status: current
+kind: reference
+verified_against: null
+---
+
 # Fish Counts & Screening Accuracy
 
 ## `fish_count` Is a Best-Effort Estimate

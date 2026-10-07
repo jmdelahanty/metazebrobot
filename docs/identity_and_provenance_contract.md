@@ -1,3 +1,13 @@
+---
+title: "Identity and Provenance Contract"
+summary: "Which system owns which records across MetaZebrobot, Citrus, Orange and Palette, and how identity flows between them."
+owner: metazebrobot
+status: current
+kind: reference
+verified_against: a56e219
+verified_scope: "Dish Identity, Versioning, and Recordings Without Citrus"
+---
+
 # Identity and Provenance Contract
 
 Cross-repo data flow between MetaZebrobot (fish identity + housing),

@@ -1,3 +1,13 @@
+---
+title: "Web Page Capabilities"
+summary: "Page-by-page map of the operator web UI."
+owner: metazebrobot
+status: current
+kind: reference
+verified_against: a56e219
+verified_scope: "Daily Care section"
+---
+
 # Web Page Capabilities
 
 This is the current operator-facing page map for the FastAPI web UI.

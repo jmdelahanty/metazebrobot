@@ -1,3 +1,12 @@
+---
+title: "Web Screening UI Plan"
+summary: "Original plan for the web screening UI."
+owner: metazebrobot
+status: archive
+kind: plan
+verified_against: null
+---
+
 # Web Screening UI Plan
 
 A lightweight web interface for entering screening data at the microscope workstation, away from the main desktop app. Both share the same SQLite database.

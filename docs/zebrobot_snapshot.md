@@ -1,3 +1,13 @@
+---
+title: "MetaZebrobot H5 Snapshot Integration"
+summary: "Consumer contract for Citrus, Orange and Palette: snapshot fields, identity, errors, dates and times, stability."
+owner: metazebrobot
+status: current
+kind: reference
+verified_against: a56e219
+verified_scope: "Identity and change detection; API errors; Dates and times; Contract and stability"
+---
+
 # MetaZebrobot H5 Snapshot Integration
 
 This document describes how the acquisition agent should query the

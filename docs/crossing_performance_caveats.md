@@ -1,3 +1,12 @@
+---
+title: "Crossing Performance Metrics — Known Limitations"
+summary: "How crossing performance (raised / requested) is calculated and where it misleads."
+owner: metazebrobot
+status: current
+kind: reference
+verified_against: null
+---
+
 # Crossing Performance Metrics — Known Limitations
 
 ## How MetaZebrobot Currently Calculates Performance
