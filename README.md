@@ -96,6 +96,10 @@ pixi run metazebrobot
 pixi run python -m pytest
 ```
 
+Pydantic deprecation warnings (Pydantic 1-style models) fail the suite on
+purpose (`pyproject.toml`, `[tool.pytest.ini_options]`); use the Pydantic 2
+API (`model_config = ConfigDict(...)`, `@field_validator`, `.model_dump()`).
+
 `tests/test_consumer_contract.py` is the API drift check. After an intentional,
 additive API change, regenerate the pinned schema with
 `pixi run python scripts/export_consumer_openapi.py` and commit it.

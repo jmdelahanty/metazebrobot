@@ -23,6 +23,11 @@ requires = ["hatchling"]
 packages = ["src/metazebrobot"]
 include = ["src/metazebrobot/config/**", "src/metazebrobot/static/**", "src/metazebrobot/templates/**"]
 
+[tool.pytest.ini_options]
+# Pydantic 1-style code (class Config, @validator, .dict()) still runs on
+# Pydantic 2 but breaks on 3; fail tests on it instead of collecting warnings.
+filterwarnings = ["error::pydantic.warnings.PydanticDeprecatedSince20"]
+
 # --- Keep your pixi sections below ---
 [tool.pixi.project]
 channels = ["conda-forge"]

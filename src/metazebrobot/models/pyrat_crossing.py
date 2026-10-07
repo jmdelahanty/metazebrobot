@@ -8,7 +8,7 @@ including parsed requested groups from descriptions and performance calculations
 import re
 from datetime import datetime
 from typing import Optional, List, Literal
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 # Crossing status from PyRAT
@@ -265,5 +265,4 @@ class PyRATCrossing(BaseModel):
             child_tanks=child_tanks,
         )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -5,9 +5,11 @@ This module defines the data models for agarose bottles and solutions.
 """
 
 from datetime import datetime, timedelta
-from ..utils.lab_time import lab_now
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field, validator
+
+from pydantic import BaseModel, Field, field_validator
+
+from ..utils.lab_time import lab_now
 
 
 class StorageLocation(BaseModel):
@@ -31,7 +33,8 @@ class AgaroseBottle(BaseModel):
     storage_location: str
     notes: Optional[str] = None
     
-    @validator('date_received', 'expiration_date')
+    @field_validator('date_received', 'expiration_date')
+    @classmethod
     def validate_date_format(cls, v):
         """Validate date format (YYYYMMDD)."""
         if not v:
@@ -55,7 +58,8 @@ class AgaroseSolution(BaseModel):
     quality_checks: QualityChecks
     notes: Optional[str] = None
 
-    @validator('date_prepared')
+    @field_validator('date_prepared')
+    @classmethod
     def validate_date_format(cls, v):
         """Validate date format (YYYYMMDD)."""
         if not v:
@@ -73,7 +77,7 @@ class AgaroseSolution(BaseModel):
         
     def to_dict(self) -> Dict[str, Any]:
         """Convert the model to a dictionary."""
-        return self.dict()
+        return self.model_dump()
         
     @classmethod
     def create_new(

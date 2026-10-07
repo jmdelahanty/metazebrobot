@@ -167,7 +167,7 @@ class AgaroseController:
             )
             
             # Add to data manager
-            success = data_manager.add_agarose_solution(solution_id, solution.dict())
+            success = data_manager.add_agarose_solution(solution_id, solution.model_dump())
             
             if success:
                 return True, solution_id, solution

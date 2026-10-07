@@ -7,7 +7,7 @@ including age information and status tracking.
 
 from datetime import datetime
 from typing import Optional, Literal
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 # Age status based on fish age thresholds
@@ -110,5 +110,4 @@ class PyRATTank(BaseModel):
             age_status=data.get("age_status", "UNKNOWN"),
         )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
