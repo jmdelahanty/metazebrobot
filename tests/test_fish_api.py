@@ -990,6 +990,37 @@ class TestDailyCare:
         resp = client.get("/care/NO_SUCH_DISH")
         assert resp.status_code == 404
 
+    def test_care_pages_show_current_count_not_baseline(self, client, seed_full_dish):
+        """Deaths recorded in care reduce the count the care pages show."""
+        resp = client.post(f"/care/{seed_full_dish}/check", data={
+            "check_time": "20260403T09:00:00", "fed": "true", "num_dead": 3,
+        })
+        assert resp.status_code == 200
+        with data_manager.get_connection() as conn:
+            current = conn.execute(
+                "SELECT current_fish_count FROM dishes WHERE dish_id = ?", (seed_full_dish,)
+            ).fetchone()[0]
+        assert current == 47  # opened at 50, minus 3 deaths
+
+        form = client.get(f"/care/{seed_full_dish}").text
+        assert "47 fish" in form
+        assert "opened at 50" in form
+
+        listing = client.get("/care/").text
+        row = listing[listing.index(seed_full_dish):]
+        row = row[:row.index("</tr>")]
+        assert "47" in row and "opened at 50" in row
+
+    def test_care_list_shows_zero_fish(self, client, seed_full_dish):
+        with data_manager.get_connection() as conn:
+            conn.execute("UPDATE dishes SET current_fish_count = 0 WHERE dish_id = ?", (seed_full_dish,))
+            conn.commit()
+        listing = client.get("/care/").text
+        row = listing[listing.index(seed_full_dish):]
+        row = row[:row.index("</tr>")]
+        cells = [re.sub(r"<[^>]+>", " ", c).split() for c in re.findall(r"<td>(.*?)</td>", row, re.S)]
+        assert cells[1][0] == "0"  # count column (after the dish id): 0, not "-"
+
     def test_submit_dish_check(self, client, seed_dish):
         resp = client.post(
             f"/care/{seed_dish}/check",

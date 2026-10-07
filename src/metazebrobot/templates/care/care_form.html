@@ -4,7 +4,7 @@
 {% block content %}
 <hgroup>
     <h2>Care — {{ dish_id }}</h2>
-    <p>{{ genotype or "Unknown genotype" }} &mdash; {{ fish_count or "?" }} fish &mdash; {{ container_type or "petri_dish" }}</p>
+    <p>{{ genotype or "Unknown genotype" }} &mdash; {{ current_fish_count if current_fish_count is not none else "?" }} fish{% if fish_count is not none and fish_count != current_fish_count %} <small>(opened at {{ fish_count }})</small>{% endif %} &mdash; {{ container_type or "petri_dish" }}</p>
 </hgroup>
 {% include "_transgenes.html" %}
 

@@ -5050,8 +5050,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         today = datetime.now().strftime("%Y%m%d")
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             rows = conn.execute("""
-                SELECT d.dish_id, d.genotype, d.fish_count, d.container_type,
-                       MAX(q.check_time) AS last_check
+                SELECT d.dish_id, d.genotype, d.fish_count, d.current_fish_count,
+                       d.container_type, MAX(q.check_time) AS last_check
                 FROM dishes d
                 LEFT JOIN quality_checks q ON q.dish_id = d.dish_id
                 WHERE d.status = 'active'
@@ -5074,7 +5074,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         db_path = _require_db_path()
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             row = conn.execute(
-                "SELECT dish_id, genotype, fish_count, container_type FROM dishes WHERE dish_id = ?",
+                "SELECT dish_id, genotype, fish_count, current_fish_count, container_type "
+                "FROM dishes WHERE dish_id = ?",
                 (dish_id,),
             ).fetchone()
             if not row:
@@ -5087,6 +5088,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return templates.TemplateResponse(request, "care/care_form.html", {
             "dish_id": dish_id,
             "genotype": dish.get("genotype"),
+            # Current count (after transfers, screening, and recorded deaths);
+            # fish_count is only the baseline the dish opened with.
+            "current_fish_count": (
+                dish["current_fish_count"] if dish.get("current_fish_count") is not None
+                else dish.get("fish_count")
+            ),
             "fish_count": dish.get("fish_count"),
             "container_type": dish.get("container_type"),
             "units": units,

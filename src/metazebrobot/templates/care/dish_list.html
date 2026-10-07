@@ -30,7 +30,11 @@
         <tr{% if not d.checked_today %} style="background: var(--pico-del-color)"{% endif %}>
             <td>{{ d.dish_id }}</td>
             <td>{{ d.genotype or "-" }}</td>
-            <td>{{ d.fish_count or "-" }}</td>
+            {% set current = d.current_fish_count if d.current_fish_count is not none else d.fish_count %}
+            <td>
+                {{ current if current is not none else "-" }}
+                {% if d.fish_count is not none and d.fish_count != current %}<br><small>opened at {{ d.fish_count }}</small>{% endif %}
+            </td>
             <td>{{ d.container_type or "petri_dish" }}</td>
             <td>{{ d.last_check or "Never" }}</td>
             <td>
