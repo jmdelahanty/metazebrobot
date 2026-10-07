@@ -4,8 +4,7 @@ summary: "Consumer contract for Citrus, Orange and Palette: snapshot fields, ide
 owner: metazebrobot
 status: current
 kind: reference
-verified_against: a56e219
-verified_scope: "Identity and change detection; API errors; Dates and times; Contract and stability"
+verified_against: 384a366
 ---
 
 # MetaZebrobot H5 Snapshot Integration
@@ -15,7 +14,12 @@ MetaZebrobot read-only API and store a minimal, no-PII snapshot in an H5 file.
 
 ## Schema overview
 
-End-to-end pieces:
+End-to-end pieces. MetaZebrobot owns the API values the snapshot is built
+from and the database (item 4). The H5 layout, the stored snapshot object, and
+the local registry (items 1-3) are owned by the acquisition system; items 1-3
+are MetaZebrobot's recommendation, and Citrus documents what it actually
+writes in its own repository (`docs/zebrobot_snapshot.md`,
+`docs/Understanding_H5_Log.md`).
 
 1) **H5 subject metadata** (`/subject_metadata`)
    - `zebrobot_schema_version` (int, start at 1)
@@ -29,14 +33,16 @@ End-to-end pieces:
    - optional: `dpf_at_acquisition` (int; set null + missing if invalid)
 
 2) **Snapshot JSON schema** (logical model used to populate the H5 fields)
-   - `schema_version`, `queried_at_utc`, `status`, `missing`, `dish_id`
+   - `schema_version` (version of this stored object, not the API response
+     `schema_version`), `queried_at_utc`, `status`, `missing`, `dish_id`
    - `dish` (minimal fields) and `cross` (minimal fields; `null` if missing)
    - optional: `errors[]`, `dpf_at_acquisition`
 
-3) **Local acquisition registry** (staging cache)
+3) **Local acquisition registry** (staging cache, Citrus-owned)
    - File: `~/.local/share/fisheye/subject_registry.json`
    - Tracks `fish_id` UUIDs for immediate reuse across sessions
    - Prune aggressively; registry is not the source of truth
+   - See [Acquisition registry (staging) schema](#acquisition-registry-staging-schema)
 
 4) **Database (individual tracking)**
    - `fish_subjects`, `housing_units`, `housing_unit_occupancy`, `housing_unit_checks`
@@ -73,6 +79,8 @@ the DB host.
   - `GET /crosses/{cross_id}/provenance`
 - Health check with local DB and PyRAT status split apart:
   - `GET /health?check_db=true&check_pyrat=true`
+- Identify the running service and its consumer schema digest:
+  - `GET /version` (see [Which MetaZebrobot am I talking to?](#which-metazebrobot-am-i-talking-to))
 
 Note: `GET /crosses/{cross_id}` returns `parents` as a JSON array. Older
 snapshots may have stored this field as a JSON-encoded string.
@@ -194,7 +202,10 @@ Stability promise for response `schema_version` 2:
 
 ## Snapshot JSON schema (required fields)
 
-Store a single JSON object with the following fields:
+Store a single JSON object with the following fields. The top-level
+`schema_version` is the version of this stored object (Citrus writes 1), not
+the API response `schema_version` (2); `queried_at_utc`, `status`, and
+`missing` are filled in by the consumer.
 
 ```json
 {
@@ -259,6 +270,12 @@ Optional provenance:
 
 ## H5 storage layout
 
+The H5 layout is owned by the acquisition system. Citrus documents its own
+layout in its repository (`docs/zebrobot_snapshot.md`, H5 storage layout, and
+`docs/Understanding_H5_Log.md`, Session Metadata Groups), including the
+`/zebrobot_snapshot/snapshot_json` dataset. The recommendation below is
+MetaZebrobot's.
+
 Store a flattened snapshot under:
 
 - Group: `/subject_metadata`
@@ -301,14 +318,30 @@ Keep only the explicit fields listed in the snapshot schema above.
 
 ## Implementation notes
 
-- Parse `cross.parents` from JSON string to a list of objects.
-  - If parsing fails, set `parents=[]` and add an error if desired.
+- The API returns `parents` as a JSON array of `{identifier, sex}` objects
+  (`GET /dishes/{dish_id}/citrus-snapshot` and `GET /crosses/{cross_id}`).
+  Only older stored snapshots may hold a JSON-encoded string; if parsing one
+  fails, set `parents=[]` and add an error if desired.
 - `GET /dishes/{dish_id}/citrus-snapshot` already returns `species`, `sex`,
-  `dish_uuid`, `revision`, and `updated_at`; no second dish call is needed.
+  `dish_uuid`, `revision`, `updated_at`, `line_strain`, and `parents`; no
+  second dish or cross call is needed. If the cross is not cached locally,
+  `line_strain` is `null`; if the cached cross has no parents (or is not
+  cached), `parents` falls back to the dish's breeding parents with `sex`
+  `"unknown"`.
+- `fish_count` in `citrus-snapshot` is the dish's current count (falling back
+  to the initial count). In `GET /dishes/{dish_id}`, `fish_count` is the
+  initial count and the current count is `current_fish_count`.
 - `dish_id` is provided by the acquisition UI dropdown (populated from active
   dishes).
 
 ## C++ client notes (DearImGui)
+
+Historical guidance for the Citrus client, which Citrus now owns (its
+`docs/zebrobot_snapshot.md` carries the same notes). The pattern below
+predates the current API: it only handles `parents` as a JSON-encoded string,
+but `GET /crosses/{cross_id}` now returns an array, so a client should accept
+an array (and a string only for older data). `GET /dishes/{dish_id}/citrus-snapshot`
+returns dish and cross fields in one call.
 
 - Avoid shelling out to `curl` in the app. Use an in-process HTTP client.
 - Suggested client: `cpp-httplib` (single header) or `libcurl`.
@@ -335,6 +368,12 @@ if (cross_full.contains("parents") && cross_full["parents"].is_string()) {
 ```
 
 ## Acquisition registry (staging) schema
+
+Historical, consumer-owned. The registry lives on the acquisition machine and
+is implemented by Citrus (`src/utils/subject_registry.cpp` in the Citrus
+repository), which documents it in its `docs/zebrobot_snapshot.md`
+(Acquisition registry). MetaZebrobot does not read or write it; the text below
+is the original proposal and may not match the current implementation.
 
 Use a lightweight local registry so fish IDs can be reused immediately even
 before H5 files are transferred/processed. This registry is **not** the source
@@ -391,6 +430,13 @@ index (`by_dish`) can speed this up; rebuild it whenever the registry is saved.
 - Optional cap: keep at most **200** entries (drop oldest)
 
 ## Import receipt sync (DB host -> acquisition machine)
+
+Historical, consumer-owned. Receipts pass between the processing/import
+pipeline and the acquisition machine; MetaZebrobot does not write or read
+them. The protocol is archived in
+[`archive/processing_import_receipts.md`](archive/processing_import_receipts.md);
+no current consumer document for it was found. The text below is the original
+proposal and may not match what is deployed.
 
 Use a lightweight receipt queue on the DB host to mark sessions as imported
 without tight coupling between machines.

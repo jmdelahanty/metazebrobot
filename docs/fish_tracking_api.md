@@ -4,35 +4,42 @@ summary: "API for individual fish and housing units, and snapshotting fish metad
 owner: metazebrobot
 status: current
 kind: reference
-verified_against: null
+verified_against: 384a366
 ---
 
 # Fish Tracking API
 
 This document describes the MetaZebrobot API endpoints for individual fish
-tracking, housing unit management, and how to snapshot fish metadata into H5
-files at acquisition time.
+tracking and housing unit management, and how fish identity relates to the H5
+metadata that acquisition systems write.
+
+The meaning of the identity fields (`dish_uuid`, `revision`, `updated_at`), the
+structured error shapes, timestamp conventions, and stability promises for the
+consumer endpoints `GET /dishes/{dish_id}/fish` and `GET /fish/{fish_id}` are
+owned by [`zebrobot_snapshot.md`](zebrobot_snapshot.md); their response shapes
+are pinned in [`api/consumer_openapi.json`](api/consumer_openapi.json). The
+other endpoints below are not part of that pinned contract.
 
 ## API access
 
-Same as the existing dish/cross API:
-
-- SSH tunnel: `http://127.0.0.1:18000`
-- DB host: `http://127.0.0.1:8000`
-
-No auth required via SSH tunnel.
+Same as the dish/cross API; see [API access](zebrobot_snapshot.md#api-access).
 
 ## Core concepts
 
 - **fish_id** — UUID v4 (`8-4-4-4-12` hex, lowercase). Durable identity for
   one fish. Minted either by MetaZebrobot (web UI / batch registration) or by
-  Citrus at acquisition time and back-registered later.
+  Citrus at acquisition time and back-registered later. MetaZebrobot stores a
+  caller-supplied `fish_id` as-is and does not validate its format.
 - **housing_unit** — A physical position within a dish: a well, lane, chamber,
   or the entire dish for simple petri dishes. Has its own `unit_id`
-  (`{dish_id}:{position_label}`).
-- **dish_id** — Where the fish currently lives. For derived dishes (well plates,
-  sorted populations), `dish_id` points to the derived dish, not the original
-  source.
+  (`{dish_id}:{position_label}`, or `{dish_id}:open` when created without a
+  position label).
+- **dish_id** — The dish the fish was registered on. Register fish on the dish
+  they live in: for derived dishes (well plates, sorted populations), that is
+  the derived dish, not the original source. `POST /fish/{fish_id}/assign`
+  does not change a fish's `dish_id`, even when the unit belongs to another
+  dish; current housing is `current_unit_id`, and that unit carries its own
+  `dish_id`.
 - Fish registration is **optional**. Not all dishes use individual tracking.
 - One fish can have **multiple recordings** — session tracking lives in
   Palette (see `docs/identity_and_provenance_contract.md`).
@@ -56,19 +63,31 @@ Response:
     {
       "fish_id": "6a1f9b7b-3b2a-4d7a-8a73-0b2d7c9e3d1a",
       "dish_id": "17257_1",
+      "dish_uuid": "b833f00a-0e75-42ab-aebf-8a44a852c7f8",
       "subject_label": "A1",
       "sex": "unknown",
       "genotype": "Tg(elavl3:jRGECO1b)",
       "species": "Danio rerio",
-      "created_at": "2026-03-31T14:22:01",
+      "created_at": "2026-03-31 14:22:01",
       "notes": null,
-      "current_unit_id": "17257_1_WP1:A1"
+      "current_unit_id": "17257_1_WP1:A1",
+      "revision": 2,
+      "updated_at": "2026-03-31 15:02:44"
     }
   ]
 }
 ```
 
-`current_unit_id` is `null` if the fish has not been assigned to a housing unit.
+Items are ordered by `created_at`. `current_unit_id` is `null` if the fish has
+not been assigned to a housing unit. `dish_uuid` is that of the fish's
+`dish_id`; `revision` and `updated_at` belong to the fish record itself (see
+[Identity and change detection](zebrobot_snapshot.md#identity-and-change-detection)).
+`created_at` and `updated_at` are UTC (see
+[Dates and times](zebrobot_snapshot.md#dates-and-times)).
+
+Errors use the structured shape in
+[API errors](zebrobot_snapshot.md#api-errors): `404` `dish_not_found` for an
+unknown dish, `503` `database_error` on a SQLite failure.
 
 #### Register a new fish
 
@@ -92,7 +111,9 @@ All fields are optional:
 
 Returns `201` with the created fish object (same shape as the list items above).
 
-Returns `404` if the dish does not exist.
+Returns `404` if the dish does not exist, with `{"detail": "Dish not found"}`
+(a plain string, not the structured shape). Returns `500` if the insert fails,
+for example because the `fish_id` is already registered.
 
 #### Fetch a fish by UUID
 
@@ -100,7 +121,9 @@ Returns `404` if the dish does not exist.
 GET /fish/{fish_id}
 ```
 
-Returns the fish object. `404` if not found.
+Returns the fish object (same shape as the list items above). Errors use the
+structured shape: `404` `fish_not_found`, `503` `database_error` (see
+[API errors](zebrobot_snapshot.md#api-errors)).
 
 #### Update a fish
 
@@ -112,8 +135,9 @@ Content-Type: application/json
 ```
 
 Accepted fields: `subject_label`, `sex`, `genotype`, `species`, `notes`.
+Other fields are ignored.
 
-Returns the updated fish object.
+Returns the updated fish object. `404` if the fish does not exist.
 
 #### Delete a fish
 
@@ -121,7 +145,8 @@ Returns the updated fish object.
 DELETE /fish/{fish_id}
 ```
 
-Returns `204` on success, `404` if not found.
+Returns `204` on success, `404` if not found. The fish's occupancy history and
+reference-image records are deleted with it.
 
 ---
 
@@ -144,7 +169,7 @@ Response:
       "unit_kind": "well",
       "capacity": 1,
       "status": "active",
-      "created_at": "2026-03-31T14:00:00",
+      "created_at": "2026-03-31 14:00:00",
       "notes": null,
       "occupant_count": 1
     }
@@ -152,9 +177,13 @@ Response:
 }
 ```
 
-`unit_kind` values: `open` (simple petri dish), `well`, `lane`, `chamber`.
+`occupant_count` is the number of fish whose `current_unit_id` is this unit.
+An unknown `dish_id` returns an empty `items` list, not a `404`.
 
-`status` values: `active`, `empty`, `retired`.
+`unit_kind` values in use: `open` (simple petri dish; the default), `well`,
+`lane`, `chamber`. The API does not validate the value.
+
+`status` is `active` when a unit is created. No endpoint currently changes it.
 
 #### Create housing units
 
@@ -173,7 +202,10 @@ Single unit:
 }
 ```
 
-Batch (e.g. 6-well plate):
+`unit_kind` defaults to `open` and `capacity` to 1. Without `position_label`
+the unit id is `{dish_id}:open`.
+
+Batch (`count` greater than 1):
 ```json
 {
   "unit_kind": "well",
@@ -184,10 +216,19 @@ Batch (e.g. 6-well plate):
 
 `label_format` options:
 - `"numeric"` (default): labels `1`, `2`, ..., `N`
-- `"well_plate"`: row-major labels `A1`, `A2`, ..., `B1`, etc.
+- `"well_plate"`: row-major labels over rows `A`-`H`. With a `count` of 8 or
+  fewer, every unit is in row `A` (6 gives `A1`-`A6`). With a larger count,
+  each row gets `ceil(count / 8)` columns (96 gives `A1`-`H12`; 24 gives
+  `A1`-`A3`, `B1`-`B3`, ..., `H3`). This does not match the physical layout of
+  standard 6-, 12- or 24-well plates.
+
+Batch units always get `capacity` 1; `position_label`, `capacity`, and `notes`
+are ignored.
 
 Returns `201`. Single creation returns the unit object. Batch returns
-`{"created": ["17257_1:A1", "17257_1:A2", ...]}`.
+`{"created": ["17257_1:A1", "17257_1:A2", ...]}`. Returns `404` if the dish
+does not exist, and `500` if the insert fails (for example, a `unit_id` that
+already exists).
 
 #### Fetch a housing unit
 
@@ -195,7 +236,8 @@ Returns `201`. Single creation returns the unit object. Batch returns
 GET /units/{unit_id}
 ```
 
-Returns the unit object plus a `fish` array of current occupants:
+Returns the unit object plus a `fish` array of current occupants (`404` if
+the unit does not exist):
 ```json
 {
   "unit_id": "17257_1_WP1:A1",
@@ -204,22 +246,26 @@ Returns the unit object plus a `fish` array of current occupants:
   "unit_kind": "well",
   "capacity": 1,
   "status": "active",
-  "created_at": "2026-03-31T14:00:00",
+  "created_at": "2026-03-31 14:00:00",
   "notes": null,
   "fish": [
     {
       "fish_id": "6a1f9b7b-3b2a-4d7a-8a73-0b2d7c9e3d1a",
-      "dish_id": "17257_1_WP1",
+      "dish_id": "17257_1",
       "subject_label": "A1",
       "sex": "unknown",
       "genotype": "Tg(elavl3:jRGECO1b)",
       "species": "Danio rerio",
-      "created_at": "2026-03-31T14:22:01",
+      "created_at": "2026-03-31 14:22:01",
       "notes": null
     }
   ]
 }
 ```
+
+Occupant entries are a subset of the fish object: they omit `dish_uuid`,
+`current_unit_id`, `revision`, and `updated_at`. An occupant's `dish_id` is
+the dish it was registered on, which can differ from the unit's `dish_id`.
 
 ---
 
@@ -237,13 +283,20 @@ Content-Type: application/json
 }
 ```
 
-`reason` values: `initial`, `transfer`, `terminated`, `experiment`.
+`unit_id` is required (`422` if missing). `reason` is stored as free text and
+not validated; the conventional values are `initial`, `transfer`,
+`terminated`, `experiment`. It defaults to `transfer` when omitted, including
+on a first assignment.
 
 If the fish already has a `current_unit_id`, this is treated as a move: the old
 occupancy record is closed and a new one is opened. If this is the first
-assignment, a new occupancy record is created.
+assignment, a new occupancy record is created. The unit may belong to any
+dish; the fish's `dish_id` does not change.
 
-Returns the updated fish object.
+Returns the updated fish object; its `revision` increases because
+`current_unit_id` changed. `404` if the fish or the unit does not exist.
+
+There is no web UI control for assignment yet; use this endpoint.
 
 #### Occupancy history
 
@@ -259,8 +312,8 @@ Response:
       "id": 1,
       "fish_id": "6a1f9b7b-...",
       "unit_id": "17257_1:open",
-      "moved_in_at": "2026-03-20T10:00:00",
-      "moved_out_at": "2026-03-25T09:00:00",
+      "moved_in_at": "2026-03-20 10:00:00",
+      "moved_out_at": "2026-03-25 09:00:00",
       "reason": "initial",
       "dish_id": "17257_1",
       "position_label": null,
@@ -270,7 +323,7 @@ Response:
       "id": 2,
       "fish_id": "6a1f9b7b-...",
       "unit_id": "17257_1_WP1:A1",
-      "moved_in_at": "2026-03-25T09:00:00",
+      "moved_in_at": "2026-03-25 09:00:00",
       "moved_out_at": null,
       "reason": "transfer",
       "dish_id": "17257_1_WP1",
@@ -281,7 +334,10 @@ Response:
 }
 ```
 
-Records with `moved_out_at: null` are current.
+Records with `moved_out_at: null` are current. Records are ordered by
+`moved_in_at`; `moved_in_at` and `moved_out_at` are UTC (SQLite
+`CURRENT_TIMESTAMP`). `dish_id`, `position_label`, and `unit_kind` describe
+the unit. `404` if the fish does not exist.
 
 ---
 
@@ -304,7 +360,15 @@ Content-Type: application/json
 }
 ```
 
-`check_time` is required. All other fields are optional. Returns `201`.
+`check_time` is required (`422` if missing); the web UI sends lab-local
+`YYYYMMDDTHH:MM:SS`. All other fields are optional. `feed_type` must be one of
+`paramecia`, `rotifers`, `brine_shrimp` (display labels such as
+`Brine shrimp` are also accepted, case-insensitively); anything else returns
+`422` with `{"error": "invalid_feed_type", ...}`. `num_dead` must be
+non-negative. Logging a check again for the same unit and `check_time`
+replaces the earlier one.
+
+Returns `201` with `{"status": "ok"}`. `404` if the unit does not exist.
 
 #### Check history
 
@@ -312,14 +376,17 @@ Content-Type: application/json
 GET /units/{unit_id}/checks
 ```
 
-Returns `{"items": [...]}` ordered by `check_time` descending.
+Returns `{"items": [...]}` ordered by `check_time` descending. Each item has
+`id`, `unit_id`, `check_time`, `fed`, `feed_type`, `water_changed`,
+`vol_water_changed`, `num_dead`, `notes`, `created_at`.
 
 ---
 
 ### Dish-level daily care checks
 
-The web care page chooses this form for simple containers such as petri dishes,
-beakers, and tanks.
+The web care page chooses this form when the dish has no housing units or a
+single `open` unit (simple containers such as petri dishes, beakers, and
+tanks). Dishes with other housing units get the per-unit form instead.
 
 #### Log a dish-level check
 
@@ -328,17 +395,20 @@ POST /care/{dish_id}/check
 Content-Type: multipart/form-data
 
 check_time: "20260401T09:30:00"   (required)
-fed: true                         (optional)
+fed: true                         (optional, default false)
 feed_type: "paramecia"            (optional)
-water_changed: true               (optional)
+water_changed: true               (optional, default false)
 vol_water_changed: 50             (optional)
 num_dead: 0                       (optional)
 notes: "dirty dish"               (optional)
 care_image: <binary image data>   (optional, JPEG or PNG)
 ```
 
-Returns an HTML partial containing the recent check table. If `care_image` is
-provided, the file is stored under `care_images/{dish_id}/`, served at
+Returns an HTML partial containing the recent check table; an unknown
+`feed_type` or image type returns the same partial with an error message. If
+`care_image` is provided, the file is stored under `care_images/{dish_id}/`
+next to the database as `{check_time}_{NNN}.jpg` or `.png` (characters that
+are unsafe in file names replaced with `_`), served at
 `/care-images/{dish_id}/{filename}`, and linked from
 `quality_checks.image_filename`.
 
@@ -367,11 +437,13 @@ file: <binary image data>     (required, JPEG or PNG)
 caption: "dorsal view, GFP"   (optional)
 ```
 
-Returns `201` with an HTML partial (image gallery). For programmatic use, call
-`GET /fish/{fish_id}/images` after uploading to get the updated list.
+Returns `200` with an HTML partial (image gallery); a file that is not JPEG or
+PNG returns `200` with an error-message partial. `404` if the fish does not
+exist.
 
-Images are stored at `data/fish_images/{fish_id}/001.jpg`, `002.png`, etc.
-Served at `/fish-images/{fish_id}/{filename}`.
+Images are stored in `fish_images/{fish_id}/` next to the database, numbered
+in upload order (`001.jpg`, `002.png`, etc.), and served at
+`/fish-images/{fish_id}/{filename}`.
 
 #### List images
 
@@ -379,8 +451,8 @@ Served at `/fish-images/{fish_id}/{filename}`.
 GET /fish/{fish_id}/images
 ```
 
-Returns an HTML partial (image gallery with upload form). For JSON consumers,
-query the database directly or use the file paths from the gallery.
+Returns an HTML partial (image gallery with upload form). There is no JSON
+endpoint for fish images.
 
 ---
 
@@ -408,9 +480,10 @@ Includes an "Unassigned fish" section for fish not assigned to any unit.
 GET /dishes/{dish_id}/label
 ```
 
-Returns a PNG image (62x29mm at 300 DPI) with dish ID, genotype, DOF,
-fish count, and a QR code encoding the dish_id. Designed for label
-printers (Brother QL series) or browser printing.
+Returns a PNG image (62x29mm at 300 DPI) with dish ID, genotype, DOF, current
+fish count (falling back to the initial `fish_count`), container type, and a
+QR code encoding the dish_id. Designed for label printers (Brother QL series)
+or browser printing. `404` if the dish does not exist.
 
 #### Scanner hardware notes
 
@@ -461,7 +534,8 @@ listings often look cheaper but require extra accessories.
 The `dish_transgenes` table stores parsed promoter/reporter/fluorophore
 data for each dish. Auto-populated when a dish is saved.
 
-Filter dishes by promoter:
+Filter dishes by promoter (exact match on the parsed promoter; the query value
+is lowercased):
 
 ```
 GET /dishes?promoter=elavl3
@@ -471,15 +545,22 @@ GET /dishes?promoter=elavl3
 
 ## Acquisition workflow
 
+The API calls below are MetaZebrobot's. What the acquisition system writes into
+its H5 file is owned by that system (see
+[H5 snapshot contract](#h5-snapshot-contract)).
+
 ### Path A — fish already registered
 
 Use this when fish were pre-registered via the web UI (e.g. well plate with
-batch-registered fish).
+batch-registered fish). The web UI registers fish only; housing units are
+created and fish assigned through `POST /dishes/{dish_id}/units` and
+`POST /fish/{fish_id}/assign`.
 
 1. `GET /dishes/{dish_id}/fish` — list registered fish
 2. `GET /dishes/{dish_id}/units` — get housing layout (optional, for UI display)
 3. Operator picks a fish → you have the `fish_id`
-4. `GET /fish/{fish_id}` — get full context including `current_unit_id` (optional)
+4. `GET /fish/{fish_id}` — get full context including `current_unit_id`,
+   `dish_uuid`, and `revision` (optional)
 5. Snapshot into H5 (see below)
 
 ### Path B — fish not yet registered
@@ -506,6 +587,14 @@ and file assets. MetaZebrobot only handles fish identity and housing. See
 
 ## H5 snapshot contract
 
+> **Consumer-owned.** The H5 layout is owned by the system that writes it.
+> Citrus documents its `/subject_metadata` group in its repository's
+> `docs/Understanding_H5_Log.md` (Session Metadata Groups) and its subject
+> fields in `docs/subject_identity_and_selection.md`. The tables below are
+> MetaZebrobot's original recommendation of what to record and where each
+> value comes from in MetaZebrobot; they do not describe what Citrus writes
+> today.
+
 At acquisition time, snapshot the following into H5 `/subject_metadata`. These
 are the facts that were true **at recording time** and make the H5 a
 self-contained artifact.
@@ -524,7 +613,7 @@ self-contained artifact.
 | `genotype` | `fish_subjects.genotype` or `dishes.genotype` | As known at recording time |
 | `species` | `fish_subjects.species` or `dishes.species` | Usually "Danio rerio" |
 | `sex` | `fish_subjects.sex` | |
-| `dpf_at_run` | Computed: session date − `dishes.dof` | |
+| `dpf_at_run` | Computed: session date − `dishes.dof` | Use the lab-local session date, as for [`dpf_at_acquisition`](zebrobot_snapshot.md#derived-fields-optional-recommended) |
 | `source_dish_id` | Origin dish (walk `parent_dish_id` if fish was moved) | Provenance |
 | `source_cross_id` | `dishes.cross_id` | Provenance |
 | `housing_unit_id` | `fish_subjects.current_unit_id` | Where the fish was at recording |
@@ -551,9 +640,8 @@ the H5 when individual fish are tracked.
 
 ## Naming conventions (metadata cleanup)
 
-Per the metadata cleanup recommendation
-(`~/gitrepos/palette/docs/metadata_cleanup_recommendation.md`), use explicit
-names to avoid ambiguity:
+Per Citrus's metadata cleanup recommendation (`docs/metadata_cleanup_recommendation.md`
+in the Citrus repository), use explicit names to avoid ambiguity:
 
 | Use | Instead of | Why |
 |-----|-----------|-----|

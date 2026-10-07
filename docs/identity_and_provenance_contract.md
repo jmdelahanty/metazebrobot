@@ -4,8 +4,7 @@ summary: "Which system owns which records across MetaZebrobot, Citrus, Orange an
 owner: metazebrobot
 status: current
 kind: reference
-verified_against: a56e219
-verified_scope: "Dish Identity, Versioning, and Recordings Without Citrus"
+verified_against: 384a366
 ---
 
 # Identity and Provenance Contract
@@ -20,7 +19,7 @@ Citrus (acquisition pipeline), and Palette (data processing + analysis).
 | Crosses | PyRAT (via MetaZebrobot proxy) | Palette: backfilled cache | Citrus H5 snapshot |
 | Dishes + screening history | MetaZebrobot | Palette: backfilled cache | Citrus H5 snapshot |
 | Fish identity + housing | MetaZebrobot | Palette: `subjects` cache | Citrus H5 snapshot |
-| Recordings + sessions | Palette | MetaZebrobot: read-only link | MetaZebrobot reads Palette DB |
+| Recordings + sessions | Palette | Not in MetaZebrobot (it does not read Palette) | N/A |
 | Behavioral results | Palette | Not in MetaZebrobot | N/A |
 | Arena assignments | Palette (`recordings.arena_id`) | Not in MetaZebrobot | N/A |
 
@@ -33,22 +32,35 @@ assessed simultaneously:
 - **`indicators_screened`** — list of indicators assessed (e.g. `["GFP", "jRGECO"]`),
   empty for pigment-only steps
 - **`pigment_screened`** — whether pigmentation was assessed
-- **`number_kept`** — fish that passed all criteria and remain in the dish
-- **`number_removed_pigmented/negative/other`** — fish removed, broken out by reason
+- **`count_screened_this_step`** — fish screened in this step
+- **`allocations`** — where the screened fish went, as a list of
+  `{bucket, disposition, count, destination_dish_id}`: `bucket` is
+  `remaining_in_parent`, `positive_screened`, `negative_screened`,
+  `pigmented_screened`, or `other`; `disposition` is `remain_parent`,
+  `derived_dish`, or `discarded`
+- **`number_kept`**, **`number_removed_pigmented/negative/other`** — legacy
+  compatibility counts; new steps record allocations instead
 
-The removal counts already record fish that are euthanized or discarded — no
-derived dish is needed for fish that won't be tracked further.
+A `discarded` allocation already records fish that are euthanized or
+discarded — no derived dish is needed for fish that won't be tracked further.
 
 ### Derived Dishes
 
-When kept or removed fish are physically moved to a new container, the operator
-creates a derived dish via `POST /screening/{dish_id}/split` with:
+When fish are physically moved to a new container, the operator creates a
+derived dish from the screening page. The step-linked form,
+`POST /screening/{dish_id}/steps/{screening_datetime}/split`, also records a
+`derived_dish` allocation on that step; `POST /screening/{dish_id}/split`
+creates a derived dish without a step link. Both take form fields:
 - **`fish_count`** — how many fish go into the new dish (explicit, not auto-calculated)
-- **`container_type`** — what container they go into (petri_dish, beaker, well_plate, tank)
-- **`population_type`** — positive_screened, negative_screened, or other
+- **`container_type`** — what container they go into (petri_dish, beaker,
+  well_plate, tank); defaults to the parent's
+- **`population_type`** — e.g. positive_screened, negative_screened,
+  pigmented_screened, or other
 
-The derived dish inherits cross, genotype, DOF, and enclosure settings from the
-parent. The `parent_dish_id` chain preserves full lineage.
+The derived dish inherits cross, genotype, DOF, species, sex, breeding
+parents, and enclosure settings from the parent, and records `parent_dish_id`.
+Lineage is read from screening allocations and transfer events, with
+`parent_dish_id` as a fallback; see `docs/dish_lineage_graph.md`.
 
 ### Yield Queries
 
@@ -60,8 +72,9 @@ To answer "for genotype X, what's the expected yield from one cross group?":
 
 ## Identity Assignment Flow — First Recording
 
-Fish always get IDs at recording time (not after). The flow for a fish's
-**first** behavioral session:
+Fish get IDs no later than recording time (not after): pre-registered in
+MetaZebrobot, or minted at recording. The flow for a fish's **first**
+behavioral session:
 
 1. Citrus checks MetaZebrobot for available fish → `GET /dishes/{dish_id}/fish`
 2. If fish don't have IDs yet, Citrus registers them →
@@ -70,8 +83,9 @@ Fish always get IDs at recording time (not after). The flow for a fish's
    `/zebrobot_snapshot/snapshot_json`
 4. Session/recording metadata stays in Palette (Citrus creates it in Palette's
    registry, not MetaZebrobot)
-5. After recording, operator assigns fish to wells in MetaZebrobot web UI —
-   `POST /fish/{fish_id}/assign` with `unit_id`
+5. After recording, fish are assigned to wells with
+   `POST /fish/{fish_id}/assign` and a `unit_id` (the web UI has no
+   assignment control yet; see `docs/fish_tracking_api.md`)
 6. Palette backfills subjects from H5 snapshot (existing path)
 
 ### Fish Identity Details
@@ -106,9 +120,10 @@ links them to the new session. The H5 snapshot for this recording includes
 the existing fish_id, its current housing info, and original provenance.
 
 **Microscopy/imaging:** Vendor software cannot call MetaZebrobot's API. The
-operator must log the imaging session manually — either through MetaZebrobot's
-web UI or by following a file naming convention that Palette can parse during
-import.
+operator must log the imaging session manually or follow a file naming
+convention that Palette can parse during import. MetaZebrobot has no session
+logging (sessions belong to Palette), so manual logging would happen in
+Palette.
 
 ## Open Design Questions (resolve before Citrus implementation)
 
@@ -118,18 +133,20 @@ import.
    blocks (`GET /dishes/{dish_id}/fish`, `GET /units/{unit_id}`).
 
 2. **Imaging session logging:** Microscopy uses vendor software that can't call
-   APIs. Options: operator logs imaging sessions manually in MetaZebrobot web
-   UI, or imaging files are named/organized by fish_id and Palette parses the
-   association during import.
+   APIs. Options: operator logs imaging sessions manually (in Palette, which
+   owns sessions; MetaZebrobot no longer stores them), or imaging files are
+   named/organized by fish_id and Palette parses the association during
+   import.
 
-3. **H5 snapshot evolution:** The snapshot is currently flat (one dish, one
-   cross). With individual fish, it needs to include per-fish metadata
-   (fish_id, current housing, previous sessions). Define the schema_version=2
-   format.
+3. **H5 snapshot evolution:** The stored snapshot is currently flat (one dish,
+   one cross). With individual fish, it needs to include per-fish metadata
+   (fish_id, current housing, previous sessions). This is the stored snapshot
+   format, owned by Citrus; it is separate from the API response
+   `schema_version` 2 described in `docs/zebrobot_snapshot.md`.
 
-4. **Palette backfill for known fish:** When Palette processes a recording
-   where the fish already exists in its `subjects` table, it should update
-   (not duplicate) the subject record. Verify that
+4. **Palette backfill for known fish (Palette-owned):** When Palette processes
+   a recording where the fish already exists in its `subjects` table, it
+   should update (not duplicate) the subject record. Verify that
    `_backfill_subject_dish_cross_entities()` handles this via
    `INSERT OR IGNORE` / `ON CONFLICT`.
 
@@ -140,7 +157,10 @@ import.
 
 ## H5 Snapshot Schema (extended)
 
-Current snapshot schema plus new fields:
+Proposed fields for the H5 snapshot. The H5 layout is owned by Citrus, which
+documents what it writes in its own repository (`docs/zebrobot_snapshot.md`,
+`docs/Understanding_H5_Log.md`); this list is MetaZebrobot's request, not a
+description of current Citrus output. Current snapshot schema plus new fields:
 
 - `dish_uuid`, `dish_revision`, `dish_updated_at`, `fish_revision` — identity
   and version at acquisition (see `docs/zebrobot_snapshot.md`)
@@ -150,6 +170,10 @@ Current snapshot schema plus new fields:
 - `session_uuid` — already captured
 
 ## Palette Contract
+
+This section describes Palette internals as last known to MetaZebrobot;
+Palette documents its snapshot import in its own repository
+(`docs/zebrobot_snapshot.md`).
 
 Palette's `_backfill_subject_dish_cross_entities()` already reads `fish_id`
 from provenance. As long as Citrus writes the fish_id to the H5, the existing
