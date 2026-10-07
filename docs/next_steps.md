@@ -124,6 +124,23 @@ appended later.
 
 ## Remaining
 
+### Known issues
+
+Code problems found during the 2026-10-07 docs review. The GitHub issues own
+the details; this list only links them.
+
+- [#1](https://github.com/jmdelahanty/metazebrobot/issues/1): Lineage: transfer-created dishes likely get duplicate edges
+- [#2](https://github.com/jmdelahanty/metazebrobot/issues/2): Count edit and its audit event are saved non-atomically
+- [#3](https://github.com/jmdelahanty/metazebrobot/issues/3): Assigning a fish to a unit doesn't update or check its dish
+- [#4](https://github.com/jmdelahanty/metazebrobot/issues/4): Well-plate unit labels don't follow standard plate layouts
+- [#5](https://github.com/jmdelahanty/metazebrobot/issues/5): Batch unit creation can report units that weren't saved
+- [#6](https://github.com/jmdelahanty/metazebrobot/issues/6): `GET /dishes/{dish_id}/units` sorts positions as text
+- [#7](https://github.com/jmdelahanty/metazebrobot/issues/7): Genotype parser treats any `word(...)` as a transgene construct
+- [#8](https://github.com/jmdelahanty/metazebrobot/issues/8): `requested_groups` is parsed differently on desktop and web
+- [#9](https://github.com/jmdelahanty/metazebrobot/issues/9): Web UI: small broken behaviours (crossings dish link, htmx fish delete, fish links, walkthrough cleanup)
+- [#10](https://github.com/jmdelahanty/metazebrobot/issues/10): API consistency for fish and unit endpoints (error shapes, 409 vs 500, status codes)
+- [#11](https://github.com/jmdelahanty/metazebrobot/issues/11): Desktop crossings worker uses its own PyRAT field list (decide: align or document)
+
 ### Web UI — next features
 - [ ] Material tracking web UI (agarose, fish water, poly-L-serine)
 - [ ] Export/survivability reports via web
