@@ -132,3 +132,35 @@ class TestHeritageRoutes:
         base, _, child_cross = self.cache_family()
         page = client.get(f"/crosses/{child_cross}/provenance/").text
         assert f'href="/tanks/{base + 200}/heritage/"' in page
+
+
+class TestTankLinks:
+    def test_pyrat_tanks_page_links_each_tank_to_heritage(self, client, monkeypatch):
+        import metazebrobot.api_server as api_server
+
+        monkeypatch.setattr(api_server, "_fetch_pyrat", lambda endpoint, params=None: [
+            {"tank_id": 8130, "tank_label": None, "status": "open", "strain_name_with_id": "AB",
+             "number_of_male": 0, "number_of_female": 2, "number_of_unknown": 0,
+             "date_of_birth": "2025-12-23T00:00:00", "location_rack_name": "M13", "tank_position": "A2"},
+        ])
+        page = client.get("/pyrat/tanks/").text
+        assert '<th>Heritage</th>' in page
+        assert 'href="/tanks/8130/heritage/"' in page
+
+    def test_uncached_tank_gets_friendly_page(self, client):
+        response = client.get("/tanks/987654322/heritage/")
+        assert response.status_code == 404
+        assert "No cached PyRAT records for this tank yet" in response.text
+        assert "resolve_tank_origins.py" in response.text
+
+    def test_split_only_tank_is_known(self, client):
+        from metazebrobot.data.data_manager import data_manager
+
+        tank = str(50000 + uuid.uuid4().int % 9000)
+        with data_manager.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO tank_origins (tank_id, status, source_tank_id) VALUES (?, 'split', '1')",
+                (tank,),
+            )
+            conn.commit()
+        assert client.get(f"/tanks/{tank}/heritage").status_code == 200

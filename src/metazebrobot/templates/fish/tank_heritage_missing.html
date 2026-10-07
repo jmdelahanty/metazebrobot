@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Heritage - Tank {{ tank_id }}{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Heritage - Tank {{ tank_id }}</h2>
+    <p>No cached PyRAT records for this tank yet.</p>
+</hgroup>
+
+<p>
+    Heritage is built from cached PyRAT crossings: a tank appears once a cached
+    cross lists it as a parent or a child. This tank hasn't appeared in one yet.
+    It may come from a cross older than the synced window, or have been split
+    off from another tank, or be an imported or founder tank.
+</p>
+<p>
+    The nightly cross-cache sync widens coverage each night. To look this tank
+    up now, run
+    <code>pixi run python scripts/resolve_tank_origins.py --db-path &lt;db&gt; --tank-id {{ tank_id }}</code>.
+</p>
+<p><a href="/pyrat/tanks/">PyRAT tanks</a> | <a href="/">Home</a></p>
+{% endblock %}

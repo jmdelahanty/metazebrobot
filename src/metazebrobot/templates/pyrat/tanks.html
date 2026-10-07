@@ -34,6 +34,7 @@
             <th class="sortable">Fish</th>
             <th class="sortable sort-desc">Age (days)</th>
             <th class="sortable">Status</th>
+            <th>Heritage</th>
         </tr>
     </thead>
     <tbody>
@@ -47,6 +48,7 @@
             <td>{{ t.total_fish }}</td>
             <td>{{ t.age_days if t.age_days is not none else "?" }}</td>
             <td>{{ t.status or "-" }}</td>
+            <td><a href="/tanks/{{ t.tank_id }}/heritage/">Heritage</a></td>
         </tr>
         {% endfor %}
     </tbody>
