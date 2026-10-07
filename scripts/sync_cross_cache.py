@@ -10,7 +10,9 @@ runs. Idempotent; safe to re-run at any time:
 2. Resolve parent tanks that still have no producing cross (new tanks, plus
    negative results older than RETRY_AFTER_DAYS) via tank history splits and
    targeted date-of-birth searches.
-3. Fetch strain ancestry (step 2c) for strains that are new or older than
+3. Refresh PyRAT strain names (``strains``/``strain_names``) and re-derive
+   backgrounds for cached rows of renamed strains. Best-effort.
+4. Fetch strain ancestry (step 2c) for strains that are new or older than
    REFRESH_AFTER_DAYS and used by a tank whose records give no background.
    Needs PyRAT frontend credentials; if they are missing or the (unofficial)
    pedigree endpoint fails, this step is skipped with a warning and the run
@@ -43,6 +45,7 @@ from metazebrobot.api_server import (  # noqa: E402
 from metazebrobot.data.data_manager import data_manager  # noqa: E402
 from metazebrobot.utils.cross_sync import SyncLockBusy, exclusive_lock, run_cross_sync  # noqa: E402
 from metazebrobot.utils.pyrat_api_client import PyratApiClient  # noqa: E402
+from metazebrobot.utils.strain_registry import refresh_strain_registry  # noqa: E402
 from metazebrobot.utils.strain_ancestry import (  # noqa: E402
     StrainPedigreeClient,
     fetch_strain_ancestry,
@@ -82,6 +85,7 @@ def main() -> int:
                 conn.commit()
                 result = run_cross_sync(conn, client, _cache_cross_rows, days=args.days,
                                         max_generations=args.max_generations)
+                strains = sync_strain_registry(conn, client)
                 ancestry = None if args.skip_ancestry else sync_strain_ancestry(conn, args.pause)
     except SyncLockBusy as exc:
         print(f"Skipped: {exc}", file=sys.stderr)
@@ -99,9 +103,20 @@ def main() -> int:
     print(f"{'':22}{'before':>8}{'after':>8}")
     for key, before in result["before"].items():
         print(f"{key:22}{before:>8}{result['after'][key]:>8}")
+    print(f"Strain registry: {strains}")
     if ancestry is not None:
         print(f"Strain ancestry: {ancestry}")
     return 0
+
+
+def sync_strain_registry(conn, client) -> str:
+    """Best-effort: strain names and rename re-derivation; never fails the run."""
+    try:
+        result = refresh_strain_registry(conn, client)
+        return ", ".join(f"{k}={v}" for k, v in result.items())
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: strain registry refresh skipped: {exc}", file=sys.stderr)
+        return f"skipped ({type(exc).__name__})"
 
 
 def sync_strain_ancestry(conn, pause: float) -> str:

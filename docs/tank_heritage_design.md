@@ -156,18 +156,19 @@ uses the derived values instead of parsing names only.
    tank on the left and ancestors to the right).
 4. ✅ Strain-ancestry cache, refreshed nightly for strains that need it.
 5. Manual curation (`cross_parent_background_design.md` step 6).
-6. Strain renames and tank strain reassignment: key everything by `strain_id`,
-   keep a name history, re-derive from current names (see open questions).
+6. ✅ Strain renames (`utils/strain_registry.py`): `strains` holds each
+   strain id's current PyRAT name, `strain_names` every name seen (including
+   names in cached crossings). Derivation and display use the current name by
+   `strain_id`; cached rows keep the name as fetched and are re-parsed when it
+   differs; pages show "formerly ...". Refreshed nightly (~9 requests).
+7. Tank strain reassignment (a tank's `strain_id` changes, e.g. after
+   genotyping): not yet handled; needs a periodic re-fetch of cached crossings.
 
 ## Open questions
 
-- Strain renames (2026-10-06). PyRAT strain names change as information
-  arrives, but cached rows store the name as fetched, and backgrounds/labels
-  are parsed from it, so old crosses keep stale names. Plan: a `strains`
-  table refreshed nightly from `api/v3/strains` (about 9 requests), a
-  `strain_names` history, derivation from the current name by `strain_id`,
-  and "formerly ..." in the UI. A tank reassigned to another strain (new
-  `strain_id`) needs a periodic re-fetch of cached crossings instead.
+- Tank strain reassignment (step 7). PyRAT has no change date on strains or
+  tanks, so changes are only visible by re-fetching. Candidate: re-fetch all
+  cached crossings weekly (~330 requests) and record per-tank strain changes.
 
 - *Danionella* and bracketed line tags (2026-10-06). `WT D. cerebrum [Utah]`,
   `WT D. translucida`, `WT D. dracula`, and tags such as `[Parisian]` on

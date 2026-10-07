@@ -97,7 +97,10 @@
                     {{ parent.location_display or parent.tank_label or parent.tank_id or "-" }}
                     {% if parent.tank_id %}<br><a href="/tanks/{{ parent.tank_id }}/heritage/"><small>Heritage</small></a>{% endif %}
                 </td>
-                <td>{{ parent.raw_strain_name or "-" }}</td>
+                <td>
+                    {{ parent.current_strain_name or parent.raw_strain_name or "-" }}
+                    {% if parent.former_strain_names %}<br><small>formerly {{ parent.former_strain_names | join("; ") }}</small>{% endif %}
+                </td>
                 <td>{{ parent.generation or "-" }}</td>
                 {% set h = parent.heritage or {} %}
                 {% set pc = h.producing_cross %}

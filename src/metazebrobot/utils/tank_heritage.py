@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from .cross_provenance import parse_parent_background
 from .strain_ancestry import strain_ancestry_backgrounds
+from .strain_registry import current_strain_name, former_names
 from .tank_origins import origin_chain
 
 MAX_GENERATIONS = 4
@@ -91,6 +92,14 @@ def _tank_record(conn: sqlite3.Connection, tank_id: str) -> Dict[str, Any]:
         for key in ("strain_id", "date_of_birth"):
             if payload.get(key) not in (None, ""):
                 record.setdefault(key, payload[key])
+    # Names change in PyRAT; the strain id does not. Show and parse the
+    # current name, keeping the name as fetched for "formerly ...".
+    current = current_strain_name(conn, record.get("strain_id"))
+    if current and current != record.get("strain_name"):
+        record["fetched_strain_name"] = record.get("strain_name")
+        record["strain_name"] = current
+    if record.get("strain_id") is not None:
+        record["former_strain_names"] = former_names(conn, record["strain_id"])
     return {k: v for k, v in record.items() if v is not None}
 
 
@@ -121,7 +130,8 @@ def _producing_cross(conn: sqlite3.Connection, tank_id: str) -> Optional[Dict[st
         payload = _payload(parent["raw_payload"])
         parents.append({
             "tank_id": parent["tank_id"],
-            "strain_name": parent["raw_strain_name"] or None,
+            "strain_name": current_strain_name(conn, payload.get("strain_id"))
+                           or parent["raw_strain_name"] or None,
             "strain_id": payload.get("strain_id"),
             "generation": parent["generation"] or None,
             "background_strains": _list(parent["parsed_background_strains"]),

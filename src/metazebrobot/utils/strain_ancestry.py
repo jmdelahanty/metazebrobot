@@ -111,8 +111,14 @@ def strain_ancestry_backgrounds(conn: sqlite3.Connection, strain_id: Any) -> Dic
     backgrounds: Dict[str, List[str]] = {}
     mutants: Dict[str, List[str]] = {}
     try:
+        # Prefer each ancestor's current name (strains table) over the name
+        # recorded when the pedigree was fetched.
         rows = conn.execute(
-            "SELECT ancestor_name, depth FROM strain_ancestry WHERE strain_id = ? ORDER BY depth, ancestor_name",
+            """
+            SELECT COALESCE(s.name, a.ancestor_name), a.depth FROM strain_ancestry a
+            LEFT JOIN strains s ON s.strain_id = a.ancestor_id
+            WHERE a.strain_id = ? ORDER BY a.depth, a.ancestor_name
+            """,
             (str(strain_id),),
         ).fetchall()
     except sqlite3.OperationalError:  # table not created yet
@@ -156,7 +162,10 @@ def strains_needing_ancestry(conn: sqlite3.Connection) -> List[str]:
     for strain_id, tank_ids in tanks_by_strain.items():
         if not needs_fetch(conn, strain_id):
             continue
-        named = parse_parent_background(names.get(strain_id, ""))
+        from .strain_registry import current_strain_name  # avoid import cycle
+
+        named = parse_parent_background(
+            current_strain_name(conn, strain_id) or names.get(strain_id, ""))
         if named["background_strains"] or named["mutant_backgrounds"]:
             continue  # the name already says it; ancestry adds little
         for tank_id in tank_ids:

@@ -55,6 +55,7 @@ from .utils.cross_provenance import (
 from .utils.heritage_graph import build_heritage_graph, layout_heritage_graph
 from .utils.tank_heritage import derive_tank_heritage
 from .utils.strain_ancestry import ensure_strain_ancestry_schema
+from .utils.strain_registry import current_strain_name, ensure_strain_registry_schema, former_names
 from .utils.tank_origins import ensure_tank_origins_schema
 
 logger = logging.getLogger(__name__)
@@ -1313,6 +1314,7 @@ def _ensure_cross_parent_provenance_schema(conn: sqlite3.Connection) -> None:
     """)
     ensure_tank_origins_schema(conn)
     ensure_strain_ancestry_schema(conn)
+    ensure_strain_registry_schema(conn)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS cross_background_summaries (
             cross_id TEXT PRIMARY KEY,
@@ -1658,6 +1660,11 @@ def _load_cross_parent_provenance(conn: sqlite3.Connection, cross_id: str) -> Di
             "confidence": row["confidence"],
             "heritage": derive_tank_heritage(conn, row["tank_id"]) if row["tank_id"] else None,
         })
+        strain_id = (parents[-1]["heritage"] or {}).get("tank", {}).get("strain_id")
+        current = current_strain_name(conn, strain_id)
+        if current and current != row["raw_strain_name"]:
+            parents[-1]["current_strain_name"] = current
+        parents[-1]["former_strain_names"] = former_names(conn, strain_id)
 
     # Backgrounds the parents' own origins prove (records only, no labels).
     from_parentage: Dict[str, List[str]] = {}

@@ -89,5 +89,23 @@ class PyratApiClient:
             if not page or offset >= total:
                 return crossings
 
+    def strains(self) -> List[Dict[str, Any]]:
+        """Every PyRAT strain with its current name (paged)."""
+        strains: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            response = self._get("strains", {
+                "k": ["id", "name", "official_name", "active"],
+                # strains only sorts by name-like fields; a rename mid-fetch can
+                # at worst repeat/skip one strain, corrected the next night.
+                "s": ["name:asc"], "l": PAGE_SIZE, "o": offset,
+            })
+            page = response.json()
+            strains.extend(page)
+            total = int(response.headers.get("X-Total-Count") or 0)
+            offset += len(page)
+            if not page or offset >= total:
+                return strains
+
     def tank_history(self, tank_id: Any) -> List[Dict[str, Any]]:
         return self._get(f"tanks/{tank_id}/history").json()

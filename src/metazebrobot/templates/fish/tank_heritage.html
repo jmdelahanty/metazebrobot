@@ -22,7 +22,7 @@
 
 <hgroup>
     <h2>Heritage - Tank {{ tank_id }}</h2>
-    <p>{{ t.strain_name or "unknown strain" }}{% if t.generation %} · {{ t.generation }}{% endif %}{% if t.date_of_birth %} · born {{ t.date_of_birth[:10] }}{% endif %}</p>
+    <p>{{ t.strain_name or "unknown strain" }}{% if t.former_strain_names %} <small>(formerly {{ t.former_strain_names | join("; ") }})</small>{% endif %}{% if t.generation %} · {{ t.generation }}{% endif %}{% if t.date_of_birth %} · born {{ t.date_of_birth[:10] }}{% endif %}</p>
 </hgroup>
 
 <section>
