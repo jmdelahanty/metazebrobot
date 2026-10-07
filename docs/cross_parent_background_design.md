@@ -4,15 +4,15 @@ summary: "Per-parent strain and background model for PyRAT crosses (cross_parent
 owner: metazebrobot
 status: current
 kind: design
-verified_against: a56e219
-verified_scope: "status block"
+verified_against: 384a366
 ---
 
 # Cross Parent Strain and Background Design
 
-Status (2026-10-06): steps 1–5 of the implementation sequence are built; 6–7
-are not. Parent strain data is often missing from the cache, and tank-level
-heritage (incross, cohort, producing cross) is designed in
+Status (2026-10-07): steps 1–5 of the implementation sequence are built; step
+6 is not, and step 7 is partly built (see below). Missing parent strain data
+and tank-level heritage (incross, cohort, producing cross, background from
+records and strain ancestry) are owned by
 [`tank_heritage_design.md`](tank_heritage_design.md).
 
 ## Motivation
@@ -49,9 +49,9 @@ Therefore, analytics should be able to ask questions like:
 - Are outcomes different for AB x AB versus AB x WIK crosses?
 - Does a transgene behave differently depending on the parent background?
 
-## Current Model
+## Model Before This Design
 
-Relevant existing fields:
+Fields that existed before `cross_parents` (all still present):
 
 - `crosses.cross_id`: local cache key for the PyRAT crossing ID.
 - `crosses.data`: raw PyRAT crossing payload JSON.
@@ -62,10 +62,11 @@ Relevant existing fields:
   dish creation.
 - `dish_transgenes`: normalized dish-level transgene constructs parsed from
   genotype strings.
-- `transgenic_indicators`: older cross-level transgene indicator table.
+- `crossing_transgenic_indicators`: older cross-level transgene indicator
+  table.
 
-This is enough to link a dish to a PyRAT cross, but it does not cleanly model
-the two parents as structured entities. It also risks mixing distinct concepts:
+This was enough to link a dish to a PyRAT cross, but it does not cleanly model
+the two parents as structured entities. It also risked mixing distinct concepts:
 transgenes, mutant alleles, wild-type strain background, lab line labels, and
 parent tank identity.
 
@@ -86,27 +87,30 @@ Do not force a dish to have one exact "strain" when the real provenance is a
 parent pair. A dish from `AB transgene x WIK Casper_HHMI` is best represented
 as progeny of those parent backgrounds, with a derived summary for filtering.
 
-## Proposed Future Schema
+## Schema (as built)
 
-Add a structured parent table keyed by cross:
+Created at startup by `_ensure_cross_parent_provenance_schema` in
+`api_server.py` (mirrored in `DataManager`), and backfilled from cached
+`crosses.data`. One structured parent row per cross parent:
 
 ```sql
 CREATE TABLE cross_parents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cross_id TEXT NOT NULL,
     parent_index INTEGER NOT NULL,
-    role TEXT,                         -- male, female, parent, unknown
+    role TEXT,                         -- male, female, mixed, unknown (from sex counts)
     tank_id TEXT,
     tank_label TEXT,
     location_display TEXT,
     raw_strain_name TEXT,
-    parsed_background_strain TEXT,      -- AB, WIK, TU, etc. when clear
-    parsed_line_label TEXT,             -- Casper_HHMI, TLN, etc.
-    parsed_transgenes TEXT,             -- JSON array
-    parsed_mutant_alleles TEXT,         -- JSON array
-    source TEXT DEFAULT 'pyrat',         -- pyrat, manual, inferred
-    confidence TEXT DEFAULT 'raw',       -- raw, inferred, curated
-    raw_payload TEXT,                   -- JSON source parent payload
+    generation TEXT,
+    parsed_background_strains TEXT,    -- JSON array: ["WIK"]
+    parsed_line_labels TEXT,           -- JSON array: ["Casper_HHMI"]
+    parsed_transgenes TEXT,            -- JSON array
+    parsed_mutant_alleles TEXT,        -- JSON array: ["casper"]
+    source TEXT DEFAULT 'pyrat',
+    confidence TEXT DEFAULT 'raw',     -- raw, or inferred when anything parsed
+    raw_payload TEXT,                  -- JSON source parent payload
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (cross_id) REFERENCES crosses(cross_id),
@@ -114,36 +118,44 @@ CREATE TABLE cross_parents (
 );
 ```
 
-Optional derived table or cached fields can be added later if analytics need
-fast filtering:
+A derived per-cross summary for fast filtering:
 
 ```sql
 CREATE TABLE cross_background_summaries (
     cross_id TEXT PRIMARY KEY,
-    background_summary TEXT,             -- e.g. AB x WIK/casper
-    background_strains TEXT,             -- JSON array: ["AB", "WIK"]
-    line_labels TEXT,                    -- JSON array: ["Casper_HHMI"]
-    mutant_backgrounds TEXT,             -- JSON array: ["casper", "nacre"]
-    transgenes TEXT,                     -- JSON array of parsed constructs
-    has_mixed_background BOOLEAN,
-    curated BOOLEAN DEFAULT FALSE,
+    background_summary TEXT,           -- e.g. "WIK + Casper_HHMI + casper"
+    background_strains TEXT,           -- JSON array: ["AB", "WIK"]
+    line_labels TEXT,                  -- JSON array: ["Casper_HHMI"]
+    mutant_backgrounds TEXT,           -- JSON array: ["casper", "nacre"]
+    transgenes TEXT,                   -- JSON array of parsed constructs
+    has_mixed_background INTEGER DEFAULT 0,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (cross_id) REFERENCES crosses(cross_id)
 );
 ```
 
-The summary table should be treated as derived/cache data. The source of truth
-should remain the per-parent records plus the raw PyRAT payload.
+`has_mixed_background` means more than one wild-type background across the
+parents (e.g. AB x WIK); a pigment mutant such as casper on one background is
+not a mix. Startup backfill corrects rows summarized under the older rule.
+
+The summary table is derived/cache data. The source of truth is the per-parent
+records plus the raw PyRAT payload. The same migration also creates
+`cross_children` and the heritage tables, which belong to
+[`tank_heritage_design.md`](tank_heritage_design.md). The proposed `curated`
+flag on summaries was not built; it waits on step 6.
 
 ## Parsing and Curation
 
-Parsing should be conservative:
+Parsing is conservative (`parse_parent_background` in
+`utils/cross_provenance.py`):
 
 - Preserve `raw_strain_name` exactly.
-- Parse clear tokens such as `AB`, `WIK`, `TU`, `TL`, `EK`, `casper`, `nacre`.
+- Parse clear tokens such as `AB`, `WIK`, `TU`, `TL`, `EK`, `casper`, `nacre`
+  (`mitfa`), `roy` (`mpv17`).
 - Do not discard facility suffixes such as `_HHMI`.
-- Mark uncertain results as `confidence = 'inferred'`.
-- Allow manual correction to set `confidence = 'curated'`.
+- Any parsed result is stored as `confidence = 'inferred'`; nothing parsed
+  stays `raw`.
+- Manual correction to `confidence = 'curated'` is planned (step 6), not built.
 
 Examples:
 
@@ -161,7 +173,7 @@ is not incorrectly treated as a transgene.
 
 ## UI Implications
 
-Dish creation from a PyRAT cross should eventually show a compact parent block:
+Proposed compact parent block for dish creation from a PyRAT cross:
 
 ```text
 Cross 18055
@@ -170,11 +182,14 @@ Parent 2: WIK Casper_HHMI                 tank #...
 Derived background: WIK + casper background
 ```
 
-The operator should be able to:
+Built: the new-dish form shows a Parent Provenance table (tank, strain,
+generation, parsed background per parent), and `/crosses/{cross_id}/provenance/`
+shows the per-parent rows and background summary (see
+[`web_pages.md`](web_pages.md)). The operator should also be able to:
 
 - Accept raw PyRAT parent metadata as-is.
-- Correct parsed background/line labels when the parser is wrong.
-- Add parent metadata manually if PyRAT access is incomplete.
+- Correct parsed background/line labels when the parser is wrong (not built).
+- Add parent metadata manually if PyRAT access is incomplete (not built).
 - Keep local dish `responsible` separate from PyRAT cross `responsible_fullname`.
 
 ## Analytics Implications
@@ -190,8 +205,11 @@ Analysis code should prefer structured parent/background fields over parsing
 - `parent_background_pair`
 - `transgene_constructs`
 
-These can be materialized later, but they should be derived from
-`cross_parents` rather than hand-entered per dish.
+These should be derived from `cross_parents` rather than hand-entered per
+dish. Today `GET /acquisition/dishes` exposes the cross summary fields
+(`background_summary`, `background_strains`, `line_labels`,
+`mutant_backgrounds`, `has_mixed_background`) per dish; the per-feature flags
+above are not materialized.
 
 ## Implementation Sequence
 
@@ -204,9 +222,11 @@ These can be materialized later, but they should be derived from
 4. ✅ Populate `cross_parents` during exact cross lookup and PyRAT crossing sync.
    Some sync paths don't request parent strain fields, so most cached parents
    have no strain; fixed by step 1 of `tank_heritage_design.md`.
-5. ✅ Display parent background summary on new-dish and cross-lineage pages.
+5. ✅ Display parent background on the new-dish form and the cross
+   provenance page.
 6. Add manual curation UI only after the raw/parsed model is stable.
-7. Add analytics/export fields derived from `cross_parents`.
+7. Add analytics/export fields derived from `cross_parents`. Partly built:
+   `GET /acquisition/dishes` carries the cross summary fields.
 
 ## Open Questions
 
