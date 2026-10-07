@@ -6,6 +6,7 @@ This module contains business logic for managing agarose bottles and solutions.
 
 import logging
 from datetime import datetime
+from ..utils.lab_time import lab_now
 from typing import Dict, Any, List, Optional, Tuple
 
 from ..models.agarose import AgaroseBottle, AgaroseSolution
@@ -144,7 +145,7 @@ class AgaroseController:
                 return False, "", None
             
             # Create a new solution
-            today = datetime.now().strftime("%Y%m%d")
+            today = lab_now().strftime("%Y%m%d")
             solution_id = f"AGSOL_{today}"
             
             # Check if solution ID already exists

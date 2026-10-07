@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHeaderView, QScrollArea, QDialog
 )
 from PySide6.QtCore import Qt, QDate, QUrl, Signal, Slot
+from .lab_qt_time import lab_qdate
 from PySide6.QtGui import QDesktopServices
 
 from ..utils.config import config
@@ -138,7 +139,7 @@ class FishDishTab(QWidget):
         row += 1
         form_layout.addWidget(QLabel("Date of Fertilization:"), row, 0)
         self.dof = QDateEdit()
-        self.dof.setDate(QDate.currentDate())
+        self.dof.setDate(lab_qdate())
         self.dof.setCalendarPopup(True)
         self.dof.setDisplayFormat("yyyy-MM-dd")
         form_layout.addWidget(self.dof, row, 1)
@@ -702,7 +703,7 @@ class FishDishTab(QWidget):
         self.cross_id.setCurrentIndex(0) # This should trigger handle_cross_selection_change to clear fields
         # Explicitly clear fields not cleared by cross selection change
         self.dish_number.setValue(1)
-        self.dof.setDate(QDate.currentDate())
+        self.dof.setDate(lab_qdate())
         self.sex.setCurrentText("unknown")
         self.species.setText("Danio rerio")
         self.temperature.setValue(28.5)

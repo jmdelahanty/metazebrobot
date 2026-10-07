@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QTimeEdit, QSizePolicy, QComboBox, QScrollArea, QWidget
 )
 from PySide6.QtCore import Qt, QDate, Slot, QTime
+from ..lab_qt_time import lab_qdate, lab_qtime
 from PySide6.QtGui import QPixmap, QFont
 
 # Import controller, models, and data_manager
@@ -134,14 +135,14 @@ class ScreeningDialog(QDialog):
 
         # Date and Time Input
         datetime_layout = QHBoxLayout()
-        self.step_date = QDateEdit(QDate.currentDate())
+        self.step_date = QDateEdit(lab_qdate())
         self.step_date.setCalendarPopup(True)
         self.step_date.setDisplayFormat("yyyy-MM-dd")
         self.step_date.dateChanged.connect(self.update_dpf)
         datetime_layout.addWidget(QLabel("Date:"))
         datetime_layout.addWidget(self.step_date)
         datetime_layout.addSpacing(10)
-        self.step_time = QTimeEdit(QTime.currentTime())
+        self.step_time = QTimeEdit(lab_qtime())
         self.step_time.setDisplayFormat("HH:mm:ss")
         datetime_layout.addWidget(QLabel("Time:"))
         datetime_layout.addWidget(self.step_time)
@@ -262,8 +263,8 @@ class ScreeningDialog(QDialog):
     @Slot()
     def set_current_datetime(self):
         """Sets the date and time edits to the current time."""
-        self.step_date.setDate(QDate.currentDate())
-        self.step_time.setTime(QTime.currentTime())
+        self.step_date.setDate(lab_qdate())
+        self.step_time.setTime(lab_qtime())
 
     def setup_steps_table(self):
         """Configure the appearance and columns of the steps table."""
@@ -449,7 +450,7 @@ class ScreeningDialog(QDialog):
         """Fill the finalize section with data from the loaded dish."""
         if not self.dish or not self.dish.screening_results:
             self.final_count.setEnabled(True); self.final_date.setEnabled(True)
-            self.final_date.setDate(QDate.currentDate()); self.final_count.setValue(0)
+            self.final_date.setDate(lab_qdate()); self.final_count.setValue(0)
             return
         results = self.dish.screening_results
         self.final_count.setEnabled(True); self.final_date.setEnabled(True)
@@ -459,8 +460,8 @@ class ScreeningDialog(QDialog):
             try:
                 dt_obj = datetime.strptime(results.date_finalized, "%Y%m%d")
                 self.final_date.setDate(QDate(dt_obj.year, dt_obj.month, dt_obj.day))
-            except ValueError: self.final_date.setDate(QDate.currentDate())
-        else: self.final_date.setDate(QDate.currentDate())
+            except ValueError: self.final_date.setDate(lab_qdate())
+        else: self.final_date.setDate(lab_qdate())
 
 
     @Slot()

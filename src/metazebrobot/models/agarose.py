@@ -4,7 +4,8 @@ Agarose models for MetaZebrobot.
 This module defines the data models for agarose bottles and solutions.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from ..utils.lab_time import lab_now
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, validator
 
@@ -104,9 +105,10 @@ class AgaroseSolution(BaseModel):
         Returns:
             A new AgaroseSolution instance
         """
-        today = datetime.now().strftime("%Y%m%d")
-        expiration = (datetime.now().replace(day=datetime.now().day + expiration_days)
-                     .strftime("%Y%m%d"))
+        now = lab_now()
+        today = now.strftime("%Y%m%d")
+        # timedelta, not replace(day=day + n), which raises past month end.
+        expiration = (now + timedelta(days=expiration_days)).strftime("%Y%m%d")
         
         return cls(
             concentration=concentration,

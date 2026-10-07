@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime
+from ..utils.lab_time import lab_now
 from typing import Optional, Dict, Any, Iterable, List, Literal, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -544,7 +545,7 @@ class FishDish(BaseModel):
         if parents is None:
             parents = []
 
-        today = datetime.now().strftime("%Y%m%d")
+        today = lab_now().strftime("%Y%m%d")
 
         # Generate dish_id if not provided (typically for primary)
         if dish_id is None:
@@ -725,5 +726,5 @@ class FishDish(BaseModel):
                 f"{termination_reason_options_text()}."
             )
         self.status = "inactive"
-        self.termination_date = datetime.now().strftime("%Y%m%d")
+        self.termination_date = lab_now().strftime("%Y%m%d")
         self.termination_reason = canonical_reason

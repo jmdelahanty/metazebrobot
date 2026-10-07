@@ -5,6 +5,7 @@ This module defines the data models for poly-L-serine bottles and solutions.
 """
 
 from datetime import datetime
+from ..utils.lab_time import lab_now
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
@@ -90,7 +91,7 @@ class PolyLSerineDerivative(BaseModel):
     ) -> 'PolyLSerineDerivative':
         """Create a new poly-L-serine derivative."""
         if not date_prepared:
-            date_prepared = datetime.now().strftime("%Y%m%d")
+            date_prepared = lab_now().strftime("%Y%m%d")
         
         return cls(
             source_bottle_id=source_bottle_id,

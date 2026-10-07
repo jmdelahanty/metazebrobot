@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QDateEdit, QTimeEdit, QGroupBox
 )
 from PySide6.QtCore import Signal, Qt, QDate, QTime
+from ...utils.lab_time import lab_now
 
 from ...models.fish_dish import FEED_TYPE_OPTIONS
 
@@ -157,7 +158,7 @@ class QualityCheckDialog(QDialog):
     
     def set_current_time(self):
         """Set the check date and time to current date and time."""
-        now = datetime.now()
+        now = lab_now()
         date = QDate(now.year, now.month, now.day)
         self.check_date.setDate(date)
         self.check_time.setTime(QTime(now.hour, now.minute, now.second))

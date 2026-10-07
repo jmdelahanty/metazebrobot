@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from ..utils.lab_time import lab_now
 from typing import Dict, Any, List, Optional, Tuple, Union, Callable
 
 from pydantic import BaseModel, Field, field_validator
@@ -276,7 +277,7 @@ class FishDishController:
                     note_parts.append(f"screening step {matched_step.screening_datetime}")
                     if source_screening_bucket:
                         note_parts.append(f"bucket {source_screening_bucket}")
-                note_parts.append(f"on {datetime.now().strftime('%Y%m%d')}.")
+                note_parts.append(f"on {lab_now().strftime('%Y%m%d')}.")
                 default_notes = " ".join(note_parts)
 
             new_dish = FishDish.create_new(
@@ -670,7 +671,7 @@ class FishDishController:
                 except ValueError:
                     return False, "Invalid transfer datetime format. Expected YYYYMMDDTHH:MM:SS.", None
             else:
-                event_datetime = datetime.now().strftime("%Y%m%dT%H:%M:%S")
+                event_datetime = lab_now().strftime("%Y%m%dT%H:%M:%S")
 
             transfer_event = {
                 "source_dish_id": source_dish_id,
@@ -772,7 +773,7 @@ class FishDishController:
                 except ValueError:
                     return False, "Invalid transfer datetime format. Expected YYYYMMDDTHH:MM:SS.", None
             else:
-                event_datetime = datetime.now().strftime("%Y%m%dT%H:%M:%S")
+                event_datetime = lab_now().strftime("%Y%m%dT%H:%M:%S")
 
             cross_dish_ids = [
                 dish.get("dish_id", "")
@@ -922,7 +923,7 @@ class FishDishController:
                 except ValueError:
                     return False, "Invalid count event datetime format. Expected YYYYMMDDTHH:MM:SS.", None
             else:
-                event_datetime = datetime.now().strftime("%Y%m%dT%H:%M:%S")
+                event_datetime = lab_now().strftime("%Y%m%dT%H:%M:%S")
 
             previous_current_count = dish.current_fish_count
             if previous_current_count is None:
@@ -1065,11 +1066,11 @@ class FishDishController:
                          msg = f"Invalid termination date format: {termination_date}. Expected YYYYMMDD."
                          logger.error(msg)
                          # Option: Use today's date as fallback? Or return error?
-                         # dish.termination_date = datetime.now().strftime("%Y%m%d")
+                         # dish.termination_date = lab_now().strftime("%Y%m%d")
                          return False, msg
                 else:
                     # Default to today if terminating and no date provided
-                    dish.termination_date = datetime.now().strftime("%Y%m%d")
+                    dish.termination_date = lab_now().strftime("%Y%m%d")
 
                 dish.termination_reason = normalized_reason
             else:
@@ -1275,7 +1276,7 @@ class FishDishController:
                 total_initially_produced=total_initial_prod,
                 total_positive_final=total_positive_fin,
                 yield_percentage=yield_perc,
-                date_aggregated=datetime.now().strftime("%Y%m%d")
+                date_aggregated=lab_now().strftime("%Y%m%d")
             )
 
         except Exception as e:

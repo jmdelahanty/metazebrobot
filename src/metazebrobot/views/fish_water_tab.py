@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QTextEdit, QCheckBox
 )
 from PySide6.QtCore import Qt, QDate, Slot
+from .lab_qt_time import lab_qdate
 
 from ..controllers.fish_water_controller import fish_water_controller
 
@@ -90,7 +91,7 @@ class FishWaterTab(QWidget):
         
         # Date prepared (YYYY-MM-DD format to match existing)
         form_layout.addWidget(QLabel("Date Prepared:"), 1, 2)
-        self.batch_date = QDateEdit(QDate.currentDate())
+        self.batch_date = QDateEdit(lab_qdate())
         self.batch_date.setCalendarPopup(True)
         self.batch_date.setDisplayFormat("yyyy-MM-dd")
         form_layout.addWidget(self.batch_date, 1, 3)
@@ -197,7 +198,7 @@ class FishWaterTab(QWidget):
         
         # Date prepared
         form_layout.addWidget(QLabel("Date Prepared:"), 3, 0)
-        self.derivative_date = QDateEdit(QDate.currentDate())
+        self.derivative_date = QDateEdit(lab_qdate())
         self.derivative_date.setCalendarPopup(True)
         self.derivative_date.setDisplayFormat("yyyy-MM-dd")
         form_layout.addWidget(self.derivative_date, 3, 1)
@@ -401,7 +402,7 @@ class FishWaterTab(QWidget):
         self.batch_id.clear()
         self.batch_source.setCurrentIndex(0)
         self.batch_volume.setValue(1000.0)
-        self.batch_date.setDate(QDate.currentDate())
+        self.batch_date.setDate(lab_qdate())
         self.batch_prepared_by.setText("Jeremy Delahanty")
         self.batch_notes.clear()
     
@@ -413,7 +414,7 @@ class FishWaterTab(QWidget):
         self.derivative_volume.setValue(250.0)
         self.derivative_storage.setText("2E.260-7-B")
         self.derivative_prepared_by.setText("Jeremy Delahanty")
-        self.derivative_date.setDate(QDate.currentDate())
+        self.derivative_date.setDate(lab_qdate())
         self.derivative_filter_type.setCurrentIndex(0)
         self.derivative_filter_size.setCurrentIndex(0)
         self.derivative_notes.clear()

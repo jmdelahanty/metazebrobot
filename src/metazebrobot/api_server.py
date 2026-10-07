@@ -16,7 +16,6 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
-from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -42,6 +41,7 @@ from .models.fish_dish import (
     termination_reason_label,
     termination_reason_options_text,
 )
+from .utils.lab_time import LAB_TIMEZONE, lab_calendar_date, lab_now, lab_today  # noqa: F401 (re-exported)
 from .utils.label_generator import generate_dish_label
 from .utils.ome_reference_export import (
     export_reference_pngs_from_ome_tiff,
@@ -68,22 +68,6 @@ logger = logging.getLogger(__name__)
 _PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_BUSY_TIMEOUT_MS = 250
 
-# The lab's calendar (dof, dpf, ...) is US East Coast wall-clock time; see
-# docs/zebrobot_snapshot.md "Dates and times". Explicit so a server or
-# container set to UTC can't shift ages by a day after 20:00 EDT.
-LAB_TIMEZONE = ZoneInfo("America/New_York")
-
-
-def lab_calendar_date(instant: Optional[datetime] = None) -> date:
-    """Lab-local calendar date of ``instant`` (default: now).
-
-    Naive instants are taken as UTC; aware ones are converted.
-    """
-    if instant is None:
-        return datetime.now(LAB_TIMEZONE).date()
-    if instant.tzinfo is None:
-        instant = instant.replace(tzinfo=timezone.utc)
-    return instant.astimezone(LAB_TIMEZONE).date()
 _USER_MAPPING_PATH = os.path.expanduser("~/.pyrat_user_mapping.json")
 DEFAULT_OME_STAGING_ROOT = Path("/groups/ahrens/ahrenslab/jeremy/screening_staging")
 _REFERENCE_DISPLAY_ROLES = {"composite", "channel", "brightfield", "other", "reference"}
@@ -3288,7 +3272,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         except Exception:
             pass
 
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = lab_now().strftime("%Y-%m-%d")
         prefill = _load_cross_prefill(cross_id, _require_db_path(), app.state.busy_timeout_ms) if cross_id else {
             "genotype": "",
             "responsible": "",
@@ -3377,7 +3361,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         # Only fetch recent crosses unless "all visible crosses" is requested.
         if not all_crosses:
-            cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+            cutoff = (lab_now() - timedelta(days=30)).strftime("%Y-%m-%d")
             params["date_of_record_from"] = cutoff
 
         try:
@@ -3477,7 +3461,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         return templates.TemplateResponse(request, "dishes/new_dish.html", {
             "crosses": crosses,
-            "today": datetime.now().strftime("%Y-%m-%d"),
+            "today": lab_now().strftime("%Y-%m-%d"),
             "form": {
                 "cross_id": cross_id,
                 "dish_number": dish_number,
@@ -3690,7 +3674,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "dishes": dishes,
             "summary": summary,
             "status_filter": normalized_status,
-            "today": datetime.now().strftime("%Y-%m-%d"),
+            "today": lab_now().strftime("%Y-%m-%d"),
             "termination_reason_options": TERMINATION_REASON_OPTIONS,
             "transfer_reason_options": DISH_TRANSFER_REASON_OPTIONS,
             "count_reason_options": DISH_COUNT_REASON_OPTIONS,
@@ -3719,7 +3703,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if termination_date and not stored_termination_date:
             raise HTTPException(status_code=400, detail="Termination date must be a valid date.")
         if not stored_termination_date:
-            stored_termination_date = datetime.now().strftime("%Y%m%d")
+            stored_termination_date = lab_now().strftime("%Y%m%d")
 
         normalized_reason = normalize_termination_reason(termination_reason)
         if not normalized_reason:
@@ -5073,7 +5057,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     def care_dish_list(request: Request):
         """Dish list for daily care logging."""
         db_path = _require_db_path()
-        today = datetime.now().strftime("%Y%m%d")
+        today = lab_now().strftime("%Y%m%d")
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             rows = conn.execute("""
                 SELECT d.dish_id, d.genotype, d.fish_count, d.current_fish_count,
@@ -5109,7 +5093,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             dish = _row_to_dict(row)
         units = data_manager.get_housing_units_with_fish(dish_id)
         has_units = len(units) > 1 or (len(units) == 1 and units[0]["unit_kind"] != "open")
-        now = datetime.now().strftime("%Y%m%dT%H:%M:%S")
+        now = lab_now().strftime("%Y%m%dT%H:%M:%S")
         transgenes = data_manager.get_dish_transgenes(dish_id)
         return templates.TemplateResponse(request, "care/care_form.html", {
             "dish_id": dish_id,
@@ -5239,7 +5223,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """Submit checks for all housing units at once."""
         _require_db_path()
         form = await request.form()
-        check_time = form.get("check_time", datetime.now().strftime("%Y%m%dT%H:%M:%S"))
+        check_time = form.get("check_time", lab_now().strftime("%Y%m%dT%H:%M:%S"))
 
         units = data_manager.get_housing_units_with_fish(dish_id)
         invalid = sorted({
@@ -5989,8 +5973,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     cross_id,
                     "active",
                     "primary",
-                    datetime.now().strftime("%Y%m%d"),
-                    (datetime.now() - timedelta(days=5)).strftime("%Y%m%d"),
+                    lab_now().strftime("%Y%m%d"),
+                    (lab_now() - timedelta(days=5)).strftime("%Y%m%d"),
                     "tour",
                     20,
                     "petri_dish",
@@ -6003,7 +5987,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         # 2. Screening step
         step_data = {
-            "screening_datetime": datetime.now().strftime("%Y%m%dT%H:%M:%S"),
+            "screening_datetime": lab_now().strftime("%Y%m%dT%H:%M:%S"),
             "dpf_screened": 5,
             "indicators_screened": ["gfap:TRPV1-T2A-GFP"],
             "pigment_screened": False,
@@ -6153,7 +6137,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             params["status"] = "open"
 
             raw = _fetch_pyrat("tanks", params)
-            now = datetime.now()
+            now = lab_now()
             for t in raw:
                 total = (t.get("number_of_male") or 0) + (t.get("number_of_female") or 0) + (t.get("number_of_unknown") or 0)
                 t["total_fish"] = total

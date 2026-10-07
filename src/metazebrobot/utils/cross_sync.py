@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from .tank_origins import ensure_tank_origins_schema, record_search_days, resolve_tank_origins
+from .lab_time import lab_today
 
 CACHE_CHUNK_SIZE = 200  # crossings per _cache_cross_rows call
 
@@ -62,7 +63,7 @@ def sync_recorded_crossings(
     Always re-fetches (status changes and newly raised children arrive on old
     records), then marks the days as fetched so targeted searches skip them.
     """
-    until = until or date.today()
+    until = until or lab_today()
     crossings = client.crossings_recorded(since)
     conn.commit()  # release our read snapshot before another connection writes
     cache_in_chunks(cache_crossings, crossings)
@@ -118,7 +119,7 @@ def run_cross_sync(
 
     Raises RuntimeError if fetched crossings did not reach the cache.
     """
-    today = today or date.today()
+    today = today or lab_today()
     since = today - timedelta(days=days)
     before = heritage_counts(conn)
 

@@ -22,7 +22,7 @@ Back up the database first, or point --db-path at a copy to preview.
 import argparse
 import sqlite3
 import sys
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Dict
 
@@ -37,6 +37,7 @@ from metazebrobot.api_server import (  # noqa: E402
 )
 from metazebrobot.data.data_manager import data_manager  # noqa: E402
 from metazebrobot.utils.cross_sync import cache_in_chunks, sync_recorded_crossings  # noqa: E402
+from metazebrobot.utils.lab_time import lab_today  # noqa: E402
 from metazebrobot.utils.pyrat_api_client import PyratApiClient  # noqa: E402
 
 def counts(conn: sqlite3.Connection) -> Dict[str, int]:
@@ -80,7 +81,7 @@ def main() -> int:
 
     with data_manager.get_connection() as conn:
         if args.sync_months:
-            since = date.today() - timedelta(days=round(args.sync_months * 30.44))
+            since = lab_today() - timedelta(days=round(args.sync_months * 30.44))
             # Also records the days, so resolve_tank_origins skips them.
             window = sync_recorded_crossings(conn, pyrat, _cache_cross_rows, since)
             print(f"Fetched {len(window)} crossings recorded since {since} (all owners)")

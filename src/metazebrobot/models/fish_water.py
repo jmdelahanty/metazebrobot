@@ -3,6 +3,7 @@ Fish water models for MetaZebrobot.
 """
 
 from datetime import datetime
+from ..utils.lab_time import lab_now
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
@@ -41,7 +42,7 @@ class FishWaterBatch(BaseModel):
     ) -> 'FishWaterBatch':
         """Create a new fish water batch."""
         if not preparation_date:
-            preparation_date = datetime.now().strftime("%Y-%m-%d")
+            preparation_date = lab_now().strftime("%Y-%m-%d")
         
         return cls(
             source=source,
@@ -107,7 +108,7 @@ class FishWaterDerivative(BaseModel):
     ) -> 'FishWaterDerivative':
         """Create a new fish water derivative."""
         if not date_prepared:
-            date_prepared = datetime.now().strftime("%Y%m%d")
+            date_prepared = lab_now().strftime("%Y%m%d")
         
         return cls(
             source_batch_id=source_batch_id,

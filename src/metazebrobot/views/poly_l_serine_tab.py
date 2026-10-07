@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QTextEdit, QCheckBox
 )
 from PySide6.QtCore import Qt, QDate, Slot
+from .lab_qt_time import lab_qdate
 
 from ..controllers.poly_l_serine_controller import poly_l_serine_controller
 
@@ -91,7 +92,7 @@ class PolyLSerineTab(QWidget):
         self.bottle_expiration_date.setCalendarPopup(True)
         self.bottle_expiration_date.setDisplayFormat("yyyy-MM-dd")
         # Set default to 1 year from now
-        future_date = QDate.currentDate().addYears(1)
+        future_date = lab_qdate().addYears(1)
         self.bottle_expiration_date.setDate(future_date)
         form_layout.addWidget(self.bottle_expiration_date, 1, 3)
         
@@ -101,7 +102,7 @@ class PolyLSerineTab(QWidget):
         self.bottle_received_date.setCalendarPopup(True)
         self.bottle_received_date.setDisplayFormat("yyyy-MM-dd")
         self.bottle_received_date.setSpecialValueText("Not specified")
-        self.bottle_received_date.setDate(QDate.currentDate())
+        self.bottle_received_date.setDate(lab_qdate())
         received_checkbox = QCheckBox("Specify received date")
         received_checkbox.stateChanged.connect(lambda state: self.bottle_received_date.setEnabled(bool(state)))
         self.bottle_received_date.setEnabled(False)
@@ -209,7 +210,7 @@ class PolyLSerineTab(QWidget):
         self.derivative_storage_expiration.setDisplayFormat("yyyy-MM-dd")
         self.derivative_storage_expiration.setSpecialValueText("Same as bottle")
         # Default to 1 year from now
-        future_date = QDate.currentDate().addYears(1)
+        future_date = lab_qdate().addYears(1)
         self.derivative_storage_expiration.setDate(future_date)
         form_layout.addWidget(self.derivative_storage_expiration, 3, 3)
         
@@ -397,9 +398,9 @@ class PolyLSerineTab(QWidget):
         self.bottle_id.clear()
         self.bottle_manufacturer.setCurrentIndex(0)
         self.bottle_storage.setText("2E.254")
-        future_date = QDate.currentDate().addYears(1)
+        future_date = lab_qdate().addYears(1)
         self.bottle_expiration_date.setDate(future_date)
-        self.bottle_received_date.setDate(QDate.currentDate())
+        self.bottle_received_date.setDate(lab_qdate())
         self.bottle_notes.clear()
     
     def clear_derivative_form(self):
@@ -411,7 +412,7 @@ class PolyLSerineTab(QWidget):
         self.derivative_prepared_by.setText("Jeremy Delahanty")
         self.derivative_storage_location.setText("2E.254")
         self.derivative_storage_container.setCurrentIndex(0)
-        future_date = QDate.currentDate().addYears(1)
+        future_date = lab_qdate().addYears(1)
         self.derivative_storage_expiration.setDate(future_date)
         self.derivative_notes.clear()
     

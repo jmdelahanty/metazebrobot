@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel, QComboBox, QDateEdit, QPushButton
 )
 from PySide6.QtCore import QDate, Qt
+from ..lab_qt_time import lab_qdate
 
 from ...models.fish_dish import (
     TERMINATION_REASON_OPTIONS,
@@ -64,7 +65,7 @@ class TerminationDialog(QDialog):
 
         # Termination date (only enabled if status is inactive)
         self.termination_date = QDateEdit()
-        self.termination_date.setDate(QDate.currentDate())
+        self.termination_date.setDate(lab_qdate())
         self.termination_date.setCalendarPopup(True)
         self.termination_date.setEnabled(False)
         form_layout.addRow("Termination Date:", self.termination_date)
@@ -141,9 +142,9 @@ class TerminationDialog(QDialog):
                 self.termination_date.setDate(QDate(year, month, day))
             except (ValueError, IndexError):
                 # If the date format is invalid, use current date
-                self.termination_date.setDate(QDate.currentDate())
+                self.termination_date.setDate(lab_qdate())
         else:
-            self.termination_date.setDate(QDate.currentDate())
+            self.termination_date.setDate(lab_qdate())
             
         canonical_reason = normalize_termination_reason(termination_reason)
         if canonical_reason:
