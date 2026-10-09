@@ -126,8 +126,8 @@ appended later.
 
 ### Known issues
 
-Code problems found during the 2026-10-07 docs review. The GitHub issues own
-the details; this list only links them.
+Code problems found during the 2026-10-07 docs review and since. The GitHub
+issues own the details; this list only links them.
 
 - [#1](https://github.com/jmdelahanty/metazebrobot/issues/1): Lineage: transfer-created dishes likely get duplicate edges
 - [#2](https://github.com/jmdelahanty/metazebrobot/issues/2): Count edit and its audit event are saved non-atomically
@@ -140,6 +140,8 @@ the details; this list only links them.
 - [#9](https://github.com/jmdelahanty/metazebrobot/issues/9): Web UI: small broken behaviours (crossings dish link, htmx fish delete, fish links, walkthrough cleanup)
 - [#10](https://github.com/jmdelahanty/metazebrobot/issues/10): API consistency for fish and unit endpoints (error shapes, 409 vs 500, status codes)
 - [#11](https://github.com/jmdelahanty/metazebrobot/issues/11): Desktop crossings worker uses its own PyRAT field list (decide: align or document)
+- [#12](https://github.com/jmdelahanty/metazebrobot/issues/12): Fish registered via the JSON API get no genotype/species
+- [#13](https://github.com/jmdelahanty/metazebrobot/issues/13): Record an individual fish's death, not just a well's `num_dead` (enhancement)
 
 ### Web UI — next features
 - [ ] Material tracking web UI (agarose, fish water, poly-L-serine)
