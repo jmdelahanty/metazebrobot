@@ -28,6 +28,7 @@ treat it as background, not ground truth. Schema: agent-contracts
 | [Cross Parent Strain and Background Design](cross_parent_background_design.md) | Per-parent strain and background model for PyRAT crosses (cross_parents, background parser). | checked at `384a366` |
 | [Dish Lineage Graph](dish_lineage_graph.md) | Dish lineage as a directed graph built from transfer and screening records. | checked at `384a366` |
 | [Tank Heritage and Background Design](tank_heritage_design.md) | Record-derived tank heritage: producing crosses, splits, backgrounds, strain ancestry and renames, plus the heritage view. | checked at `384a366` |
+| [User-Scoped Crosses, Dishes, and Fish](user_scoped_workflow_design.md) | Proposal to let each lab member find their own PyRAT crosses live and see their own dishes and fish by default, keeping the cross cache for heritage. | checked at `fcdba01` |
 
 ## Investigations
 
