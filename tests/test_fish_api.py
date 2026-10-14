@@ -3096,3 +3096,56 @@ class TestMortalityInventory:
         assert 'Saved 1 unit checks' in response.text
         assert client.get(f'/dishes/{dish_id}').json()['data']['current_fish_count'] == 47
         assert len(data_manager.get_housing_unit_checks(unit_id)) == 2
+
+
+# -------------------------------------------------------------------
+# Fish revision history (fish_subject_revisions)
+# -------------------------------------------------------------------
+
+
+class TestFishRevisionHistory:
+    def test_creation_is_revision_one(self, client, seed_dish):
+        fish_id = client.post(
+            f"/dishes/{seed_dish}/fish", json={"subject_label": "Z1"}
+        ).json()["fish_id"]
+        items = client.get(f"/fish/{fish_id}/revisions").json()["items"]
+        assert [(r["revision"], r["kind"]) for r in items] == [(1, "created")]
+        assert items[0]["subject_label"] == "Z1"
+        assert items[0]["dish_id"] == seed_dish
+
+    def test_each_change_is_recorded_and_creation_kept(self, client, seed_dish):
+        fish_id = client.post(
+            f"/dishes/{seed_dish}/fish", json={"subject_label": "Z1"}
+        ).json()["fish_id"]
+        client.patch(f"/fish/{fish_id}", json={"subject_label": "Z2"})
+        client.patch(f"/fish/{fish_id}", json={"notes": "moved"})
+        client.patch(f"/fish/{fish_id}", json={"notes": "moved"})  # no-op: no new revision
+
+        items = client.get(f"/fish/{fish_id}/revisions").json()["items"]
+        assert [(r["revision"], r["kind"], r["subject_label"]) for r in items] == [
+            (1, "created", "Z1"), (2, "changed", "Z2"), (3, "changed", "Z2"),
+        ]
+        assert client.get(f"/fish/{fish_id}").json()["revision"] == 3
+
+    def test_history_outlives_delete(self, client, seed_dish):
+        fish_id = client.post(f"/dishes/{seed_dish}/fish", json={}).json()["fish_id"]
+        client.delete(f"/fish/{fish_id}")
+        assert client.get(f"/fish/{fish_id}/revisions").json()["items"][0]["kind"] == "created"
+
+    def test_unknown_fish(self, client):
+        resp = client.get(f"/fish/{uuid.uuid4()}/revisions")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["error"] == "fish_not_found"
+
+    def test_existing_fish_backfilled_at_current_revision(self, client, seed_dish):
+        fish_id = str(uuid.uuid4())
+        with data_manager.get_connection() as conn:
+            conn.execute("DROP TRIGGER trg_fish_subjects_history_insert")
+            conn.execute(
+                "INSERT INTO fish_subjects (fish_id, dish_id, revision) VALUES (?, ?, 3)",
+                (fish_id, seed_dish),
+            )
+            data_manager._ensure_fish_revision_history(conn)
+            conn.commit()
+        items = client.get(f"/fish/{fish_id}/revisions").json()["items"]
+        assert [(r["revision"], r["kind"]) for r in items] == [(3, "backfilled")]

@@ -198,11 +198,73 @@ class DataManager:
                             WHERE rowid = NEW.rowid;
                         END
                     """)
+                self._ensure_fish_revision_history(conn)
                 conn.commit()
             return True
         except Exception as e:
             logger.error("Error ensuring revision tracking: %s", e, exc_info=True)
             return False
+
+    # Fish content kept per revision; revision 1 is the creation values that
+    # idempotent client-minted creates compare against.
+    FISH_HISTORY_COLUMNS = (
+        "dish_id", "subject_label", "sex", "genotype", "species", "notes", "current_unit_id",
+    )
+
+    def _ensure_fish_revision_history(self, conn) -> None:
+        """Record every fish revision in fish_subject_revisions (kept after deletes)."""
+        cols = ", ".join(self.FISH_HISTORY_COLUMNS)
+        new_cols = ", ".join(f"NEW.{c}" for c in self.FISH_HISTORY_COLUMNS)
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS fish_subject_revisions (
+                fish_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('created', 'changed', 'backfilled')),
+                recorded_at TEXT NOT NULL,
+                {", ".join(f"{c} TEXT" for c in self.FISH_HISTORY_COLUMNS)},
+                PRIMARY KEY (fish_id, revision)
+            )
+        """)
+        conn.execute("DROP TRIGGER IF EXISTS trg_fish_subjects_history_insert")
+        conn.execute(f"""
+            CREATE TRIGGER trg_fish_subjects_history_insert
+            AFTER INSERT ON fish_subjects
+            FOR EACH ROW
+            BEGIN
+                INSERT OR IGNORE INTO fish_subject_revisions
+                    (fish_id, revision, kind, recorded_at, {cols})
+                VALUES (NEW.fish_id, NEW.revision, 'created',
+                        COALESCE(NEW.updated_at, CURRENT_TIMESTAMP), {new_cols});
+            END
+        """)
+        # Fires on the revision trigger's own UPDATE, the only one that moves revision.
+        conn.execute("DROP TRIGGER IF EXISTS trg_fish_subjects_history_update")
+        conn.execute(f"""
+            CREATE TRIGGER trg_fish_subjects_history_update
+            AFTER UPDATE ON fish_subjects
+            FOR EACH ROW WHEN NEW.revision IS NOT OLD.revision
+            BEGIN
+                INSERT OR REPLACE INTO fish_subject_revisions
+                    (fish_id, revision, kind, recorded_at, {cols})
+                VALUES (NEW.fish_id, NEW.revision, 'changed',
+                        COALESCE(NEW.updated_at, CURRENT_TIMESTAMP), {new_cols});
+            END
+        """)
+        conn.execute(f"""
+            INSERT OR IGNORE INTO fish_subject_revisions
+                (fish_id, revision, kind, recorded_at, {cols})
+            SELECT fish_id, revision, 'backfilled', COALESCE(updated_at, CURRENT_TIMESTAMP), {cols}
+            FROM fish_subjects
+        """)
+
+    def get_fish_revisions(self, fish_id: str) -> List[Dict[str, Any]]:
+        """Stored revisions of a fish, oldest first (may outlive the fish)."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM fish_subject_revisions WHERE fish_id = ? ORDER BY revision",
+                (fish_id,),
+            ).fetchall()
+        return [{k: row[k] for k in row.keys()} for row in rows]
 
     def ensure_schema(self) -> bool:
         """Verify required tables exist and apply all known schema migrations."""

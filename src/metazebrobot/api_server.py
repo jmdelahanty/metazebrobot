@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -262,6 +262,26 @@ class FishSubjectResponse(BaseModel):
 
 class FishListResponse(BaseModel):
     items: List[FishSubjectResponse] = Field(default_factory=list)
+
+
+class FishRevisionResponse(BaseModel):
+    """A fish's content as of one revision (fish_subject_revisions)."""
+
+    fish_id: str
+    revision: int
+    kind: Literal["created", "changed", "backfilled"]
+    recorded_at: str
+    dish_id: Optional[str] = None
+    subject_label: Optional[str] = None
+    sex: Optional[str] = None
+    genotype: Optional[str] = None
+    species: Optional[str] = None
+    notes: Optional[str] = None
+    current_unit_id: Optional[str] = None
+
+
+class FishRevisionListResponse(BaseModel):
+    items: List[FishRevisionResponse] = Field(default_factory=list)
 
 
 class ApiErrorDetail(BaseModel):
@@ -5873,6 +5893,28 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if not success:
             raise HTTPException(status_code=500, detail="Failed to assign fish")
         return data_manager.get_fish_subject(fish_id)
+
+    @app.get(
+        "/fish/{fish_id}/revisions",
+        response_model=FishRevisionListResponse,
+        responses=_LOOKUP_ERROR_RESPONSES,
+    )
+    def get_fish_revisions(fish_id: str) -> Dict[str, Any]:
+        """Every stored revision of a fish, oldest first.
+
+        ``kind`` is ``created`` for revision 1, ``changed`` for later edits,
+        and ``backfilled`` for the state an existing fish had when history
+        began (its earlier revisions are unknown). History outlives a deleted
+        fish.
+        """
+        _require_db_path()
+        try:
+            revisions = data_manager.get_fish_revisions(fish_id)
+        except Exception as exc:
+            raise _database_error(exc)
+        if not revisions:
+            raise _not_found("fish", fish_id=fish_id)
+        return {"items": revisions}
 
     @app.get("/fish/{fish_id}/history")
     def get_fish_history(fish_id: str) -> Dict[str, Any]:
