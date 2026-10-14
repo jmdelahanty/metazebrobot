@@ -58,6 +58,9 @@ A construct on a different transgene than its marker has no link at all. The
 marker only co-segregates by chance, so it is never recorded as a readout for
 that construct.
 
+Full snapshot with match details and lab questions:
+[construct data inventory, 2026-10-14](construct_data_inventory_2026-10-14.md).
+
 ## Proposal
 
 ### 1. Curate the catalog
@@ -98,7 +101,7 @@ Addgene, ZFIN, FPbase) go in `construct_references` (next section).
 |---|---|---|---|---|---|---|
 | `bark` | effector | GRK2 (βARK1) RGS fragment; attenuates Gq GPCR signaling | mCherry, red | co_expressed | `linker` P2A; HA-FLAG N-terminal tags | **confirmed from plasmid B0078** (Tol2, zebrafish gfap promoter) and Nagai et al. 2021 |
 | `bark_d110a` | effector (inactive control) | as above, D→A at RGS-fragment codon 66 (consistent with D110A) | mCherry, red | co_expressed | `linker` P2A; `variant_of` `bark` | **confirmed from plasmid B0077**: one base differs from B0078 |
-| `pmca2mcherry` | effector | hPMCA2w/b; Ca²⁺ extrusion ("CalEx") | mCherry, red | fusion | `fusion_terminus` to determine | published CalEx is N-terminal; lab line orientation unknown |
+| `pmca2mcherry` | effector | hPMCA2w/b; Ca²⁺ extrusion ("CalEx") | mCherry, red | fusion | `fusion_terminus` to determine | mammalian CalEx is N-terminal (Addgene #111568, "mCherry tag, N terminal"); the Ahrens lab zebrafish line is written `Tg(gfap:hPMCA2-mCherry)` (Chen, Duque et al., Science 2025, doi 10.1126/science.adq5233), so the name suggests C-terminal; sequence not yet seen. PyRAT also has a P2A line (`Tg(gfap:PMCA2-P2A-mCherry-zf_J00)`) |
 | `jgcamp8f`, `gcamp7ff`, `gcamp6s` | sensor | calcium | green | intrinsic | | to confirm ("GCaMP7ff" naming to check) |
 | `jrgeco1b` | sensor | calcium | red | intrinsic | | to confirm |
 | `grab5ht`, `grabatp10` | sensor | serotonin, ATP | green (cpGFP) | intrinsic | | to confirm |
@@ -125,8 +128,11 @@ linked here (one owner per fact):
   library can own the bibliography, and the catalog stores the DOI plus the
   Zotero item key so the app can link to it. Zotero items can be tagged with
   the catalog key so the link works both ways.
-- **Plasmids:** Addgene ids (iβARK-p2A-mCherry: #117688), or an internal
-  plasmid id for lab-made constructs.
+- **Plasmids:** Addgene ids, or an internal plasmid id for lab-made
+  constructs. Take ids from Addgene's own pages, not from papers: Nagai et al.
+  2021's methods list #117688 as active iβARK, but Addgene's #117688 is the
+  R106A control. The active plasmids are #117689 (CMV) and #117691 (GfaABC1D,
+  astrocyte promoter); D110A controls are #117690 and #117692.
 - **Zebrafish constructs and lines:** ZFIN is the authority for zebrafish
   transgene nomenclature and records transgenic constructs and lines with
   stable ids (`ZDB-TGCONSTRCT-…`, `ZDB-ALT-…`). Lab-made lines often aren't in
@@ -173,13 +179,30 @@ readout". Fish inherit these from their origin dish
 so each tracked fish has one call per construct with its source and readout
 link. Pigment calls work the same way.
 
-### 4. Unparsed strains get constructs entered once
+### 4. Unparsed strains take constructs from the parent tanks
 
-For crosses whose strain parses to nothing (`EXPERIMENTAL`), constructs and
-their readouts are entered once per cross. New dishes from that cross then
-carry them. Whether PyRAT's tank or strain records hold transgene data that
-could fill this automatically is to check first (deferred item in
-[user-scoped workflow](user_scoped_workflow_design.md#deferred)).
+When a cross's own strain parses to no constructs (PyRAT's `EXPERIMENTAL`,
+strain 564), a dish's candidate constructs come from its **parent tanks'
+strains** instead. `cross_parents.parsed_transgenes` already holds them.
+Example, cross 19234:
+
+- the female parent is tank 7472, `Tg(gfap:PMCA2-mCherry-zf)`, F2;
+- the male parent is tank 8130, `Casper_HHMI [AB-C] DEC25`, with no transgenes;
+- so the dishes' candidate construct is `Tg(gfap:PMCA2-mCherry-zf)`.
+
+These rows are stored with `source_type = parent_tank` and the tank id, so
+they're distinguishable from constructs parsed from the cross's own strain.
+
+Parent-derived constructs mean "may carry", not "carries". A cross of a
+transgenic carrier with a non-transgenic partner yields a mix, which is what
+the screen sorts out. So they become the dish's **screenable** constructs: they
+appear on the screening form, and a dish's calls for them come only from its
+screening steps. In the 19234 example, 19234_1 is PMCA2-mCherry positive and
+19234_2 negative, both from 2026-10-05.
+
+Manual entry per cross stays as the fallback for cases the parent strains
+don't cover: a parent strain that is itself unparsed, or a construct that isn't
+named in any strain.
 
 ### 5. API and Citrus
 
@@ -221,7 +244,7 @@ the field names land once.
 2. `screening_step_indicators`, form change, backfill with review report.
 3. Construct and screening fields in the API and snapshot; re-pin.
 4. Fish-level inherited calls, after the origin/location work.
-5. Per-cross constructs for unparsed strains.
+5. Parent-tank constructs for unparsed strains (manual entry as fallback).
 
 Steps 1-3 don't depend on the origin/location work. Step 4 does.
 
