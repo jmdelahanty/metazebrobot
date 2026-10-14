@@ -135,6 +135,24 @@ could fill this automatically is to check first (deferred item in
   `screening_calls[]`. Citrus can show them per arena at runtime (e.g. "Z1:
   PMCA2-mCherry +, fusion") and seal them in the recording.
 
+Identifiers and precedence:
+
+- **Catalog key:** each catalog entry is referenced by its `normalized_name`
+  (unique today, e.g. `pmca2mcherry`), not the integer `id`, so the key
+  survives a rebuilt database.
+- **Dish construct key:** a call names its dish construct by the canonical
+  construct string (e.g. `Tg(her4.1:PMCA2-mCherry)`), which is unique per dish
+  (`dish_transgenes` has `UNIQUE(dish_id, construct)`). The same reporter
+  under two promoters stays two constructs.
+- **Precedence:** for one fish and one construct, an observed call on the fish
+  wins over the inherited one. Both are served, with the observed call marked
+  current and the inherited call kept with its source, so a disagreement is
+  visible rather than hidden. Dish-level calls are never rewritten by fish
+  observations (see open questions).
+- **Vocabulary:** `readout_link`, call `result` and `kind` values are closed
+  enums pinned with the endpoint version. Consumers such as Citrus seal them
+  verbatim.
+
 All of these are additive fields on pinned endpoints: a re-pin through
 agent-contracts, coordinated with the Citrus subject identity v4 contract so
 the field names land once.
