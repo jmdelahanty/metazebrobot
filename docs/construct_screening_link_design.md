@@ -50,9 +50,9 @@ built. The catalog records this as `readout_link`:
 |---|---|---|---|
 | `intrinsic` | The transgene product is the fluorescent molecule | Expressed, in the expressing cells | jGCaMP8f, jRGECO1b, GRAB sensors |
 | `fusion` | Fluorophore fused to the protein of interest | Expressed, where the fusion localizes | PMCA2-mCherry, CoChR-eGFP |
-| `co_expressed` | Same transcript, separate protein (2A, IRES) | Expressed in the same cells | TRPV1-T2A-GFP |
+| `co_expressed` | Same transcript, separate protein (2A, IRES) | Expressed in the same cells | TRPV1-T2A-GFP, iβARK-p2A-mCherry |
 | `cis_marker` | Separate marker cassette on the same construct (e.g. `cmlc2:EGFP`) | Carries the construct; says nothing about target expression | heart or eye markers |
-| `none` | No fluorescent readout | Can't be screened by fluorescence | b-ARK (to confirm) |
+| `none` | No fluorescent readout | Can't be screened by fluorescence | none in use today |
 
 A construct on a different transgene than its marker has no link at all. The
 marker only co-segregates by chance, so it is never recorded as a readout for
@@ -68,7 +68,7 @@ Jeremy's to confirm. Proposed starting values:
 
 | Construct | Role | Readout | `readout_link` | Confirm |
 |---|---|---|---|---|
-| PMCA2-mCherry | effector | mCherry, red | fusion | |
+| PMCA2-mCherry | effector | mCherry, red | fusion | supported: "CalEx" mCherry-hPMCA2w/b in Nagai et al. 2021 |
 | jGCaMP8f, GCaMP7ff, GCaMP6s | sensor | green | intrinsic | |
 | jRGECO1b | sensor | red | intrinsic | |
 | GRAB-5HT, GRABATP1.0 | sensor | green (cpGFP) | intrinsic | |
@@ -76,11 +76,36 @@ Jeremy's to confirm. Proposed starting values:
 | CaMPARI | sensor | green→red | intrinsic | |
 | TRPV1-T2A-GFP | effector | GFP, green | co_expressed | |
 | CoChR-eGFP | effector | eGFP, green | fusion | |
-| b-ARK | effector? | ? | ? | yes: steps screen "b-ark", so it has some readout |
+| b-ARK (iβARK) | effector | mCherry, red | co_expressed (P2A) | confirmed 2026-10-14: iβARK-p2A-mCherry (genetics expert; Nagai et al. 2021, Addgene #117688) |
 
 Construct identity in the catalog is the reporter or effector. The promoter
 stays per dish construct (`Tg(gfap:jRGECO1b)` and `Tg(elavl3:jRGECO1b)` share a
 catalog entry but differ in where they express).
+
+### References and external identifiers
+
+Each catalog entry can carry where its facts come from, owned elsewhere and
+linked here (one owner per fact):
+
+- **Papers:** DOIs (e.g. iβARK: `10.1016/j.neuron.2021.05.023`, Nagai et al.
+  2021, *Neuron* 109:2256). The DOI is the stable key. A lab Zotero group
+  library can own the bibliography, and the catalog stores the DOI plus the
+  Zotero item key so the app can link to it. Zotero items can be tagged with
+  the catalog key so the link works both ways.
+- **Plasmids:** Addgene ids (iβARK-p2A-mCherry: #117688), or an internal
+  plasmid id for lab-made constructs.
+- **Zebrafish constructs and lines:** ZFIN is the authority for zebrafish
+  transgene nomenclature and records transgenic constructs and lines with
+  stable ids (`ZDB-TGCONSTRCT-…`, `ZDB-ALT-…`). Lab-made lines often aren't in
+  ZFIN; the field stays empty rather than guessed.
+- **Fluorophores:** FPbase for spectra, which could fill
+  `excitation_nm`/`emission_nm` instead of hand entry.
+
+Stored as a small `construct_references` table (catalog key, kind: `doi` |
+`zotero` | `addgene` | `zfin` | `fpbase` | `internal`, value, note), served
+with the catalog. Lookups start manual. Assisted matching against ZFIN or
+FPbase (both offer public data) is a later step, and results stay proposals
+for review.
 
 ### 2. Screening steps point at constructs
 
