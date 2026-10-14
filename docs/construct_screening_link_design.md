@@ -312,11 +312,19 @@ the field names land once.
 
 Steps 1-3 don't depend on the origin/location work. Step 4 does.
 
+## Decisions
+
+- **Legacy "Both/Final Brightness"** (2026-10-14, Jeremy): the four steps on
+  15178_1/2 and 15180_1/2 (2025, inactive dishes) are read as positive for
+  both dish constructs if bright. Each backfilled call carries
+  `match_confidence = low` and a note saying it's an interpretation of an
+  early, unclear label. It isn't a recorded call.
+- **No brightness grade:** brightness was never labelled meaningfully, so
+  screening records positive/negative per construct only.
+
 ## Open questions
 
 - Should a negative call on a `cis_marker` construct be reported as "does not
   carry" or only "marker not seen"? Markers can be silenced.
-- Screening brightness grades ("Final Brightness"): a per-call grade field, or
-  out of scope?
 - Do promoters need their own catalog (expected tissue, e.g. her4.1 = radial
   glia), or is the free promoter string enough for now?
