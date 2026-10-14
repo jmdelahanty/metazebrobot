@@ -150,8 +150,19 @@ after a move, so a later move doesn't affect a recording.
   `dish_id` after a move: Citrus seals the dish at start, and Palette joins on
   `fish_id`. This is stated in [zebrobot_snapshot.md](zebrobot_snapshot.md)
   and confirmed with Citrus and Palette before release.
-- `GET /dishes/{dish_id}/fish` lists fish by location, the fish in that dish.
-  A by-origin listing can be a query parameter later.
+- **`GET /dishes/{dish_id}/fish` changes meaning:** from "fish registered to
+  the dish" to "fish in the dish now". A fish moved out drops off the list.
+  Orange seals this list at record start (`dish_fish`), so recordings made
+  before and after the change mean different things. The sealed
+  `consumer_schema_sha256` tells them apart, because the re-pin changes the
+  digest. The re-pin and [zebrobot_snapshot.md](zebrobot_snapshot.md) must
+  state the change explicitly (Palette, 2026-10-14). A by-origin listing can
+  be a query parameter later.
+- **Subject identity v4 wording:** the v4 note says a fish's `dish_id` stays
+  its origin after later moves. That becomes false and needs an amendment
+  with Citrus. Idempotent create behaviour is unchanged, because it compares
+  against revision 1, whose `dish_id` is the origin. `409 fish_id_conflict`
+  should read "under a different origin dish".
 - It's a re-pin through agent-contracts, not a new `schema_version`.
 
 ## Builds on this
