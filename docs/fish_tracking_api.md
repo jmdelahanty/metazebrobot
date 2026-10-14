@@ -105,15 +105,37 @@ Content-Type: application/json
 }
 ```
 
-All fields are optional:
-- If `fish_id` is omitted, a UUID v4 is generated server-side.
-- If `fish_id` is provided (e.g. minted by Citrus), it is used as-is.
+All fields are optional.
 
-Returns `201` with the created fish object (same shape as the list items above).
+- `fish_id` omitted: the server mints a UUID v4.
+- `fish_id` supplied (e.g. minted by Citrus at record start): it must be a
+  lowercase canonical UUID v4, else `422` `invalid_fish_id`.
+- `sex`, `genotype` and `species` default from the dish when omitted
+  (`species` falls back to `Danio rerio`).
+- `subject_label`: at most 64 characters, no control characters, else `422`
+  `invalid_subject_label`. It isn't unique and isn't an identifier.
 
-Returns `404` if the dish does not exist, with `{"detail": "Dish not found"}`
-(a plain string, not the structured shape). Returns `500` if the insert fails,
-for example because the `fish_id` is already registered.
+The request is idempotent on `fish_id`, for client outbox replays (contract:
+agent-contracts `citrus-palette/subject_identity_v4_2026-10-14.md`):
+
+| Case | Response |
+|---|---|
+| New `fish_id`, dish active | `201`, the created fish (revision 1) |
+| `fish_id` exists, same creation values | `200`, the **current** fish (revision may be > 1) |
+| `fish_id` exists, different creation values | `409` `{"error": "fish_id_conflict", "fish_id": ...}` |
+| New `fish_id`, dish inactive | `409` `{"error": "dish_inactive", "dish_id": ...}` |
+| New `fish_id`, unknown dish | `404` `{"error": "dish_not_found", "dish_id": ...}` |
+
+- **Creation values compared:** `dish_id` (from the path) and `subject_label`
+  (absent means null) always; `sex`, `genotype` and `species` only if the
+  request sends them. Values defaulted from the dish aren't compared, so a
+  replay doesn't conflict because the dish changed meanwhile. The comparison
+  is against the fish's revision 1 (see revision history below), so later
+  edits or well moves don't cause a conflict.
+- **Order:** an existing `fish_id` is answered before any dish check, so a
+  replay still gets `200` after the dish is retired.
+- Errors use the `{"detail": {"error": ...}}` shape. A malformed body gets
+  FastAPI's validation shape (`{"detail": [...]}`) instead.
 
 #### Fetch a fish by UUID
 
@@ -124,6 +146,23 @@ GET /fish/{fish_id}
 Returns the fish object (same shape as the list items above). Errors use the
 structured shape: `404` `fish_not_found`, `503` `database_error` (see
 [API errors](zebrobot_snapshot.md#api-errors)).
+
+#### Fish revision history
+
+```
+GET /fish/{fish_id}/revisions
+```
+
+Every stored revision of the fish, oldest first: `{"items": [{fish_id,
+revision, kind, recorded_at, dish_id, subject_label, sex, genotype, species,
+notes, current_unit_id}, ...]}`.
+
+- `kind`: `created` (revision 1), `changed` (a later revision), or
+  `backfilled` (the state a fish already had when history began on
+  2026-10-14; its earlier revisions are unknown).
+- `recorded_at` is the revision's `updated_at` (UTC).
+- History is kept after a fish is deleted. `404` `fish_not_found` only when
+  no revision was ever recorded.
 
 #### Update a fish
 
@@ -136,6 +175,8 @@ Content-Type: application/json
 
 Accepted fields: `subject_label`, `sex`, `genotype`, `species`, `notes`.
 Other fields are ignored.
+`subject_label` follows the same rule as on create (at most 64 characters, no
+control characters, else `422` `invalid_subject_label`).
 
 Returns the updated fish object. `404` if the fish does not exist.
 

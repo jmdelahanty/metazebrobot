@@ -772,6 +772,130 @@
         "title": "FishListResponse",
         "type": "object"
       },
+      "FishRevisionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FishRevisionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "title": "FishRevisionListResponse",
+        "type": "object"
+      },
+      "FishRevisionResponse": {
+        "description": "A fish's content as of one revision (fish_subject_revisions).",
+        "properties": {
+          "current_unit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Unit Id"
+          },
+          "dish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dish Id"
+          },
+          "fish_id": {
+            "title": "Fish Id",
+            "type": "string"
+          },
+          "genotype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Genotype"
+          },
+          "kind": {
+            "enum": [
+              "created",
+              "changed",
+              "backfilled"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "sex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sex"
+          },
+          "species": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species"
+          },
+          "subject_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Label"
+          }
+        },
+        "required": [
+          "fish_id",
+          "revision",
+          "kind",
+          "recorded_at"
+        ],
+        "title": "FishRevisionResponse",
+        "type": "object"
+      },
       "FishSubjectResponse": {
         "properties": {
           "created_at": {
@@ -838,15 +962,8 @@
             "title": "Notes"
           },
           "revision": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Revision"
+            "title": "Revision",
+            "type": "integer"
           },
           "sex": {
             "anyOf": [
@@ -882,20 +999,15 @@
             "title": "Subject Label"
           },
           "updated_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At"
+            "title": "Updated At",
+            "type": "string"
           }
         },
         "required": [
           "fish_id",
-          "dish_id"
+          "dish_id",
+          "revision",
+          "updated_at"
         ],
         "title": "FishSubjectResponse",
         "type": "object"
@@ -1364,6 +1476,95 @@
           }
         },
         "summary": "List Fish For Dish"
+      },
+      "post": {
+        "description": "Register a fish on a dish; idempotent on a client-supplied ``fish_id``.\n\nSubject identity v4 (agent-contracts citrus-palette): a client may\nmint the ``fish_id`` (lowercase canonical UUID v4). An existing\n``fish_id`` is answered 200 (same creation values; current record) or\n409 ``fish_id_conflict`` before any dish check, so an outbox replay\nsucceeds even after the dish is retired. For a new ``fish_id``: 404\n``dish_not_found``, 409 ``dish_inactive``, else 201. Sex, genotype and\nspecies default from the dish when not supplied.",
+        "operationId": "create_fish_for_dish_dishes__dish_id__fish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dish_id",
+            "required": true,
+            "schema": {
+              "title": "Dish Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "default": {},
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FishSubjectResponse"
+                }
+              }
+            },
+            "description": "fish_id already exists with the same creation values; the current record"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FishSubjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "dish_not_found (only for a new fish_id)"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "fish_id_conflict (existing fish_id, different creation values) or dish_inactive (only for a new fish_id)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_fish_id or invalid_subject_label; a malformed body gets FastAPI's validation shape instead"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Lookup failed (database_error)"
+          }
+        },
+        "summary": "Create Fish For Dish"
       }
     },
     "/fish/{fish_id}": {
@@ -1424,6 +1625,66 @@
           }
         },
         "summary": "Get Fish"
+      }
+    },
+    "/fish/{fish_id}/revisions": {
+      "get": {
+        "description": "Every stored revision of a fish, oldest first.\n\n``kind`` is ``created`` for revision 1, ``changed`` for later edits,\nand ``backfilled`` for the state an existing fish had when history\nbegan (its earlier revisions are unknown). History outlives a deleted\nfish.",
+        "operationId": "get_fish_revisions_fish__fish_id__revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fish_id",
+            "required": true,
+            "schema": {
+              "title": "Fish Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FishRevisionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Record not found (dish_not_found / fish_not_found)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Lookup failed (database_error)"
+          }
+        },
+        "summary": "Get Fish Revisions"
       }
     },
     "/version": {

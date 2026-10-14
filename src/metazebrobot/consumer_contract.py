@@ -26,7 +26,9 @@ CONSUMER_ENDPOINTS: List[Tuple[str, str]] = [
     ("get", "/dishes/{dish_id}"),
     ("get", "/dishes/by-uuid/{dish_uuid}"),
     ("get", "/dishes/{dish_id}/fish"),
+    ("post", "/dishes/{dish_id}/fish"),
     ("get", "/fish/{fish_id}"),
+    ("get", "/fish/{fish_id}/revisions"),
     ("get", "/version"),
 ]
 

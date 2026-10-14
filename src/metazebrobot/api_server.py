@@ -257,8 +257,8 @@ class FishSubjectResponse(BaseModel):
     created_at: Optional[str] = None
     notes: Optional[str] = None
     current_unit_id: Optional[str] = None
-    revision: Optional[int] = None
-    updated_at: Optional[str] = None
+    revision: int
+    updated_at: str
 
 
 class FishListResponse(BaseModel):

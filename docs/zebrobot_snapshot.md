@@ -73,6 +73,10 @@ the DB host.
 - Fetch registered fish or housing units for a selected dish:
   - `GET /dishes/{dish_id}/fish`
   - `GET /dishes/{dish_id}/units`
+- Register a fish at record start (client-minted, idempotent `fish_id`):
+  - `POST /dishes/{dish_id}/fish` (see [fish tracking API](fish_tracking_api.md#register-a-new-fish))
+- A fish's content at each revision:
+  - `GET /fish/{fish_id}/revisions`
 - Fetch its cross:
   - `GET /crosses/{cross_id}`
 - Fetch cached parent/background provenance:
@@ -116,8 +120,10 @@ Fish responses (`GET /fish/{fish_id}`, `GET /dishes/{dish_id}/fish`) carry
 - `revision` covers the dish row only. `parents` and `line_strain` come from
   the cached PyRAT cross (watch `cross.cache_updated_at` in
   `/acquisition/dishes`), and `dpf` is computed from `dof` at request time.
-- There is no "read as of time T"; the API always returns the current record.
-  Store the snapshot you fetched.
+- Dishes have no "read as of time T"; the API returns the current record.
+  Store the snapshot you fetched. Fish keep a revision history from
+  2026-10-14 on: `GET /fish/{fish_id}/revisions` returns each revision's
+  content, so a stored `(fish_id, revision)` can be looked up later.
 
 ## API errors
 
@@ -129,7 +135,11 @@ JSON read endpoints return structured errors in FastAPI's `detail` field:
 | 404 | `{"detail": {"error": "dish_not_found", "dish_uuid": "..."}}` | Unknown `dish_uuid` |
 | 404 | `{"detail": {"error": "fish_not_found", "fish_id": "..."}}` | Unknown `fish_id` |
 | 503 | `{"detail": {"error": "database_error", "message": "..."}}` | SQLite failure (e.g. locked) |
-| 422 | `{"detail": [...]}` | Invalid query parameters |
+| 409 | `{"detail": {"error": "fish_id_conflict", "fish_id": "..."}}` | `POST /dishes/{dish_id}/fish`: the `fish_id` exists with different creation values |
+| 409 | `{"detail": {"error": "dish_inactive", "dish_id": "..."}}` | `POST /dishes/{dish_id}/fish`: new `fish_id` on an inactive dish |
+| 422 | `{"detail": {"error": "invalid_fish_id", "fish_id": "..."}}` | `POST`: `fish_id` isn't a lowercase canonical UUID v4 |
+| 422 | `{"detail": {"error": "invalid_subject_label", "message": "..."}}` | `POST`/`PATCH`: label over 64 characters or with control characters |
+| 422 | `{"detail": [...]}` | Invalid query parameters or malformed body |
 
 A 404 means the record does not exist; a 503 means the lookup failed and
 should be retried. A connection failure (service down or tunnel closed) has
@@ -169,8 +179,8 @@ Field-level shapes are generated from the code, not written by hand:
 - `docs/api/consumer_openapi.json`: the OpenAPI slice for
   `/dishes/{dish_id}/citrus-snapshot`, `/acquisition/dishes`,
   `/dishes/{dish_id}`, `/dishes/by-uuid/{dish_uuid}`,
-  `/dishes/{dish_id}/fish`, `/fish/{fish_id}`, and `/version`, including
-  their 404/503 error models.
+  `/dishes/{dish_id}/fish` (GET and POST), `/fish/{fish_id}`,
+  `/fish/{fish_id}/revisions` and `/version`, including their error models.
 - `tests/test_consumer_contract.py` fails if the code and that file
   disagree, and asserts the identity fields explicitly.
 - `pixi run python scripts/export_consumer_openapi.py --check` verifies it
