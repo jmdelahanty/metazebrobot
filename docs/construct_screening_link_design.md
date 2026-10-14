@@ -94,21 +94,53 @@ in the pinned OpenAPI schema and change only by a deliberate re-pin.
 `unknown`, never inferred from the name: the published CalEx construct is
 mCherry-hPMCA2w/b (N-terminal), while the lab's line is named "PMCA2-mCherry".
 
-Proposed values; the biology is Jeremy's to confirm. External ids (DOIs,
-Addgene, ZFIN, FPbase) go in `construct_references` (next section).
+Proposed values, assembled 2026-10-14 from the lab's plasmid files and from
+research whose identifiers were each re-checked against the source (DOIs via
+Crossref, Addgene ids via Addgene's pages, ZFIN ids via ZFIN's
+`features.txt` download). The biology is Jeremy's to confirm row by row; "?"
+marks a value no opened source gave.
 
-| Key | Role | Payload / target | Readout | `readout_link` | Detail | Status |
+| Key | Role | Payload / target | Readout | `readout_link` | Ex/em nm (source) | Open |
 |---|---|---|---|---|---|---|
-| `bark` | effector | GRK2 (βARK1) RGS fragment; attenuates Gq GPCR signaling | mCherry, red | co_expressed | `linker` P2A; HA-FLAG N-terminal tags | **confirmed from plasmid B0078** (Tol2, zebrafish gfap promoter) and Nagai et al. 2021 |
-| `bark_d110a` | effector (inactive control) | as above, D→A at RGS-fragment codon 66 (consistent with D110A) | mCherry, red | co_expressed | `linker` P2A; `variant_of` `bark` | **confirmed from plasmid B0077**: one base differs from B0078 |
-| `pmca2mcherry` | effector | hPMCA2w/b; Ca²⁺ extrusion ("CalEx") | mCherry, red | fusion | `fusion_terminus` to determine | mammalian CalEx is N-terminal (Addgene #111568, "mCherry tag, N terminal"); the Ahrens lab zebrafish line is written `Tg(gfap:hPMCA2-mCherry)` (Chen, Duque et al., Science 2025, doi 10.1126/science.adq5233), so the name suggests C-terminal; sequence not yet seen. PyRAT also has a P2A line (`Tg(gfap:PMCA2-P2A-mCherry-zf_J00)`) |
-| `jgcamp8f`, `gcamp7ff`, `gcamp6s` | sensor | calcium | green | intrinsic | | to confirm ("GCaMP7ff" naming to check) |
-| `jrgeco1b` | sensor | calcium | red | intrinsic | | to confirm |
-| `grab5ht`, `grabatp10` | sensor | serotonin, ATP | green (cpGFP) | intrinsic | | to confirm |
-| `iglusnfr3` | sensor | glutamate | green | intrinsic | | to confirm |
-| `campari` | sensor | activity integrator | green→red | intrinsic | `screen_color` photoconvertible | to confirm |
-| `trpv1t2agfp` | effector | TRPV1; capsaicin-gated cation channel | GFP, green | co_expressed | `linker` T2A | to confirm |
-| `cochregfp` | effector | CoChR; blue-light-gated cation channel | eGFP, green | fusion | `fusion_terminus` C (from name; to confirm) | to confirm |
+| `bark` | effector | bovine GRK2 (βARK1) RGS fragment; attenuates Gq GPCR signaling | mCherry | co_expressed, P2A; HA-FLAG N-terminal | 587/610 (FPbase mCherry) | |
+| `bark_d110a` | effector, `variant_of` `bark` | same, D110A (inactive) | mCherry | co_expressed, P2A | 587/610 | |
+| `pmca2mcherry` | effector | hPMCA2w/b (ATP2B2); Ca²⁺ extrusion ("CalEx") | mCherry | fusion, `fusion_terminus` ? | 587/610 | orientation (plasmid requested); which PyRAT PMCA2 names are distinct constructs |
+| `trpv1t2agfp` | effector | rat TRPV1; capsaicin-gated cation channel | EGFP | co_expressed, T2A | 488/507 (FPbase EGFP) | |
+| `cochregfp` | effector | CoChR; blue-light-gated cation channel | EGFP | fusion, C | 488/507 | |
+| `jgcamp8f` | sensor | calcium | cpGFP | intrinsic | 492/512 (Helassa et al. 2023, secondary) | |
+| `jgcamp7f` (lab name `GCaMP7ff`) | sensor | calcium | cpGFP | intrinsic | ? | confirm 7ff = jGCaMP7f; cytosolic, nuclear (H2B) or soma-targeted |
+| `gcamp6s` | sensor | calcium | cpGFP | intrinsic | 497/515 (secondary, from Chen et al. 2013) | |
+| `jrgeco1b` | sensor | calcium | cpmApple | intrinsic | ? | |
+| `grab5ht` | sensor | serotonin | cpGFP in 5-HT2C receptor | intrinsic | ? | version (see ZFIN ct876Tg note) |
+| `grabatp10` | sensor | extracellular ATP | cpEGFP in P2Y1 receptor | intrinsic | ? | |
+| `iglusnfr3` | sensor | glutamate | cp superfolder Venus/GFP | intrinsic | ? | variant (v857 or v82) and membrane anchor |
+| `campari` / `campari2` | sensor | Ca²⁺ × light activity integrator | mEos2-derived, photoconvertible | intrinsic | CaMPARI 498/514 → 560/576; CaMPARI2 502/516 → 562/577 (Moeyaert et al. 2018, Table 1) | which one the lab used; two entries |
+
+References per entry (go into `construct_references`):
+
+| Key | Papers (DOI) | Addgene | ZFIN |
+|---|---|---|---|
+| `bark`, `bark_d110a` | Nagai et al. 2021 Neuron, 10.1016/j.neuron.2021.05.023 | #117691 GfaABC1D BARK p2A mCherry, #117689 CMV; controls #117692, #117690 (D110A), #117688 (R106A) | none (lab plasmids B0078, B0077) |
+| `pmca2mcherry` | Yu et al. 2018 Neuron, 10.1016/j.neuron.2018.08.015 (CalEx); Chen, Duque et al. 2025 Science, 10.1126/science.adq5233 (zebrafish `Tg(gfap:hPMCA2-mCherry)`) | #111568 pZac2.1-GfaABC1D-mCherry-hPMCA2w/b ("mCherry tag, N terminal") | none |
+| `trpv1t2agfp` | Chen et al. 2015 Nat Methods, 10.1038/nmeth.3691 (tool); Duque, Chen et al. 2025 Neuron, 10.1016/j.neuron.2024.11.011 (line) | none | ZDB-TGCONSTRCT-260122-1 `Tg(gfap:Rno.Trpv1-2A-EGFP)`, allele jf64Tg (ZDB-ALT-260122-1) |
+| `cochregfp` | Klapoetke et al. 2014 Nat Methods, 10.1038/nmeth.2836 (tool); Mu et al. 2019 Cell, 10.1016/j.cell.2019.05.050 (line) | #124233 pTol1-UAS:CoChR-tdTomato (zebrafish vector, tdTomato, not an exact match) | ZDB-TGCONSTRCT-200206-4 `Tg(gfap:CoChR-EGFP)`, jf29Tg (ZDB-ALT-200206-8); no her4.1 line |
+| `jgcamp8f` | Zhang et al. 2023 Nature, 10.1038/s41586-023-05828-9 | #162373 pGP-CMV-jGCaMP8f, #162376 pGP-AAV-syn-jGCaMP8f-WPRE | ZDB-TGCONSTRCT-260409-6 `Tg(elavl3:GCaMP8f)` (no allele; not in `features.txt`, unverified) |
+| `jgcamp7f` | Dana et al. 2019 Nat Methods, 10.1038/s41592-019-0435-6 | #158760 elavl3:SomaGCaMP7f (soma-targeted) | `Tg(elavl3:H2B-jGCaMP7f)` jf90Tg (ZDB-ALT-240412-2); `Tg(elavl3:H2B-GCaMP7f)` jf96Tg (ZDB-ALT-230117-5); no "7ff" |
+| `gcamp6s` | Chen et al. 2013 Nature, 10.1038/nature12354 | #59531 Tol2-elavl3-GCaMP6s | ZDB-TGCONSTRCT-141023-2 `Tg(elavl3:GCaMP6s)`, jf4Tg (ZDB-ALT-141023-1) |
+| `jrgeco1b` | Dana et al. 2016 eLife, 10.7554/eLife.12727 | #100857 pAAV.Syn.NES-jRGECO1b | `Tg(elavl3:jRGECO1b)` jf17Tg (ZDB-ALT-200206-5); `Tg(gfap:jRGECO1b)` jf33Tg (ZDB-ALT-200206-6); no her4.1 line |
+| `grab5ht` | Wan et al. 2021 Nat Neurosci, 10.1038/s41593-021-00823-7; Deng et al. 2024 Nat Methods, 10.1038/s41592-024-02188-8 | #140552 GRAB_5-HT1.0, #208717 GRAB_g5-HT3.0 | ZDB-TGCONSTRCT-260211-5 `Tg(elavl3:GRABht-4.0)`, ct876Tg (ZDB-ALT-231109-10); ZFIN notes it was published as "GRAB5-HT2.0" |
+| `grabatp10` | Wu et al. 2022 Neuron, 10.1016/j.neuron.2021.11.027 | #167577 pAAV-hsyn-GRAB_ATP1.0 | none neuronal (only liver `Tg(fabp10a:GRABATP,…)`) |
+| `iglusnfr3` | Aggarwal et al. 2023 Nat Methods, 10.1038/s41592-023-01863-6 | #175186 pRSET iGluSnFR3 v857, #178329 hSyn v857.PDGFR | none |
+| `campari`, `campari2` | Fosque et al. 2015 Science, 10.1126/science.1260922; Moeyaert et al. 2018 Nat Commun, 10.1038/s41467-018-06935-2 | #137185 pTol2-HuC(elavl3)-CaMPARI2 | `Tg(elavl3:CaMPARI)` jf9Tg (ZDB-ALT-150403-1); `Tg(elavl3:CaMPARI2)` jf92Tg (ZDB-ALT-180410-5) |
+
+Lines in the lab without a ZFIN record (her4.1 jRGECO1b and CoChR, any
+PMCA2, b-ARK, elavl3 GRAB-ATP, iGluSnFR3) are presumably unpublished lab
+lines. A ZFIN id on a catalog entry describes the published line of that
+construct, not necessarily the lab's tank; matching a tank to an allele is a
+separate, per-strain fact.
+
+FPbase has no entries for these sensors, so sensor spectra come from papers.
+Unknown values stay null rather than being filled from a sibling variant.
 
 An inactive control such as `bark_d110a` screens exactly like its active
 parent, so screening can't tell them apart. Only line identity (strain or
