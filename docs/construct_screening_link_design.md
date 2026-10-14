@@ -208,6 +208,16 @@ for review.
 
 ### 2. Screening steps point at constructs
 
+Status: built (2026-10-14). As built, the table is `screening_step_indicators`
+with `match_rule`, `match_confidence` (`high` | `medium` | `low` | `none`) and
+`note`. Rows are derived on every dish save from the step's text, the dish
+constructs and the catalog, so the raw text stays the record. Matching rules
+are in `utils/indicator_match.py`. Existing steps are matched by
+`scripts/backfill_screening_indicators.py` (dry run by default). The review
+report is [screening indicator backfill](screening_indicator_backfill_2026-10-14.md):
+all 42 steps match, with no unmatched or ambiguous tokens. The form still takes
+text and offers the dish's constructs as suggestions.
+
 A new table, `screening_step_indicators`, records one row per indicator per
 step. Each row has:
 - the step (`dish_id`, `screening_datetime`);

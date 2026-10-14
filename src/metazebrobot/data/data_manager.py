@@ -16,6 +16,7 @@ from contextlib import contextmanager, nullcontext
 from pydantic import NonNegativeInt, TypeAdapter
 
 from ..utils.config import config
+from ..utils.indicator_match import match_step
 from ..utils.file_operations import ensure_directory, load_json_file
 
 logger = logging.getLogger(__name__)
@@ -325,6 +326,29 @@ class DataManager:
                         FOREIGN KEY (dish_id) REFERENCES dishes(dish_id),
                         UNIQUE(dish_id, screening_datetime)
                     )
+                """)
+                # Indicators per screening step, matched to dish constructs.
+                # Derived from screening_steps.indicators_screened (kept as the
+                # raw record); see utils/indicator_match.py.
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS screening_step_indicators (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        dish_id TEXT NOT NULL,
+                        screening_datetime TEXT NOT NULL,
+                        raw_text TEXT NOT NULL,
+                        kind TEXT NOT NULL CHECK (kind IN ('construct', 'pigment', 'other')),
+                        dish_construct TEXT,
+                        construct_key TEXT,
+                        match_rule TEXT NOT NULL,
+                        match_confidence TEXT NOT NULL
+                            CHECK (match_confidence IN ('high', 'medium', 'low', 'none')),
+                        note TEXT,
+                        CHECK ((kind = 'construct') = (dish_construct IS NOT NULL))
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_screening_step_indicators_step
+                    ON screening_step_indicators(dish_id, screening_datetime)
                 """)
                 cursor.execute("""
                     CREATE INDEX IF NOT EXISTS idx_screening_steps_dish_id
@@ -1341,6 +1365,9 @@ class DataManager:
             # Update normalized transgenes (within same transaction)
             self._save_dish_transgenes(cursor, dish_data)
 
+            # Match step indicators to the dish's constructs (needs both above)
+            self.derive_step_indicators(cursor, dish_id)
+
             # Commit transaction - all or nothing
             conn.commit()
 
@@ -1753,6 +1780,52 @@ class DataManager:
                 spectra["color"] if spectra else None,
                 construct_key,
             ))
+
+    def step_indicator_matches(self, cursor, dish_id: str) -> List[Dict[str, Any]]:
+        """Matched indicator rows for every screening step of a dish (no writes)."""
+        constructs = [
+            {k: row[k] for k in row.keys()}
+            for row in cursor.execute(
+                """SELECT construct, promoter, reporter, construct_key, fluorophore,
+                          fluorophore_color FROM dish_transgenes WHERE dish_id = ?""",
+                (dish_id,),
+            )
+        ]
+        for c in constructs:
+            c["catalog_entry"] = (
+                self.get_construct(c["construct_key"], _connection=cursor)
+                if c.get("construct_key") else None
+            )
+        rows = []
+        steps = cursor.execute(
+            """SELECT screening_datetime, indicators_screened, pigment_screened
+               FROM screening_steps WHERE dish_id = ? ORDER BY screening_datetime""",
+            (dish_id,),
+        ).fetchall()
+        for step in steps:
+            try:
+                indicators = json.loads(step["indicators_screened"] or "[]")
+            except (TypeError, ValueError):
+                indicators = step["indicators_screened"]
+            for match in match_step(
+                indicators, bool(step["pigment_screened"]), constructs,
+                lambda text: self.resolve_construct_key(text, cursor=cursor),
+            ):
+                rows.append({"dish_id": dish_id,
+                             "screening_datetime": step["screening_datetime"], **match})
+        return rows
+
+    def derive_step_indicators(self, cursor, dish_id: str) -> int:
+        """Rewrite a dish's screening_step_indicators from its steps and constructs."""
+        rows = self.step_indicator_matches(cursor, dish_id)
+        cursor.execute("DELETE FROM screening_step_indicators WHERE dish_id = ?", (dish_id,))
+        for row in rows:
+            cursor.execute(
+                f"INSERT INTO screening_step_indicators ({', '.join(row)}) "
+                f"VALUES ({', '.join('?' for _ in row)})",
+                list(row.values()),
+            )
+        return len(rows)
 
     def backfill_dish_transgenes(self):
         """Populate missing or outdated normalized dish transgene rows."""

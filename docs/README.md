@@ -38,6 +38,7 @@ treat it as background, not ground truth. Schema: agent-contracts
 |---|---|---|
 | [Construct and Screening Data Inventory (2026-10-14)](construct_data_inventory_2026-10-14.md) | Read-only inventory of unmatched constructs, screening-indicator backfill matches, unparsed strains, and open questions for the lab, taken before the construct catalog work. | checked at `f4ebc43` |
 | [PyRAT Crossing Date Fields Investigation](pyrat_cross_date_fields.md) | Which PyRAT crossing date fields MetaZebrobot uses for dish dates, and why. | checked at `384a366` |
+| [Screening Indicator Backfill Review (2026-10-14)](screening_indicator_backfill_2026-10-14.md) | Dry-run matches of the 42 existing screening steps' free-text indicators to dish constructs, for review before the backfill is applied. | checked at `c43a088` |
 
 ## Plans
 
