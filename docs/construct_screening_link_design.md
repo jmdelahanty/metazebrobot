@@ -85,7 +85,8 @@ in the pinned OpenAPI schema and change only by a deliberate re-pin.
 | `linker` | `P2A` \| `T2A` \| `E2A` \| `F2A` \| `IRES` | readout_link = co_expressed (null otherwise) |
 | `fusion_terminus` | `N` \| `C` \| `unknown`: which end of the payload carries the fluorophore | readout_link = fusion (null otherwise) |
 | `marker_promoter` | text (e.g. `cmlc2`) | readout_link = cis_marker (null otherwise) |
-| `variant_of` | catalog key: e.g. an inactive control's active parent | optional |
+| `variant_of` | catalog key: e.g. an inactive control's active parent, or a nuclear version's base sensor | optional |
+| `localization` | `cytosolic` \| `nuclear` \| `soma` \| `membrane` \| `synaptic` \| `unknown` | role = sensor (default `cytosolic`) |
 | `excitation_nm`, `emission_nm` | integers | readout_link ≠ none |
 | `screen_color` | `green` \| `red` \| `far_red` \| `blue` \| `yellow` \| `photoconvertible` | readout_link ≠ none |
 | `notes` | text | optional |
@@ -108,7 +109,7 @@ marks a value no opened source gave.
 | `trpv1t2agfp` | effector | rat TRPV1; capsaicin-gated cation channel | EGFP | co_expressed, T2A | 488/507 (FPbase EGFP) | |
 | `cochregfp` | effector | CoChR; blue-light-gated cation channel | EGFP | fusion, C | 488/507 | |
 | `jgcamp8f` | sensor | calcium | cpGFP | intrinsic | 492/512 (Helassa et al. 2023, secondary) | |
-| `jgcamp7f` (lab name `GCaMP7ff`) | sensor | calcium | cpGFP | intrinsic | ? | confirm 7ff = jGCaMP7f; cytosolic, nuclear (H2B) or soma-targeted |
+| `jgcamp8p` (aliases `GCaMP7ff`, `GCaMP7FF`, `GCaMP8p`) | sensor | calcium | cpGFP (GCaMP family; to confirm) | intrinsic | ? | unpublished lab sensor; H2B (nuclear) lines are `variant_of` entries |
 | `gcamp6s` | sensor | calcium | cpGFP | intrinsic | 497/515 (secondary, from Chen et al. 2013) | |
 | `jrgeco1b` | sensor | calcium | cpmApple | intrinsic | ? | |
 | `grab5ht` | sensor | serotonin | cpGFP in 5-HT2C receptor | intrinsic | ? | version (see ZFIN ct876Tg note) |
@@ -125,13 +126,28 @@ References per entry (go into `construct_references`):
 | `trpv1t2agfp` | Chen et al. 2015 Nat Methods, 10.1038/nmeth.3691 (tool); Duque, Chen et al. 2025 Neuron, 10.1016/j.neuron.2024.11.011 (line) | none | ZDB-TGCONSTRCT-260122-1 `Tg(gfap:Rno.Trpv1-2A-EGFP)`, allele jf64Tg (ZDB-ALT-260122-1) |
 | `cochregfp` | Klapoetke et al. 2014 Nat Methods, 10.1038/nmeth.2836 (tool); Mu et al. 2019 Cell, 10.1016/j.cell.2019.05.050 (line) | #124233 pTol1-UAS:CoChR-tdTomato (zebrafish vector, tdTomato, not an exact match) | ZDB-TGCONSTRCT-200206-4 `Tg(gfap:CoChR-EGFP)`, jf29Tg (ZDB-ALT-200206-8); no her4.1 line |
 | `jgcamp8f` | Zhang et al. 2023 Nature, 10.1038/s41586-023-05828-9 | #162373 pGP-CMV-jGCaMP8f, #162376 pGP-AAV-syn-jGCaMP8f-WPRE | ZDB-TGCONSTRCT-260409-6 `Tg(elavl3:GCaMP8f)` (no allele; not in `features.txt`, unverified) |
-| `jgcamp7f` | Dana et al. 2019 Nat Methods, 10.1038/s41592-019-0435-6 | #158760 elavl3:SomaGCaMP7f (soma-targeted) | `Tg(elavl3:H2B-jGCaMP7f)` jf90Tg (ZDB-ALT-240412-2); `Tg(elavl3:H2B-GCaMP7f)` jf96Tg (ZDB-ALT-230117-5); no "7ff" |
+| `jgcamp8p` | none yet (in preparation) | none | none |
 | `gcamp6s` | Chen et al. 2013 Nature, 10.1038/nature12354 | #59531 Tol2-elavl3-GCaMP6s | ZDB-TGCONSTRCT-141023-2 `Tg(elavl3:GCaMP6s)`, jf4Tg (ZDB-ALT-141023-1) |
 | `jrgeco1b` | Dana et al. 2016 eLife, 10.7554/eLife.12727 | #100857 pAAV.Syn.NES-jRGECO1b | `Tg(elavl3:jRGECO1b)` jf17Tg (ZDB-ALT-200206-5); `Tg(gfap:jRGECO1b)` jf33Tg (ZDB-ALT-200206-6); no her4.1 line |
 | `grab5ht` | Wan et al. 2021 Nat Neurosci, 10.1038/s41593-021-00823-7; Deng et al. 2024 Nat Methods, 10.1038/s41592-024-02188-8 | #140552 GRAB_5-HT1.0, #208717 GRAB_g5-HT3.0 | ZDB-TGCONSTRCT-260211-5 `Tg(elavl3:GRABht-4.0)`, ct876Tg (ZDB-ALT-231109-10); ZFIN notes it was published as "GRAB5-HT2.0" |
 | `grabatp10` | Wu et al. 2022 Neuron, 10.1016/j.neuron.2021.11.027 | #167577 pAAV-hsyn-GRAB_ATP1.0 | none neuronal (only liver `Tg(fabp10a:GRABATP,…)`) |
 | `iglusnfr3` | Aggarwal et al. 2023 Nat Methods, 10.1038/s41592-023-01863-6 | #175186 pRSET iGluSnFR3 v857, #178329 hSyn v857.PDGFR | none |
 | `campari`, `campari2` | Fosque et al. 2015 Science, 10.1126/science.1260922; Moeyaert et al. 2018 Nat Commun, 10.1038/s41467-018-06935-2 | #137185 pTol2-HuC(elavl3)-CaMPARI2 | `Tg(elavl3:CaMPARI)` jf9Tg (ZDB-ALT-150403-1); `Tg(elavl3:CaMPARI2)` jf92Tg (ZDB-ALT-180410-5) |
+
+**GCaMP7ff is jGCaMP8p.** It isn't jGCaMP7f, as name-based research had
+guessed. The lab asked aquatics in October 2026 to rename "GCaMP7ff" to
+jGCaMP8p, the name it will be published under. PyRAT can't rename closed tanks,
+so only active tanks changed:
+
+- strain 1485 was renamed in place; MetaZebrobot's `strain_names` recorded
+  the old name (last seen 2026-10-08) and the new one (from 2026-10-09);
+- tank 8937 moved to a new strain, 1705 `Tg(elavl3:jGCaMP8p)`;
+- about ten older strains (68 `Tg(elavl3:GCaMP7ff)`, nuclear `H2B-` lines,
+  `gfap:` and `tph2:` lines) and dishes 18055_* keep "GCaMP7ff" permanently.
+
+The old spellings stay as catalog aliases for good. This is the general rule:
+an alias is how a historical name keeps resolving after a rename, not a typo
+to clean up.
 
 Lines in the lab without a ZFIN record (her4.1 jRGECO1b and CoChR, any
 PMCA2, b-ARK, elavl3 GRAB-ATP, iGluSnFR3) are presumably unpublished lab
