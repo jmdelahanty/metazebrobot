@@ -748,9 +748,13 @@ class TestDishTransgenes:
         assert tgs[0]["construct_role"] == "sensor"
         assert tgs[0]["sensor_family"] == "GRAB"
         assert tgs[0]["sensor_target"] == "serotonin"
-        assert tgs[0]["fluorophore"] == "gfp"
-        assert tgs[0]["spectra"]["ex"] == 488
-        assert tgs[0]["spectra"]["em"] == 509
+        assert tgs[0]["fluorophore"] == "cpGFP"
+        # Peak spectra aren't sourced for GRAB5-HT, so none are claimed.
+        assert tgs[0]["spectra"] is None
+        assert tgs[0]["screen_color"] == "green"
+        assert tgs[0]["construct_key"] == "grab5ht"
+        assert tgs[0]["catalog_entry"]["readout_link"] == "intrinsic"
+        assert tgs[0]["catalog_entry"]["localization"] == "membrane"
 
     def test_grabatp_catalog_match_enriches_dish_transgenes(self, client):
         dish_data = {
@@ -777,8 +781,8 @@ class TestDishTransgenes:
         assert tgs[0]["sensor_family"] == "GRAB"
         assert tgs[0]["sensor_target"] == "ATP"
         assert tgs[0]["fluorophore"] == "cpEGFP"
-        assert tgs[0]["spectra"]["ex"] == 500
-        assert tgs[0]["spectra"]["em"] == 520
+        assert tgs[0]["spectra"] is None
+        assert tgs[0]["construct_key"] == "grabatp10"
 
 
 class TestParentTankTransgenes:
@@ -877,8 +881,8 @@ class TestCrossingIndicatorNormalization:
         assert saved[0]["construct_role"] == "sensor"
         assert saved[0]["sensor_family"] == "GRAB"
         assert saved[0]["sensor_target"] == "serotonin"
-        assert saved[0]["fluorophore"] == "gfp"
-        assert saved[0]["spectra"]["color"] == "green"
+        assert saved[0]["fluorophore"] == "cpGFP"
+        assert saved[0]["spectra"] is None  # GRAB5-HT peaks aren't sourced
 
 
 class TestConstructCatalog:
@@ -1015,3 +1019,77 @@ class TestMapzebrainLookup:
         result = data_manager.fetch_mapzebrain_catalog()
 
         assert result == cached
+
+
+class TestEnforcedConstructCatalog:
+    """config/construct_catalog.json -> constructs (CHECK-enforced) + aliases + refs."""
+
+    def test_every_seed_entry_loads(self, client):
+        seed = json.loads(
+            (data_manager.config_dir / "construct_catalog.json").read_text()
+        )["constructs"]
+        keys = {entry["key"] for entry in data_manager.list_constructs()}
+        assert keys == {entry["key"] for entry in seed}
+
+    def test_renamed_and_variant_names_resolve(self, client):
+        assert data_manager.resolve_construct_key("GCaMP7ff") == "jgcamp8p"
+        assert data_manager.resolve_construct_key("jGCaMP8p") == "jgcamp8p"
+        assert data_manager.resolve_construct_key("H2B-GCaMP7ff") == "jgcamp8ph2b"
+        assert data_manager.resolve_construct_key("b-ARK") == "bark"
+        assert data_manager.resolve_construct_key("b-ARK-D110") == "barkd110a"
+        assert data_manager.resolve_construct_key("pmca2-mcherry-zf") == "pmca2mcherryzf"
+
+    def test_generic_family_names_no_longer_match(self, client):
+        # "gcamp" used to resolve to GCaMP6s; family names are ambiguous.
+        for generic in ("gcamp", "jrgeco", "trpv1"):
+            assert data_manager.resolve_construct_key(generic) is None
+
+    def test_entry_carries_linkage_and_references(self, client):
+        bark = data_manager.get_construct("bark")
+        assert bark["readout_link"] == "co_expressed"
+        assert bark["linker"] == "P2A"
+        assert {"kind": "addgene", "value": "117691",
+                "note": "GfaABC1D BARK p2A mCherry"} in bark["references"]
+        assert data_manager.get_construct("barkd110a")["variant_of"] == "bark"
+        assert data_manager.get_construct("pmca2mcherry")["fusion_terminus"] == "unknown"
+
+    @pytest.mark.parametrize("bad", [
+        {"readout_link": "co_expressed", "linker": None},       # linker required
+        {"readout_link": "fusion"},                              # fusion_terminus required
+        {"readout_link": "intrinsic", "linker": "P2A"},         # linker only for co_expressed
+        {"role": "sensor", "localization": None},                # sensors need localization
+        {"role": "enzyme"},                                      # closed role set
+        {"key": "Bad-Key"},                                      # key is [a-z0-9]
+    ])
+    def test_constraints_reject_inconsistent_entries(self, client, bad):
+        row = {"key": "checkme", "canonical_name": "CheckMe", "role": "sensor",
+               "payload": "x", "sensor_target": "calcium", "localization": "cytosolic",
+               "readout_fluorophore": "cpGFP", "readout_link": "intrinsic",
+               "screen_color": "green", **bad}
+        with data_manager.get_connection() as conn:
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    f"INSERT INTO constructs ({', '.join(row)}) "
+                    f"VALUES ({', '.join('?' for _ in row)})",
+                    list(row.values()),
+                )
+
+    def test_dish_construct_links_to_catalog_entry(self, client):
+        dish_id = f"DISH_{uuid.uuid4().hex[:8]}"
+        assert data_manager.save_fish_dish({
+            "dish_id": dish_id, "cross_id": "18055", "date_created": "20260506",
+            "dof": "20260506", "genotype": "Tg(elavl3:GCaMP7ff)",
+            "responsible": "test-user", "fish_count": 5, "species": "Danio rerio",
+            "sex": "unknown", "status": "active",
+        })
+        tgs = data_manager.get_dish_transgenes(dish_id)
+        assert tgs[0]["construct_key"] == "jgcamp8p"
+        assert tgs[0]["catalog_entry"]["canonical_name"] == "jGCaMP8p"
+
+    def test_construct_endpoints(self, client):
+        listing = client.get("/constructs").json()["items"]
+        assert "jgcamp8p" in {entry["key"] for entry in listing}
+        assert client.get("/constructs/bark").json()["linker"] == "P2A"
+        missing = client.get("/constructs/nope")
+        assert missing.status_code == 404
+        assert missing.json()["detail"]["error"] == "construct_not_found"

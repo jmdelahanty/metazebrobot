@@ -2123,6 +2123,8 @@ async def lifespan(app: FastAPI):
                 conn.execute("ALTER TABLE dish_transgenes ADD COLUMN emission_nm INTEGER")
             if 'fluorophore_color' not in tg_cols:
                 conn.execute("ALTER TABLE dish_transgenes ADD COLUMN fluorophore_color TEXT")
+            if 'construct_key' not in tg_cols:
+                conn.execute("ALTER TABLE dish_transgenes ADD COLUMN construct_key TEXT")
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_dish_transgenes_construct_role
                 ON dish_transgenes(construct_role)
@@ -3911,6 +3913,25 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             ),
             status_code=303,
         )
+
+    # ------------------------------------------------------------------
+    # JSON API — construct catalog (docs/construct_screening_link_design.md)
+    # ------------------------------------------------------------------
+
+    @app.get("/constructs")
+    def list_constructs() -> Dict[str, Any]:
+        """The construct catalog: readout, linkage, localization, references."""
+        _require_db_path()
+        return {"items": data_manager.list_constructs()}
+
+    @app.get("/constructs/{construct_key}")
+    def get_construct(construct_key: str) -> Dict[str, Any]:
+        """One catalog entry by key (e.g. ``bark``, ``jgcamp8p``)."""
+        _require_db_path()
+        entry = data_manager.get_construct(construct_key)
+        if entry is None:
+            raise _not_found("construct", construct_key=construct_key)
+        return entry
 
     # ------------------------------------------------------------------
     # JSON API — health + dishes

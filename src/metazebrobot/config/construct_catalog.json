@@ -1,95 +1,579 @@
 {
+  "schema": "metazebrobot.construct_catalog",
+  "version": 2,
   "constructs": [
     {
+      "key": "grab5ht",
       "canonical_name": "GRAB-5HT",
-      "aliases": ["grab5ht", "grab_5ht", "grab-5ht", "GRAB5HT"],
-      "construct_role": "sensor",
+      "role": "sensor",
       "family": "GRAB",
-      "target": "serotonin",
-      "fluorophore": "gfp",
-      "excitation_nm": 488,
-      "emission_nm": 509,
+      "payload": "GRAB 5-HT sensor (version unresolved)",
+      "sensor_target": "serotonin",
+      "readout_fluorophore": "cpGFP",
+      "readout_link": "intrinsic",
+      "localization": "membrane",
       "screen_color": "green",
-      "notes": "GPCR-based serotonin sensor with cpGFP-like green readout.",
-      "is_active": true
+      "aliases": [
+        "grab5ht",
+        "grab_5ht",
+        "grab-5ht",
+        "GRAB5HT",
+        "GRAB5-HT"
+      ],
+      "notes": "cpGFP in the 5-HT2C receptor. Which published version the lab line carries is unresolved; ZFIN's elavl3 line ct876Tg is Tg(elavl3:GRABht-4.0), published as GRAB5-HT2.0.",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1038/s41593-021-00823-7",
+          "note": "Wan et al. 2021, GRAB5-HT1.0"
+        },
+        {
+          "kind": "doi",
+          "value": "10.1038/s41592-024-02188-8",
+          "note": "Deng et al. 2024, g5-HT2/3"
+        },
+        {
+          "kind": "addgene",
+          "value": "140552",
+          "note": "pAAV-hsyn-GRAB_5-HT1.0"
+        },
+        {
+          "kind": "addgene",
+          "value": "208717",
+          "note": "pAAV-hSyn-GRAB_g5-HT3.0"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-TGCONSTRCT-260211-5",
+          "note": "Tg(elavl3:GRABht-4.0); version match to the lab line unconfirmed"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-ALT-231109-10",
+          "note": "ct876Tg"
+        }
+      ]
     },
     {
+      "key": "grabatp10",
       "canonical_name": "GRABATP1.0",
-      "aliases": ["GRABATP1.0", "GRAB_ATP1.0", "GRAB-ATP1.0", "GRAB ATP1.0", "GRAB-ATP", "GRAB_ATP", "GRABATP"],
-      "construct_role": "sensor",
+      "role": "sensor",
       "family": "GRAB",
-      "target": "ATP",
-      "fluorophore": "cpEGFP",
-      "excitation_nm": 500,
-      "emission_nm": 520,
+      "payload": "GRAB_ATP1.0",
+      "sensor_target": "ATP",
+      "readout_fluorophore": "cpEGFP",
+      "readout_link": "intrinsic",
+      "localization": "membrane",
       "screen_color": "green",
-      "notes": "GFP-like extracellular ATP sensor. Reported peak spectra are approximately 500 nm excitation and 520 nm emission; commonly imaged with 488 nm excitation and GFP/FITC emission collection.",
-      "is_active": true
+      "aliases": [
+        "GRABATP1.0",
+        "GRAB_ATP1.0",
+        "GRAB-ATP1.0",
+        "GRAB ATP1.0",
+        "GRAB-ATP",
+        "GRAB_ATP",
+        "GRABATP"
+      ],
+      "notes": "cpEGFP in the P2Y1 receptor; extracellular ATP (also ADP). Peak spectra not yet sourced.",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1016/j.neuron.2021.11.027",
+          "note": "Wu et al. 2022"
+        },
+        {
+          "kind": "addgene",
+          "value": "167577",
+          "note": "pAAV-hsyn-GRAB_ATP1.0"
+        }
+      ]
     },
     {
+      "key": "gcamp6s",
       "canonical_name": "GCaMP6s",
-      "aliases": ["gcamp6s", "GCaMP", "gcamp"],
-      "construct_role": "sensor",
+      "role": "sensor",
       "family": "GCaMP",
-      "target": "calcium",
-      "fluorophore": "gcamp",
-      "excitation_nm": 488,
-      "emission_nm": 510,
+      "payload": "GCaMP6s",
+      "sensor_target": "calcium",
+      "readout_fluorophore": "cpGFP",
+      "readout_link": "intrinsic",
+      "localization": "cytosolic",
+      "excitation_nm": 497,
+      "emission_nm": 515,
       "screen_color": "green",
-      "notes": "Green calcium indicator.",
-      "is_active": true
+      "aliases": [
+        "gcamp6s"
+      ],
+      "notes": "Spectra: Ca2+-bound peaks, secondary citation of Chen et al. 2013.",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1038/nature12354",
+          "note": "Chen et al. 2013"
+        },
+        {
+          "kind": "addgene",
+          "value": "59531",
+          "note": "Tol2-elavl3-GCaMP6s"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-TGCONSTRCT-141023-2",
+          "note": "Tg(elavl3:GCaMP6s)"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-ALT-141023-1",
+          "note": "jf4Tg"
+        }
+      ]
     },
     {
+      "key": "jgcamp8f",
+      "canonical_name": "jGCaMP8f",
+      "role": "sensor",
+      "family": "GCaMP",
+      "payload": "jGCaMP8f",
+      "sensor_target": "calcium",
+      "readout_fluorophore": "cpGFP",
+      "readout_link": "intrinsic",
+      "localization": "cytosolic",
+      "excitation_nm": 492,
+      "emission_nm": 512,
+      "screen_color": "green",
+      "aliases": [
+        "jgcamp8f",
+        "gcamp8f"
+      ],
+      "notes": "Spectra: Ca2+-bound peaks from Helassa et al. 2023 (secondary).",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1038/s41586-023-05828-9",
+          "note": "Zhang et al. 2023"
+        },
+        {
+          "kind": "addgene",
+          "value": "162373",
+          "note": "pGP-CMV-jGCaMP8f"
+        },
+        {
+          "kind": "addgene",
+          "value": "162376",
+          "note": "pGP-AAV-syn-jGCaMP8f-WPRE"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-TGCONSTRCT-260409-6",
+          "note": "Tg(elavl3:GCaMP8f); no allele registered"
+        }
+      ]
+    },
+    {
+      "key": "jgcamp8p",
+      "canonical_name": "jGCaMP8p",
+      "role": "sensor",
+      "family": "GCaMP",
+      "payload": "jGCaMP8p",
+      "sensor_target": "calcium",
+      "readout_fluorophore": "cpGFP",
+      "readout_link": "intrinsic",
+      "localization": "cytosolic",
+      "screen_color": "green",
+      "aliases": [
+        "jGCaMP8p",
+        "GCaMP8p",
+        "GCaMP7ff",
+        "GCaMP7FF"
+      ],
+      "notes": "Unpublished lab sensor, formerly called GCaMP7ff; renamed in PyRAT in Oct 2026 for active tanks only, so GCaMP7ff is a permanent alias. Readout core to confirm.",
+      "references": []
+    },
+    {
+      "key": "jgcamp8ph2b",
+      "canonical_name": "H2B-jGCaMP8p",
+      "role": "sensor",
+      "family": "GCaMP",
+      "payload": "H2B-jGCaMP8p",
+      "sensor_target": "calcium",
+      "readout_fluorophore": "cpGFP",
+      "readout_link": "intrinsic",
+      "localization": "nuclear",
+      "screen_color": "green",
+      "variant_of": "jgcamp8p",
+      "aliases": [
+        "H2B-jGCaMP8p",
+        "H2B-GCaMP8p",
+        "H2B-GCaMP7ff",
+        "H2B-GCaMP7FF"
+      ],
+      "notes": "Nuclear-localized jGCaMP8p.",
+      "references": []
+    },
+    {
+      "key": "jrgeco1b",
       "canonical_name": "jRGECO1b",
-      "aliases": ["jrgeco1b", "jRGECO", "jrgeco"],
-      "construct_role": "sensor",
+      "role": "sensor",
       "family": "jRGECO",
-      "target": "calcium",
-      "fluorophore": "jrgeco",
-      "excitation_nm": 561,
-      "emission_nm": 589,
+      "payload": "jRGECO1b",
+      "sensor_target": "calcium",
+      "readout_fluorophore": "cpmApple",
+      "readout_link": "intrinsic",
+      "localization": "cytosolic",
       "screen_color": "red",
-      "notes": "Red calcium indicator.",
-      "is_active": true
+      "aliases": [
+        "jrgeco1b"
+      ],
+      "notes": "Peak spectra not yet sourced for 1b (only jRGECO1a is on FPbase).",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.7554/eLife.12727",
+          "note": "Dana et al. 2016"
+        },
+        {
+          "kind": "addgene",
+          "value": "100857",
+          "note": "pAAV.Syn.NES-jRGECO1b.WPRE.SV40"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-ALT-200206-5",
+          "note": "Tg(elavl3:jRGECO1b) jf17Tg"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-ALT-200206-6",
+          "note": "Tg(gfap:jRGECO1b) jf33Tg"
+        }
+      ]
     },
     {
+      "key": "iglusnfr3",
+      "canonical_name": "iGluSnFR3",
+      "role": "sensor",
+      "family": "iGluSnFR",
+      "payload": "iGluSnFR3 (variant and anchor unresolved)",
+      "sensor_target": "glutamate",
+      "readout_fluorophore": "cp superfolder Venus/GFP",
+      "readout_link": "intrinsic",
+      "localization": "membrane",
+      "screen_color": "green",
+      "aliases": [
+        "iglusnfr3"
+      ],
+      "notes": "Which variant (v857 or v82) and membrane anchor the lab line carries is unresolved.",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1038/s41592-023-01863-6",
+          "note": "Aggarwal et al. 2023"
+        },
+        {
+          "kind": "addgene",
+          "value": "175186",
+          "note": "pRSET iGluSnFR3 v857"
+        },
+        {
+          "kind": "addgene",
+          "value": "178329",
+          "note": "pAAV.hSyn.iGluSnFR3.v857.PDGFR"
+        }
+      ]
+    },
+    {
+      "key": "campari",
       "canonical_name": "CaMPARI",
-      "aliases": ["campari", "CaMPARI2"],
-      "construct_role": "sensor",
+      "role": "sensor",
       "family": "CaMPARI",
-      "target": "neural_activity",
-      "fluorophore": "campari",
-      "excitation_nm": 488,
-      "emission_nm": 513,
-      "screen_color": "green",
-      "notes": "Photoconvertible activity reporter.",
-      "is_active": true
+      "payload": "CaMPARI",
+      "sensor_target": "calcium (light-gated activity integrator)",
+      "readout_fluorophore": "mEos2-derived, photoconvertible",
+      "readout_link": "intrinsic",
+      "localization": "cytosolic",
+      "excitation_nm": 498,
+      "emission_nm": 514,
+      "screen_color": "photoconvertible",
+      "aliases": [
+        "campari",
+        "CaMPARI1"
+      ],
+      "notes": "Green state shown; red state 560/576 nm (Moeyaert et al. 2018, Table 1).",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1126/science.1260922",
+          "note": "Fosque et al. 2015"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-ALT-150403-1",
+          "note": "Tg(elavl3:CaMPARI) jf9Tg"
+        }
+      ]
     },
     {
+      "key": "campari2",
+      "canonical_name": "CaMPARI2",
+      "role": "sensor",
+      "family": "CaMPARI",
+      "payload": "CaMPARI2",
+      "sensor_target": "calcium (light-gated activity integrator)",
+      "readout_fluorophore": "mEos2-derived, photoconvertible",
+      "readout_link": "intrinsic",
+      "localization": "cytosolic",
+      "excitation_nm": 502,
+      "emission_nm": 516,
+      "screen_color": "photoconvertible",
+      "aliases": [
+        "campari2"
+      ],
+      "notes": "Green state shown; red state 562/577 nm (Moeyaert et al. 2018, Table 1).",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1038/s41467-018-06935-2",
+          "note": "Moeyaert et al. 2018"
+        },
+        {
+          "kind": "addgene",
+          "value": "137185",
+          "note": "pTol2-HuC(elavl3)-CaMPARI2"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-ALT-180410-5",
+          "note": "Tg(elavl3:CaMPARI2) jf92Tg"
+        }
+      ]
+    },
+    {
+      "key": "trpv1t2agfp",
       "canonical_name": "TRPV1-T2A-GFP",
-      "aliases": ["trpv1t2agfp", "TRPV1", "trpv1"],
-      "construct_role": "effector",
+      "role": "effector",
       "family": "TRPV1",
-      "target": null,
-      "fluorophore": "gfp",
+      "payload": "rat TRPV1",
+      "mechanism": "capsaicin-gated cation channel (chemogenetic activation)",
+      "readout_fluorophore": "EGFP",
+      "readout_link": "co_expressed",
+      "linker": "T2A",
       "excitation_nm": 488,
-      "emission_nm": 509,
+      "emission_nm": 507,
       "screen_color": "green",
-      "notes": "TRPV1 effector construct with GFP marker.",
-      "is_active": true
+      "aliases": [
+        "trpv1t2agfp",
+        "TRPV1-T2A-eGFP",
+        "TRPV1-T2A-EGFP",
+        "Rno.Trpv1-2A-EGFP"
+      ],
+      "notes": "EGFP spectra from FPbase.",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1038/nmeth.3691",
+          "note": "Chen et al., rat TRPV1 in zebrafish"
+        },
+        {
+          "kind": "doi",
+          "value": "10.1016/j.neuron.2024.11.011",
+          "note": "Duque, Chen et al. 2025, made the gfap line"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-TGCONSTRCT-260122-1",
+          "note": "Tg(gfap:Rno.Trpv1-2A-EGFP)"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-ALT-260122-1",
+          "note": "jf64Tg"
+        }
+      ]
     },
     {
+      "key": "cochregfp",
       "canonical_name": "CoChR-eGFP",
-      "aliases": ["cochregfp", "CoChR", "cochr"],
-      "construct_role": "effector",
+      "role": "effector",
       "family": "CoChR",
-      "target": null,
-      "fluorophore": "gfp",
+      "payload": "CoChR",
+      "mechanism": "blue-light-gated cation channel (optogenetic activation)",
+      "readout_fluorophore": "EGFP",
+      "readout_link": "fusion",
+      "fusion_terminus": "C",
       "excitation_nm": 488,
-      "emission_nm": 509,
+      "emission_nm": 507,
       "screen_color": "green",
-      "notes": "CoChR optogenetic effector with GFP marker.",
-      "is_active": true
+      "aliases": [
+        "cochregfp",
+        "CoChR-EGFP"
+      ],
+      "notes": "EGFP spectra from FPbase.",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1038/nmeth.2836",
+          "note": "Klapoetke et al. 2014"
+        },
+        {
+          "kind": "doi",
+          "value": "10.1016/j.cell.2019.05.050",
+          "note": "Mu et al. 2019, gfap line"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-TGCONSTRCT-200206-4",
+          "note": "Tg(gfap:CoChR-EGFP)"
+        },
+        {
+          "kind": "zfin",
+          "value": "ZDB-ALT-200206-8",
+          "note": "jf29Tg"
+        },
+        {
+          "kind": "addgene",
+          "value": "124233",
+          "note": "pTol1-UAS:CoChR-tdTomato; zebrafish vector, tdTomato not eGFP"
+        }
+      ]
+    },
+    {
+      "key": "bark",
+      "canonical_name": "iβARK-P2A-mCherry",
+      "role": "effector",
+      "family": "iβARK",
+      "payload": "bovine GRK2 (βARK1) RGS fragment, HA-FLAG tagged",
+      "mechanism": "attenuates Gq GPCR signaling",
+      "readout_fluorophore": "mCherry",
+      "readout_link": "co_expressed",
+      "linker": "P2A",
+      "excitation_nm": 587,
+      "emission_nm": 610,
+      "screen_color": "red",
+      "aliases": [
+        "b-ARK",
+        "bARK",
+        "ibARK",
+        "b-ARK-P2A-mCherry",
+        "iBARK-P2A-mCherry"
+      ],
+      "notes": "Confirmed from lab plasmid B0078 (Tol2, zebrafish gfap promoter). mCherry spectra from FPbase.",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1016/j.neuron.2021.05.023",
+          "note": "Nagai et al. 2021"
+        },
+        {
+          "kind": "addgene",
+          "value": "117691",
+          "note": "GfaABC1D BARK p2A mCherry"
+        },
+        {
+          "kind": "addgene",
+          "value": "117689",
+          "note": "CMV BARK p2A mCherry"
+        },
+        {
+          "kind": "internal",
+          "value": "B0078",
+          "note": "Tol2_gfap(ATT)_b-ARK"
+        }
+      ]
+    },
+    {
+      "key": "barkd110a",
+      "canonical_name": "iβARK(D110A)-P2A-mCherry",
+      "role": "effector",
+      "family": "iβARK",
+      "payload": "bovine GRK2 (βARK1) RGS fragment D110A, HA-FLAG tagged",
+      "mechanism": "inactive control; does not attenuate Gq GPCR signaling",
+      "readout_fluorophore": "mCherry",
+      "readout_link": "co_expressed",
+      "linker": "P2A",
+      "excitation_nm": 587,
+      "emission_nm": 610,
+      "screen_color": "red",
+      "variant_of": "bark",
+      "aliases": [
+        "b-ARK-D110",
+        "b-ARK-D110A",
+        "bARK-D110",
+        "bARK-D110A"
+      ],
+      "notes": "Confirmed from lab plasmid B0077: one base differs from B0078 (D to A at RGS-fragment codon 66). Screens identically to bark.",
+      "references": [
+        {
+          "kind": "addgene",
+          "value": "117692",
+          "note": "GfaABC1D BARK D110A p2A mCherry"
+        },
+        {
+          "kind": "addgene",
+          "value": "117690",
+          "note": "CMV BARK D110A p2A mCherry"
+        },
+        {
+          "kind": "internal",
+          "value": "B0077",
+          "note": "Tol2_gfap(ATT)_b-ARK-D110"
+        }
+      ]
+    },
+    {
+      "key": "pmca2mcherry",
+      "canonical_name": "PMCA2-mCherry",
+      "role": "effector",
+      "family": "CalEx",
+      "payload": "hPMCA2w/b (ATP2B2)",
+      "mechanism": "Ca2+ extrusion pump (CalEx)",
+      "readout_fluorophore": "mCherry",
+      "readout_link": "fusion",
+      "fusion_terminus": "unknown",
+      "excitation_nm": 587,
+      "emission_nm": 610,
+      "screen_color": "red",
+      "aliases": [
+        "PMCA2-mCherry",
+        "pmca2mcherry"
+      ],
+      "notes": "Orientation unknown: mammalian CalEx is N-terminal mCherry; the zebrafish line is written hPMCA2-mCherry. Plasmid files requested.",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1016/j.neuron.2018.08.015",
+          "note": "Yu et al. 2018, CalEx"
+        },
+        {
+          "kind": "doi",
+          "value": "10.1126/science.adq5233",
+          "note": "Chen, Duque et al. 2025, zebrafish Tg(gfap:hPMCA2-mCherry)"
+        },
+        {
+          "kind": "addgene",
+          "value": "111568",
+          "note": "pZac2.1-GfaABC1D-mCherry-hPMCA2w/b; mammalian, mCherry N-terminal"
+        }
+      ]
+    },
+    {
+      "key": "pmca2mcherryzf",
+      "canonical_name": "PMCA2-mCherry-zf",
+      "role": "effector",
+      "family": "CalEx",
+      "payload": "hPMCA2w/b (ATP2B2), -zf version",
+      "mechanism": "Ca2+ extrusion pump (CalEx)",
+      "readout_fluorophore": "mCherry",
+      "readout_link": "fusion",
+      "fusion_terminus": "unknown",
+      "excitation_nm": 587,
+      "emission_nm": 610,
+      "screen_color": "red",
+      "variant_of": "pmca2mcherry",
+      "aliases": [
+        "PMCA2-mCherry-zf"
+      ],
+      "notes": "Meaning of the -zf suffix (codon-optimized?) unconfirmed; kept separate until it is.",
+      "references": []
     }
   ]
 }

@@ -65,6 +65,18 @@ Full snapshot with match details and lab questions:
 
 ### 1. Curate the catalog
 
+Status: built (2026-10-14). `config/construct_catalog.json` owns the entries.
+At startup it loads the `constructs`, `construct_key_aliases` and
+`construct_references` tables (the CHECK constraints below) and refreshes every
+dish construct's `construct_key`. On prod all 125 dish construct rows match an
+entry (68 were unmatched before), and no dish or fish revision changes.
+Read-only `GET /constructs` and `GET /constructs/{key}` serve the catalog;
+they're not in the pinned consumer slice yet. As built, keys are
+`[a-z0-9]` only (`barkd110a`, `jgcamp8ph2b`, `pmca2mcherryzf`). Spectra are
+optional, because several sensors have no sourced peaks. `family` is kept as
+an optional display field. The legacy `construct_catalog` table is a projection
+of the same file for older code paths.
+
 Replace `construct_catalog` with a table whose fields are exact: closed value
 sets enforced by `CHECK` constraints, and fields required by role and readout.
 SQLite can't add constraints to an existing table, so this is a new table
@@ -87,7 +99,7 @@ in the pinned OpenAPI schema and change only by a deliberate re-pin.
 | `marker_promoter` | text (e.g. `cmlc2`) | readout_link = cis_marker (null otherwise) |
 | `variant_of` | catalog key: e.g. an inactive control's active parent, or a nuclear version's base sensor | optional |
 | `localization` | `cytosolic` \| `nuclear` \| `soma` \| `membrane` \| `synaptic` \| `unknown` | role = sensor (default `cytosolic`) |
-| `excitation_nm`, `emission_nm` | integers | readout_link ≠ none |
+| `excitation_nm`, `emission_nm` | integers; null when no source gives them | optional |
 | `screen_color` | `green` \| `red` \| `far_red` \| `blue` \| `yellow` \| `photoconvertible` | readout_link ≠ none |
 | `notes` | text | optional |
 
@@ -104,7 +116,7 @@ marks a value no opened source gave.
 | Key | Role | Payload / target | Readout | `readout_link` | Ex/em nm (source) | Open |
 |---|---|---|---|---|---|---|
 | `bark` | effector | bovine GRK2 (βARK1) RGS fragment; attenuates Gq GPCR signaling | mCherry | co_expressed, P2A; HA-FLAG N-terminal | 587/610 (FPbase mCherry) | |
-| `bark_d110a` | effector, `variant_of` `bark` | same, D110A (inactive) | mCherry | co_expressed, P2A | 587/610 | |
+| `barkd110a` | effector, `variant_of` `bark` | same, D110A (inactive) | mCherry | co_expressed, P2A | 587/610 | |
 | `pmca2mcherry` | effector | hPMCA2w/b (ATP2B2); Ca²⁺ extrusion ("CalEx") | mCherry | fusion, `fusion_terminus` ? | 587/610 | orientation (plasmid requested); which PyRAT PMCA2 names are distinct constructs |
 | `trpv1t2agfp` | effector | rat TRPV1; capsaicin-gated cation channel | EGFP | co_expressed, T2A | 488/507 (FPbase EGFP) | |
 | `cochregfp` | effector | CoChR; blue-light-gated cation channel | EGFP | fusion, C | 488/507 | |
@@ -121,7 +133,7 @@ References per entry (go into `construct_references`):
 
 | Key | Papers (DOI) | Addgene | ZFIN |
 |---|---|---|---|
-| `bark`, `bark_d110a` | Nagai et al. 2021 Neuron, 10.1016/j.neuron.2021.05.023 | #117691 GfaABC1D BARK p2A mCherry, #117689 CMV; controls #117692, #117690 (D110A), #117688 (R106A) | none (lab plasmids B0078, B0077) |
+| `bark`, `barkd110a` | Nagai et al. 2021 Neuron, 10.1016/j.neuron.2021.05.023 | #117691 GfaABC1D BARK p2A mCherry, #117689 CMV; controls #117692, #117690 (D110A), #117688 (R106A) | none (lab plasmids B0078, B0077) |
 | `pmca2mcherry` | Yu et al. 2018 Neuron, 10.1016/j.neuron.2018.08.015 (CalEx); Chen, Duque et al. 2025 Science, 10.1126/science.adq5233 (zebrafish `Tg(gfap:hPMCA2-mCherry)`) | #111568 pZac2.1-GfaABC1D-mCherry-hPMCA2w/b ("mCherry tag, N terminal") | none |
 | `trpv1t2agfp` | Chen et al. 2015 Nat Methods, 10.1038/nmeth.3691 (tool); Duque, Chen et al. 2025 Neuron, 10.1016/j.neuron.2024.11.011 (line) | none | ZDB-TGCONSTRCT-260122-1 `Tg(gfap:Rno.Trpv1-2A-EGFP)`, allele jf64Tg (ZDB-ALT-260122-1) |
 | `cochregfp` | Klapoetke et al. 2014 Nat Methods, 10.1038/nmeth.2836 (tool); Mu et al. 2019 Cell, 10.1016/j.cell.2019.05.050 (line) | #124233 pTol1-UAS:CoChR-tdTomato (zebrafish vector, tdTomato, not an exact match) | ZDB-TGCONSTRCT-200206-4 `Tg(gfap:CoChR-EGFP)`, jf29Tg (ZDB-ALT-200206-8); no her4.1 line |
@@ -158,7 +170,7 @@ separate, per-strain fact.
 FPbase has no entries for these sensors, so sensor spectra come from papers.
 Unknown values stay null rather than being filled from a sibling variant.
 
-An inactive control such as `bark_d110a` screens exactly like its active
+An inactive control such as `barkd110a` screens exactly like its active
 parent, so screening can't tell them apart. Only line identity (strain or
 plasmid records) can, which is why it's a separate catalog entry.
 

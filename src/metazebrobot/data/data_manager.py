@@ -460,6 +460,61 @@ class DataManager:
                     ON construct_aliases(catalog_id)
                 """)
 
+                # Enforced construct catalog (docs/construct_screening_link_design.md).
+                # Seeded from config/construct_catalog.json, which owns the data.
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS constructs (
+                        key TEXT PRIMARY KEY CHECK (key GLOB '[a-z0-9]*' AND key NOT GLOB '*[^a-z0-9]*'),
+                        canonical_name TEXT NOT NULL UNIQUE,
+                        role TEXT NOT NULL CHECK (role IN ('sensor', 'effector', 'reporter', 'marker')),
+                        family TEXT,
+                        payload TEXT,
+                        sensor_target TEXT,
+                        mechanism TEXT,
+                        readout_fluorophore TEXT,
+                        readout_link TEXT NOT NULL CHECK (readout_link IN
+                            ('intrinsic', 'fusion', 'co_expressed', 'cis_marker', 'none')),
+                        linker TEXT CHECK (linker IN ('P2A', 'T2A', 'E2A', 'F2A', 'IRES')),
+                        fusion_terminus TEXT CHECK (fusion_terminus IN ('N', 'C', 'unknown')),
+                        marker_promoter TEXT,
+                        variant_of TEXT REFERENCES constructs(key),
+                        localization TEXT CHECK (localization IN
+                            ('cytosolic', 'nuclear', 'soma', 'membrane', 'synaptic', 'unknown')),
+                        excitation_nm INTEGER,
+                        emission_nm INTEGER,
+                        screen_color TEXT CHECK (screen_color IN
+                            ('green', 'red', 'far_red', 'blue', 'yellow', 'photoconvertible')),
+                        notes TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        CHECK ((readout_link = 'co_expressed') = (linker IS NOT NULL)),
+                        CHECK ((readout_link = 'fusion') = (fusion_terminus IS NOT NULL)),
+                        CHECK ((readout_link = 'cis_marker') = (marker_promoter IS NOT NULL)),
+                        CHECK (readout_link = 'none' OR (readout_fluorophore IS NOT NULL
+                                                         AND screen_color IS NOT NULL)),
+                        CHECK (role = 'reporter' OR payload IS NOT NULL),
+                        CHECK (role <> 'sensor' OR (sensor_target IS NOT NULL
+                                                    AND localization IS NOT NULL))
+                    )
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS construct_key_aliases (
+                        normalized_alias TEXT PRIMARY KEY,
+                        alias_name TEXT NOT NULL,
+                        construct_key TEXT NOT NULL REFERENCES constructs(key) ON DELETE CASCADE
+                    )
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS construct_references (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        construct_key TEXT NOT NULL REFERENCES constructs(key) ON DELETE CASCADE,
+                        kind TEXT NOT NULL CHECK (kind IN
+                            ('doi', 'zotero', 'addgene', 'zfin', 'fpbase', 'internal')),
+                        value TEXT NOT NULL,
+                        note TEXT,
+                        UNIQUE (construct_key, kind, value)
+                    )
+                """)
+
                 # Crossing-level transgenic indicators (keyed by PyRAT crossing_id)
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS crossing_transgenic_indicators (
@@ -629,6 +684,8 @@ class DataManager:
                     cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN emission_nm INTEGER")
                 if 'fluorophore_color' not in dish_transgene_cols:
                     cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN fluorophore_color TEXT")
+                if 'construct_key' not in dish_transgene_cols:
+                    cursor.execute("ALTER TABLE dish_transgenes ADD COLUMN construct_key TEXT")
                 cursor.execute("""
                     CREATE INDEX IF NOT EXISTS idx_dish_transgenes_construct_role
                     ON dish_transgenes(construct_role)
@@ -1604,13 +1661,16 @@ class DataManager:
             catalog_id, match_method = self.resolve_construct_catalog_match(
                 tg.get("reporter_raw") or tg.get("reporter")
             )
+            construct_key = self.resolve_construct_key(
+                tg.get("reporter_raw") or tg.get("reporter"), cursor=cursor
+            )
             cursor.execute("""
                 INSERT OR IGNORE INTO dish_transgenes
                 (dish_id, construct, modification_type, promoter, reporter, fluorophore,
                  construct_role, sensor_family, sensor_target, effector_family,
                  catalog_id, source_type, source_id, match_method,
-                 excitation_nm, emission_nm, fluorophore_color)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 excitation_nm, emission_nm, fluorophore_color, construct_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 dish_id,
                 tg["construct"],
@@ -1629,6 +1689,7 @@ class DataManager:
                 spectra["ex"] if spectra else None,
                 spectra["em"] if spectra else None,
                 spectra["color"] if spectra else None,
+                construct_key,
             ))
 
     def backfill_dish_transgenes(self):
@@ -1749,6 +1810,7 @@ class DataManager:
                            dt.excitation_nm,
                            dt.emission_nm,
                            dt.fluorophore_color,
+                           dt.construct_key,
                            cc.canonical_name AS catalog_name,
                            cc.construct_role AS catalog_construct_role,
                            cc.family AS catalog_family,
@@ -1789,6 +1851,10 @@ class DataManager:
                     tg["target"] = tg.get("sensor_target") or tg.get("catalog_target")
                     tg["screen_color"] = screen_color
                     tg["catalog_notes"] = tg.get("catalog_notes")
+                    tg["catalog_entry"] = (
+                        self.get_construct(tg["construct_key"], _connection=conn)
+                        if tg.get("construct_key") else None
+                    )
 
                     # Build spectra dict from DB columns (or None if not available)
                     if excitation_nm and emission_nm:
@@ -2609,8 +2675,21 @@ class DataManager:
         constructs = payload.get("constructs") if isinstance(payload, dict) else payload
         return constructs if isinstance(constructs, list) else []
 
+    _CONSTRUCT_FIELDS = (
+        "key", "canonical_name", "role", "family", "payload", "sensor_target",
+        "mechanism", "readout_fluorophore", "readout_link", "linker",
+        "fusion_terminus", "marker_promoter", "variant_of", "localization",
+        "excitation_nm", "emission_nm", "screen_color", "notes",
+    )
+
     def seed_construct_catalog(self):
-        """Upsert bundled starter construct catalog rows and aliases."""
+        """Load config/construct_catalog.json into the construct tables.
+
+        The file owns the catalog: `constructs`, `construct_key_aliases` and
+        `construct_references` are rebuilt from it, and the legacy
+        `construct_catalog`/`construct_aliases` tables are kept as a projection
+        for older code paths. Dish construct matches are then refreshed.
+        """
         if not self.is_initialized:
             return
 
@@ -2621,70 +2700,160 @@ class DataManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                for entry in constructs:
-                    canonical_name = entry.get("canonical_name")
-                    normalized_name = self._normalize_construct_name(
-                        entry.get("normalized_name") or canonical_name
+                # Base entries before variants (variant_of references them).
+                ordered = sorted(constructs, key=lambda e: e.get("variant_of") is not None)
+                cursor.execute("DELETE FROM construct_key_aliases")
+                cursor.execute("DELETE FROM construct_references")
+                cursor.execute("DELETE FROM construct_aliases")
+                for entry in ordered:
+                    values = [entry.get(field) for field in self._CONSTRUCT_FIELDS]
+                    placeholders = ", ".join("?" for _ in self._CONSTRUCT_FIELDS)
+                    updates = ", ".join(
+                        f"{field} = excluded.{field}" for field in self._CONSTRUCT_FIELDS[1:]
                     )
-                    if not canonical_name or not normalized_name:
-                        continue
-
-                    cursor.execute("""
-                        INSERT INTO construct_catalog
-                            (canonical_name, normalized_name, construct_role, family, target,
-                             fluorophore, excitation_nm, emission_nm, screen_color, notes, is_active)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(normalized_name) DO UPDATE SET
-                            canonical_name = excluded.canonical_name,
-                            construct_role = excluded.construct_role,
-                            family = excluded.family,
-                            target = excluded.target,
-                            fluorophore = excluded.fluorophore,
-                            excitation_nm = excluded.excitation_nm,
-                            emission_nm = excluded.emission_nm,
-                            screen_color = excluded.screen_color,
-                            notes = excluded.notes,
-                            is_active = excluded.is_active,
-                            updated_at = CURRENT_TIMESTAMP
-                    """, (
-                        canonical_name,
-                        normalized_name,
-                        entry.get("construct_role"),
-                        entry.get("family"),
-                        entry.get("target"),
-                        entry.get("fluorophore"),
-                        entry.get("excitation_nm"),
-                        entry.get("emission_nm"),
-                        entry.get("screen_color"),
-                        entry.get("notes"),
-                        entry.get("is_active", True),
-                    ))
-
-                    catalog_row = cursor.execute(
-                        "SELECT id FROM construct_catalog WHERE normalized_name = ?",
-                        (normalized_name,),
-                    ).fetchone()
-                    if not catalog_row:
-                        continue
-                    catalog_id = catalog_row["id"]
-
-                    aliases = set(entry.get("aliases") or [])
-                    aliases.add(canonical_name)
+                    cursor.execute(
+                        f"INSERT INTO constructs ({', '.join(self._CONSTRUCT_FIELDS)}) "
+                        f"VALUES ({placeholders}) ON CONFLICT(key) DO UPDATE SET {updates}, "
+                        "updated_at = CURRENT_TIMESTAMP",
+                        values,
+                    )
+                    key = entry["key"]
+                    aliases = set(entry.get("aliases") or []) | {entry["canonical_name"], key}
                     for alias in aliases:
                         normalized_alias = self._normalize_construct_name(alias)
-                        if not alias or not normalized_alias:
-                            continue
-                        cursor.execute("""
-                            INSERT INTO construct_aliases (catalog_id, alias_name, normalized_alias)
-                            VALUES (?, ?, ?)
-                            ON CONFLICT(normalized_alias) DO UPDATE SET
-                                catalog_id = excluded.catalog_id,
-                                alias_name = excluded.alias_name
-                        """, (catalog_id, alias, normalized_alias))
-
+                        if normalized_alias:
+                            cursor.execute(
+                                "INSERT OR REPLACE INTO construct_key_aliases "
+                                "(normalized_alias, alias_name, construct_key) VALUES (?, ?, ?)",
+                                (normalized_alias, alias, key),
+                            )
+                    for ref in entry.get("references") or []:
+                        cursor.execute(
+                            "INSERT OR IGNORE INTO construct_references "
+                            "(construct_key, kind, value, note) VALUES (?, ?, ?, ?)",
+                            (key, ref["kind"], str(ref["value"]), ref.get("note")),
+                        )
+                    self._project_legacy_catalog_entry(cursor, entry, aliases)
                 conn.commit()
+            self.refresh_construct_matches()
         except Exception as e:
             logger.warning(f"construct catalog seed failed: {e}")
+
+    def _project_legacy_catalog_entry(self, cursor, entry: Dict[str, Any], aliases) -> None:
+        """Mirror a catalog entry into the legacy construct_catalog tables."""
+        cursor.execute("""
+            INSERT INTO construct_catalog
+                (canonical_name, normalized_name, construct_role, family, target,
+                 fluorophore, excitation_nm, emission_nm, screen_color, notes, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(normalized_name) DO UPDATE SET
+                canonical_name = excluded.canonical_name,
+                construct_role = excluded.construct_role,
+                family = excluded.family,
+                target = excluded.target,
+                fluorophore = excluded.fluorophore,
+                excitation_nm = excluded.excitation_nm,
+                emission_nm = excluded.emission_nm,
+                screen_color = excluded.screen_color,
+                notes = excluded.notes,
+                is_active = 1,
+                updated_at = CURRENT_TIMESTAMP
+        """, (
+            entry["canonical_name"], entry["key"], entry["role"], entry.get("family"),
+            entry.get("sensor_target"), entry.get("readout_fluorophore"),
+            entry.get("excitation_nm"), entry.get("emission_nm"),
+            entry.get("screen_color"), entry.get("notes"),
+        ))
+        catalog_id = cursor.execute(
+            "SELECT id FROM construct_catalog WHERE normalized_name = ?", (entry["key"],)
+        ).fetchone()["id"]
+        for alias in aliases:
+            normalized_alias = self._normalize_construct_name(alias)
+            if normalized_alias:
+                cursor.execute(
+                    "INSERT OR REPLACE INTO construct_aliases "
+                    "(catalog_id, alias_name, normalized_alias) VALUES (?, ?, ?)",
+                    (catalog_id, alias, normalized_alias),
+                )
+
+    def resolve_construct_key(self, reporter: Optional[str], cursor=None) -> Optional[str]:
+        """Resolve a reporter/effector string to a `constructs.key`, or None."""
+        normalized = self._normalize_construct_name(reporter)
+        if not normalized:
+            return None
+        try:
+            with (nullcontext(cursor) if cursor is not None else self.get_connection()) as conn:
+                row = conn.execute(
+                    "SELECT construct_key FROM construct_key_aliases WHERE normalized_alias = ?",
+                    (normalized,),
+                ).fetchone()
+                return row["construct_key"] if row else None
+        except sqlite3.OperationalError:
+            return None
+
+    def get_construct(self, key: str, *, _connection=None) -> Optional[Dict[str, Any]]:
+        """One catalog entry with its aliases and references, or None."""
+        with (nullcontext(_connection) if _connection is not None else self.get_connection()) as conn:
+            try:
+                row = conn.execute("SELECT * FROM constructs WHERE key = ?", (key,)).fetchone()
+            except sqlite3.OperationalError:
+                return None
+            if not row:
+                return None
+            entry = {field: row[field] for field in self._CONSTRUCT_FIELDS}
+            entry["aliases"] = sorted(
+                r["alias_name"] for r in conn.execute(
+                    "SELECT alias_name FROM construct_key_aliases WHERE construct_key = ?", (key,)
+                )
+            )
+            entry["references"] = [
+                {"kind": r["kind"], "value": r["value"], "note": r["note"]}
+                for r in conn.execute(
+                    "SELECT kind, value, note FROM construct_references "
+                    "WHERE construct_key = ? ORDER BY id", (key,)
+                )
+            ]
+            return entry
+
+    def list_constructs(self) -> List[Dict[str, Any]]:
+        """Every catalog entry, ordered by key."""
+        with self.get_connection() as conn:
+            try:
+                keys = [r["key"] for r in conn.execute("SELECT key FROM constructs ORDER BY key")]
+            except sqlite3.OperationalError:
+                return []
+            return [self.get_construct(key, _connection=conn) for key in keys]
+
+    def refresh_construct_matches(self) -> int:
+        """Re-resolve every dish construct against the current catalog."""
+        updated = 0
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute("SELECT id, reporter FROM dish_transgenes").fetchall()
+            except sqlite3.OperationalError:
+                return 0
+            for row in rows:
+                key = self.resolve_construct_key(row["reporter"], cursor=conn)
+                catalog = conn.execute(
+                    "SELECT id FROM construct_catalog WHERE normalized_name = ?", (key,)
+                ).fetchone() if key else None
+                cursor = conn.execute(
+                    """
+                    UPDATE dish_transgenes
+                    SET construct_key = ?, catalog_id = ?, match_method = ?
+                    WHERE id = ? AND (construct_key IS NOT ? OR catalog_id IS NOT ?
+                                      OR match_method IS NOT ?)
+                    """,
+                    (key, catalog["id"] if catalog else None,
+                     "alias_exact" if key else "unmatched", row["id"],
+                     key, catalog["id"] if catalog else None,
+                     "alias_exact" if key else "unmatched"),
+                )
+                updated += cursor.rowcount
+            conn.commit()
+        if updated:
+            logger.info(f"Refreshed construct matches for {updated} dish construct rows")
+        return updated
 
     def resolve_construct_catalog_match(self, reporter: Optional[str]) -> Tuple[Optional[int], str]:
         """Resolve a reporter/effector string to a construct catalog row."""
