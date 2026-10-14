@@ -51,23 +51,25 @@ doesn't change the fish's `dish_id` or check that the unit belongs to its dish
 
 ## Proposal
 
-Each tracked fish gets two separate links.
+Revised 2026-10-14 (Jeremy): `dish_id` means where the fish is now, and the
+origin is a new field. Querying a fish answers "where is it?" first (dish,
+well, container type), and `GET /dishes/{dish_id}/fish` lists the fish
+actually in that dish.
 
-| | Origin | Location |
-|---|---|---|
-| Meaning | The group the fish came from | Where it is now |
-| Stored as | `dish_id` (set at registration, never changed) | `current_unit_id` (exists) and a new `current_dish_id` |
-| Example (Z1) | 19234_1 | 19234_3, well A1 |
-| Drives | Genotype, cross, age, screening results | Plate map, care, "where do I find it" |
+| Field | Meaning | Changes | Z1 |
+|---|---|---|---|
+| `dish_id` | The dish the fish is in now (location) | On every move | 19234_3 |
+| `current_unit_id` | The well or unit within that dish (exists) | On every move | `19234_3:A1` |
+| `origin_dish_id` (new) | The dish (group) the fish came from | Never; set at registration | 19234_1 |
+| `origin_dish_uuid` (new) | That dish's immutable UUID | Never | |
 
-`dish_id` already behaves as an origin for fish that are moved: assign never
-changes it. Keeping that meaning and adding a location field is additive for
-consumers. The rule that follows: **register a fish under the dish it came
-from, then move it.** Don't register it directly in a mixed container.
+The container type (`well_plate`, `petri_dish`, ...) is the dish's
+`container_type`. A fish registered in the dish it came from has
+`origin_dish_id = dish_id` until it's moved.
 
 ### Screening results are inherited
 
-A fish's screening result is computed from its origin dish's lineage, not typed
+A fish's screening result is computed from its origin dish's (`origin_dish_id`) lineage, not typed
 in per fish. Walk from the origin dish up through `parent_dish_id`, collecting
 what each step established:
 
@@ -94,13 +96,14 @@ on this fish".
 Moving a tracked fish to a unit in another dish does three things in one
 transaction:
 
-- updates `current_unit_id` and `current_dish_id`, and writes
-  `housing_unit_occupancy`;
+- updates `dish_id` and `current_unit_id`, writes `housing_unit_occupancy`,
+  and checks that the unit belongs to the destination dish (fixes
+  [#3](https://github.com/jmdelahanty/metazebrobot/issues/3));
 - records a dish transfer of 1 between the two dishes, so both
   `current_fish_count`s stay right;
 - bumps the fish's `revision`.
 
-The origin (`dish_id`) and the UUID never change. Registering a fish changes no
+`origin_dish_id` and the UUID never change. Registering a fish changes no
 counts, because the fish is already in its dish. A batch form of the move
 covers plate setup.
 
@@ -113,46 +116,48 @@ explicit "container" type is an open question.
 
 ## Worked examples
 
-**The 2026-10-09 plate.** Target state after a backfill:
+**The 2026-10-09 plate.** `dish_id` (19234_3) and `current_unit_id` are
+already right. The backfill only sets the origin:
 
-- Z1-Z5: `dish_id` 19234_1, inherited mCherry+;
-- Z6-Z10: `dish_id` 19234_2, inherited mCherry-;
-- all: `current_dish_id` 19234_3, `current_unit_id` per well.
+- Z1-Z5: `origin_dish_id` 19234_1, inherited mCherry+;
+- Z6-Z10: `origin_dish_id` 19234_2, inherited mCherry-.
 
 The existing dish transfers (5 + 5, `well_plate_setup`) already match the
-counts. The backfill bumps the ten fish's revisions, so it waits until their
-recordings are registered (Citrus and Orange seal revision 3).
+counts. Setting the origin moves the ten fish to revision 4. Jeremy approved
+that on 2026-10-14: `fish_subject_revisions` keeps revision 3, which Citrus and
+Orange sealed.
 
 **Citrus: record, then isolate.**
 
 1. At session start, Citrus registers a new fish under the batch dish with its
-   own UUID (`dish_id` = batch dish, located there, no count change).
+   own UUID (`dish_id` = `origin_dish_id` = batch dish; no count change).
 2. After the session, the fish is moved to a plate well: the batch dish count
    drops by one and the plate's rises.
-3. The fish's origin, inherited screening result and UUID are unchanged.
+3. `dish_id` becomes the plate; the fish's `origin_dish_id`, inherited
+   screening result and UUID are unchanged.
 
-Citrus seals the origin dish and its revision at start and doesn't read
-`dish_id` after a move.
+Citrus seals the dish and its revision at start and doesn't read `dish_id`
+after a move, so a later move doesn't affect a recording.
 
 ## Contract impact
 
-These would be additive fields on the pinned `GET /fish/{fish_id}` and
-`GET /dishes/{dish_id}/fish` responses:
-
-- `current_dish_id`;
-- `current_dish_uuid`;
-- inherited and observed screening results with their sources.
-
-This is a re-pin through agent-contracts, not a new `schema_version`.
-`dish_id`'s meaning is unchanged for moved fish. The doc
-[zebrobot_snapshot.md](zebrobot_snapshot.md) would state it explicitly as the
-origin. `GET /dishes/{dish_id}/fish` needs a decision: list fish by origin, by
-location, or both.
+- **Additive fields** on the pinned `GET /fish/{fish_id}`,
+  `GET /dishes/{dish_id}/fish` and `POST /dishes/{dish_id}/fish` responses:
+  - `origin_dish_id` and `origin_dish_uuid`;
+  - later, inherited and observed screening results with their sources.
+- **`dish_id` semantics:** for a fish that's moved, `dish_id` now follows the
+  fish. Today moves never change it, which is issue #3. No consumer reads
+  `dish_id` after a move: Citrus seals the dish at start, and Palette joins on
+  `fish_id`. This is stated in [zebrobot_snapshot.md](zebrobot_snapshot.md)
+  and confirmed with Citrus and Palette before release.
+- `GET /dishes/{dish_id}/fish` lists fish by location, the fish in that dish.
+  A by-origin listing can be a query parameter later.
+- It's a re-pin through agent-contracts, not a new `schema_version`.
 
 ## Builds on this
 
 - Plate setup page: pick source dishes, then place fish in wells. Fish are
-  registered under their origin and moved in one batch.
+  registered under their origin dish and moved in one batch.
 - Citrus v4 create-with-UUID (idempotent `POST /dishes/{dish_id}/fish`) and the
   fish revision history it compares against.
 - Recording a fish's death ([#13](https://github.com/jmdelahanty/metazebrobot/issues/13)):
@@ -162,8 +167,6 @@ location, or both.
 
 - Should a fish-level observation with a different result from the inherited
   one flag the origin dish's screening as suspect?
-- Should `GET /dishes/{dish_id}/fish` list by origin, by location, or both,
-  with a parameter?
 - Moves between dishes of different crosses: today dish transfers require the
   same cross. Mixed-cross plates need that rule relaxed for single-fish moves,
   or a container type exempt from it.
