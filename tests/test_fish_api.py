@@ -3149,3 +3149,130 @@ class TestFishRevisionHistory:
             conn.commit()
         items = client.get(f"/fish/{fish_id}/revisions").json()["items"]
         assert [(r["revision"], r["kind"]) for r in items] == [(3, "backfilled")]
+
+
+# -------------------------------------------------------------------
+# Idempotent client-minted create (subject identity v4)
+# -------------------------------------------------------------------
+
+
+def _set_dish_status(dish_id, status):
+    with data_manager.get_connection() as conn:
+        conn.execute("UPDATE dishes SET status = ? WHERE dish_id = ?", (status, dish_id))
+        conn.commit()
+
+
+class TestIdempotentFishCreate:
+    def test_new_client_id_is_201_with_dish_defaults(self, client, seed_dish):
+        fish_id = str(uuid.uuid4())
+        resp = client.post(f"/dishes/{seed_dish}/fish",
+                           json={"fish_id": fish_id, "subject_label": "Z1"})
+        assert resp.status_code == 201
+        body = resp.json()
+        assert (body["fish_id"], body["revision"], body["subject_label"]) == (fish_id, 1, "Z1")
+        dish = client.get(f"/dishes/{seed_dish}").json()
+        assert body["genotype"] == dish["genotype"]  # metazebrobot#12
+        assert body["species"] == (dish["species"] or "Danio rerio")
+
+    def test_exact_replay_is_200_current_record(self, client, seed_dish):
+        fish_id = str(uuid.uuid4())
+        request = {"fish_id": fish_id, "subject_label": "Z1"}
+        client.post(f"/dishes/{seed_dish}/fish", json=request)
+        client.patch(f"/fish/{fish_id}", json={"notes": "moved to A1"})
+
+        resp = client.post(f"/dishes/{seed_dish}/fish", json=request)
+        assert resp.status_code == 200
+        assert resp.json()["revision"] == 2  # current record, not revision 1
+
+    def test_replay_after_relabel_still_matches_creation(self, client, seed_dish):
+        fish_id = str(uuid.uuid4())
+        request = {"fish_id": fish_id, "subject_label": "Z1"}
+        client.post(f"/dishes/{seed_dish}/fish", json=request)
+        client.patch(f"/fish/{fish_id}", json={"subject_label": "Z9"})
+
+        assert client.post(f"/dishes/{seed_dish}/fish", json=request).status_code == 200
+
+    def test_absent_and_null_label_are_the_same(self, client, seed_dish):
+        fish_id = str(uuid.uuid4())
+        client.post(f"/dishes/{seed_dish}/fish", json={"fish_id": fish_id})
+        resp = client.post(f"/dishes/{seed_dish}/fish",
+                           json={"fish_id": fish_id, "subject_label": None})
+        assert resp.status_code == 200
+
+    def test_dish_defaults_are_not_compared(self, client, seed_dish):
+        fish_id = str(uuid.uuid4())
+        client.post(f"/dishes/{seed_dish}/fish", json={"fish_id": fish_id})
+        with data_manager.get_connection() as conn:
+            conn.execute("UPDATE dishes SET genotype = 'Tg(changed:x)' WHERE dish_id = ?",
+                         (seed_dish,))
+            conn.commit()
+        assert client.post(f"/dishes/{seed_dish}/fish",
+                           json={"fish_id": fish_id}).status_code == 200
+
+    @pytest.mark.parametrize("second", [
+        {"subject_label": "Z2"},
+        {"subject_label": "Z1", "sex": "female"},
+    ])
+    def test_different_creation_values_conflict(self, client, seed_dish, second):
+        fish_id = str(uuid.uuid4())
+        client.post(f"/dishes/{seed_dish}/fish", json={"fish_id": fish_id, "subject_label": "Z1"})
+        resp = client.post(f"/dishes/{seed_dish}/fish", json={"fish_id": fish_id, **second})
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == {"error": "fish_id_conflict", "fish_id": fish_id}
+
+    def test_same_id_under_another_dish_conflicts(self, client, seed_dish):
+        fish_id = str(uuid.uuid4())
+        client.post(f"/dishes/{seed_dish}/fish", json={"fish_id": fish_id})
+        resp = client.post("/dishes/NO_SUCH_DISH/fish", json={"fish_id": fish_id})
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["error"] == "fish_id_conflict"
+
+    def test_existing_id_answered_before_dish_state(self, client, seed_dish):
+        fish_id = str(uuid.uuid4())
+        client.post(f"/dishes/{seed_dish}/fish", json={"fish_id": fish_id})
+        _set_dish_status(seed_dish, "inactive")
+        try:
+            resp = client.post(f"/dishes/{seed_dish}/fish", json={"fish_id": fish_id})
+            assert resp.status_code == 200
+        finally:
+            _set_dish_status(seed_dish, "active")
+
+    def test_new_id_on_inactive_dish_is_409(self, client, seed_dish):
+        _set_dish_status(seed_dish, "inactive")
+        try:
+            resp = client.post(f"/dishes/{seed_dish}/fish", json={"fish_id": str(uuid.uuid4())})
+            assert resp.status_code == 409
+            assert resp.json()["detail"] == {"error": "dish_inactive", "dish_id": seed_dish}
+        finally:
+            _set_dish_status(seed_dish, "active")
+
+    def test_new_id_on_unknown_dish_is_404(self, client):
+        resp = client.post("/dishes/NO_SUCH_DISH/fish", json={"fish_id": str(uuid.uuid4())})
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == {"error": "dish_not_found", "dish_id": "NO_SUCH_DISH"}
+
+    @pytest.mark.parametrize("bad_id", [
+        str(uuid.uuid4()).upper(),            # not lowercase
+        str(uuid.uuid1()),                    # not version 4
+        "not-a-uuid",
+        12345,
+    ])
+    def test_invalid_fish_id_is_422(self, client, seed_dish, bad_id):
+        resp = client.post(f"/dishes/{seed_dish}/fish", json={"fish_id": bad_id})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "invalid_fish_id"
+
+    @pytest.mark.parametrize("bad_label", ["x" * 65, "Z1\n", "Z\x001", 7])
+    def test_invalid_label_is_422_on_create_and_patch(self, client, seed_dish, bad_label):
+        resp = client.post(f"/dishes/{seed_dish}/fish", json={"subject_label": bad_label})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "invalid_subject_label"
+
+        fish_id = client.post(f"/dishes/{seed_dish}/fish", json={}).json()["fish_id"]
+        resp = client.patch(f"/fish/{fish_id}", json={"subject_label": bad_label})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "invalid_subject_label"
+
+    def test_label_at_limit_is_accepted(self, client, seed_dish):
+        resp = client.post(f"/dishes/{seed_dish}/fish", json={"subject_label": "x" * 64})
+        assert resp.status_code == 201

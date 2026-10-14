@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import unicodedata
 import sqlite3
 import subprocess
 from contextlib import asynccontextmanager, contextmanager
@@ -304,6 +305,40 @@ _DATABASE_ERROR_RESPONSE = {
     503: {"model": ApiErrorResponse, "description": "Lookup failed (database_error)"},
 }
 _LOOKUP_ERROR_RESPONSES = {**_NOT_FOUND_RESPONSE, **_DATABASE_ERROR_RESPONSE}
+
+_CREATE_FISH_RESPONSES = {
+    200: {"model": FishSubjectResponse,
+          "description": "fish_id already exists with the same creation values; the current record"},
+    404: {"model": ApiErrorResponse, "description": "dish_not_found (only for a new fish_id)"},
+    409: {"model": ApiErrorResponse,
+          "description": "fish_id_conflict (existing fish_id, different creation values) or "
+                         "dish_inactive (only for a new fish_id)"},
+    422: {"model": ApiErrorResponse,
+          "description": "invalid_fish_id or invalid_subject_label; a malformed body gets "
+                         "FastAPI's validation shape instead"},
+    **_DATABASE_ERROR_RESPONSE,
+}
+
+# Lowercase canonical UUID v4 (subject identity v4 contract).
+_CANONICAL_UUID4 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+SUBJECT_LABEL_MAX_LENGTH = 64
+
+
+def _subject_label_error(label: Any) -> Optional[HTTPException]:
+    """422 for a label Citrus couldn't seal: not text, over 64 chars, or control chars."""
+    if label is None:
+        return None
+    if (
+        not isinstance(label, str)
+        or len(label) > SUBJECT_LABEL_MAX_LENGTH
+        or any(unicodedata.category(ch) == "Cc" for ch in label)
+    ):
+        return HTTPException(
+            status_code=422,
+            detail={"error": "invalid_subject_label",
+                    "message": f"at most {SUBJECT_LABEL_MAX_LENGTH} characters, no control characters"},
+        )
+    return None
 
 
 def _clean_optional(value: Optional[str]) -> Optional[str]:
@@ -5415,34 +5450,100 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             raise _database_error(exc) from exc
         return {"items": subjects}
 
-    @app.post("/dishes/{dish_id}/fish", status_code=201)
+    _FISH_CREATION_FIELDS = ("subject_label", "sex", "genotype", "species")
+
+    def _creation_conflict(fish_id: str, dish_id: str, body: Dict[str, Any]) -> bool:
+        """Do the supplied creation values differ from the fish's first revision?
+
+        Only values the request supplied are compared (plus ``dish_id`` from
+        the path, and ``subject_label``, where absent means null). Values
+        defaulted from the dish at creation aren't, so a replay can't conflict
+        just because the dish's genotype changed meanwhile.
+        """
+        revisions = data_manager.get_fish_revisions(fish_id)
+        first = revisions[0] if revisions else data_manager.get_fish_subject(fish_id)
+        if first.get("dish_id") != dish_id:
+            return True
+        if body.get("subject_label") != first.get("subject_label"):
+            return True
+        return any(
+            field in body and body[field] != first.get(field)
+            for field in ("sex", "genotype", "species")
+        )
+
+    @app.post(
+        "/dishes/{dish_id}/fish",
+        status_code=201,
+        response_model=FishSubjectResponse,
+        responses=_CREATE_FISH_RESPONSES,
+    )
     def create_fish_for_dish(
         dish_id: str,
+        response: Response,
         body: Dict[str, Any] = {},
     ) -> Dict[str, Any]:
-        """Register a new fish subject on a dish. Returns the created fish."""
-        db_path = _require_db_path()
-        # Verify dish exists
-        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
-            row = conn.execute(
-                "SELECT dish_id FROM dishes WHERE dish_id = ?", (dish_id,)
-            ).fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="Dish not found")
+        """Register a fish on a dish; idempotent on a client-supplied ``fish_id``.
 
-        fish_id = data_manager.create_fish_subject(
+        Subject identity v4 (agent-contracts citrus-palette): a client may
+        mint the ``fish_id`` (lowercase canonical UUID v4). An existing
+        ``fish_id`` is answered 200 (same creation values; current record) or
+        409 ``fish_id_conflict`` before any dish check, so an outbox replay
+        succeeds even after the dish is retired. For a new ``fish_id``: 404
+        ``dish_not_found``, 409 ``dish_inactive``, else 201. Sex, genotype and
+        species default from the dish when not supplied.
+        """
+        db_path = _require_db_path()
+        fish_id = body.get("fish_id")
+        if fish_id is not None and (
+            not isinstance(fish_id, str) or not _CANONICAL_UUID4.match(fish_id)
+        ):
+            raise HTTPException(
+                status_code=422, detail={"error": "invalid_fish_id", "fish_id": str(fish_id)}
+            )
+        label_error = _subject_label_error(body.get("subject_label"))
+        if label_error:
+            raise label_error
+
+        def answer_existing():
+            if _creation_conflict(fish_id, dish_id, body):
+                raise HTTPException(
+                    status_code=409, detail={"error": "fish_id_conflict", "fish_id": fish_id}
+                )
+            response.status_code = 200
+            return data_manager.get_fish_subject(fish_id)
+
+        try:
+            if fish_id and data_manager.get_fish_subject(fish_id, raise_errors=True):
+                return answer_existing()
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                dish = conn.execute(
+                    "SELECT dish_id, status, sex, genotype, species FROM dishes WHERE dish_id = ?",
+                    (dish_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
+        if not dish:
+            raise _not_found("dish", dish_id=dish_id)
+        if dish["status"] != "active":
+            raise HTTPException(
+                status_code=409, detail={"error": "dish_inactive", "dish_id": dish_id}
+            )
+
+        created_id = data_manager.create_fish_subject(
             dish_id=dish_id,
-            fish_id=body.get("fish_id"),
+            fish_id=fish_id,
             subject_label=body.get("subject_label"),
-            sex=body.get("sex"),
-            genotype=body.get("genotype"),
-            species=body.get("species"),
+            sex=body["sex"] if "sex" in body else dish["sex"],
+            genotype=body["genotype"] if "genotype" in body else dish["genotype"],
+            species=body["species"] if "species" in body else (dish["species"] or "Danio rerio"),
             notes=body.get("notes"),
         )
-        if fish_id is None:
+        if created_id is None:
+            # A concurrent request may have created the same fish_id first.
+            if fish_id and data_manager.get_fish_subject(fish_id):
+                return answer_existing()
             raise HTTPException(status_code=500, detail="Failed to create fish subject")
-        fish = data_manager.get_fish_subject(fish_id)
-        return fish
+        return data_manager.get_fish_subject(created_id)
 
     @app.get(
         "/fish/{fish_id}",
@@ -5467,6 +5568,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         existing = data_manager.get_fish_subject(fish_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="Fish not found")
+        label_error = _subject_label_error(body.get("subject_label"))
+        if label_error:
+            raise label_error
         if not data_manager.update_fish_subject(fish_id, **body):
             raise HTTPException(status_code=500, detail="Failed to update fish subject")
         return data_manager.get_fish_subject(fish_id)
@@ -5548,6 +5652,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     ):
         """Register a single fish via the web form, return HTMX partial."""
         _dish_context_for_fish_page(dish_id)  # validates dish exists
+        if _subject_label_error(subject_label or None):
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": f"Labels are at most {SUBJECT_LABEL_MAX_LENGTH} characters, "
+                           "with no control characters.",
+                "level": "error",
+            })
         fish_id = data_manager.create_fish_subject(
             dish_id=dish_id,
             subject_label=subject_label or None,
@@ -5580,6 +5690,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if count < 1 or count > 96:
             return templates.TemplateResponse(request, "screening/_flash_message.html", {
                 "message": "Count must be between 1 and 96.",
+                "level": "error",
+            })
+        if label_prefix and _subject_label_error(f"{label_prefix}-{count}"):
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": f"Labels are at most {SUBJECT_LABEL_MAX_LENGTH} characters, "
+                           "with no control characters; shorten the prefix.",
                 "level": "error",
             })
         created = 0
