@@ -51,6 +51,11 @@ doesn't change the fish's `dish_id` or check that the unit belongs to its dish
 
 ## Proposal
 
+Status: built (2026-10-14); see the commit that adds `origin_dish_id`. The
+plate fish origins are set as a separate, approved data change after deploy.
+Mixed-cross moves are refused (`409 transfer_refused`) until the open
+question below is decided.
+
 Revised 2026-10-14 (Jeremy): `dish_id` means where the fish is now, and the
 origin is a new field. Querying a fish answers "where is it?" first (dish,
 well, container type), and `GET /dishes/{dish_id}/fish` lists the fish

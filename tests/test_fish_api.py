@@ -3276,3 +3276,117 @@ class TestIdempotentFishCreate:
     def test_label_at_limit_is_accepted(self, client, seed_dish):
         resp = client.post(f"/dishes/{seed_dish}/fish", json={"subject_label": "x" * 64})
         assert resp.status_code == 201
+
+
+# -------------------------------------------------------------------
+# Origin and location (docs/fish_origin_and_location_design.md)
+# -------------------------------------------------------------------
+
+
+def _full_dish(cross_id, number, container="petri_dish", fish_count=10):
+    from metazebrobot.models.fish_dish import FishDish
+    dish = FishDish.create_new(
+        cross_id=cross_id, dish_number=number, genotype="Tg(elavl3:GCaMP6s)",
+        responsible="test-user", fish_count=fish_count, dof="20260930",
+        container_type=container,
+    )
+    assert data_manager.save_fish_dish(dish.model_dump(mode="json", exclude_none=True))
+    return dish.dish_id
+
+
+def _well(client, dish_id, label):
+    return client.post(f"/dishes/{dish_id}/units",
+                       json={"unit_kind": "well", "position_label": label}).json()["unit_id"]
+
+
+def _count(client, dish_id):
+    return client.get(f"/dishes/{dish_id}").json()["current_fish_count"]
+
+
+class TestOriginAndLocation:
+    def test_new_fish_origin_is_its_dish(self, client, seed_dish):
+        body = client.post(f"/dishes/{seed_dish}/fish", json={}).json()
+        assert body["origin_dish_id"] == body["dish_id"] == seed_dish
+        assert body["origin_dish_uuid"] == body["dish_uuid"]
+
+    def test_move_into_plate_updates_location_counts_and_keeps_origin(self, client):
+        cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+        source = _full_dish(cross, 1)
+        plate = _full_dish(cross, 2, container="well_plate", fish_count=0)
+        a1 = _well(client, plate, "A1")
+        fish = client.post(f"/dishes/{source}/fish", json={"subject_label": "Z1"}).json()
+
+        moved = client.post(f"/fish/{fish['fish_id']}/assign", json={"unit_id": a1})
+
+        assert moved.status_code == 200
+        body = moved.json()
+        assert (body["dish_id"], body["current_unit_id"], body["origin_dish_id"]) == (plate, a1, source)
+        assert (_count(client, source), _count(client, plate)) == (9, 1)
+        assert [f["fish_id"] for f in client.get(f"/dishes/{plate}/fish").json()["items"]] \
+            == [fish["fish_id"]]
+        assert client.get(f"/dishes/{source}/fish").json()["items"] == []
+
+    def test_replay_after_move_is_200_with_current_dish(self, client):
+        cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+        source = _full_dish(cross, 1)
+        plate = _full_dish(cross, 2, container="well_plate", fish_count=0)
+        a1 = _well(client, plate, "A1")
+        request = {"fish_id": str(uuid.uuid4()), "subject_label": "Z1"}
+        client.post(f"/dishes/{source}/fish", json=request)
+        client.post(f"/fish/{request['fish_id']}/assign", json={"unit_id": a1})
+
+        replay = client.post(f"/dishes/{source}/fish", json=request)
+        assert replay.status_code == 200
+        assert replay.json()["dish_id"] == plate
+        # The same id under the plate (not its origin) is a conflict.
+        assert client.post(f"/dishes/{plate}/fish", json=request).status_code == 409
+
+    def test_well_to_well_in_same_dish_records_no_transfer(self, client):
+        cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+        plate = _full_dish(cross, 1, container="well_plate", fish_count=2)
+        a1, a2 = _well(client, plate, "A1"), _well(client, plate, "A2")
+        fish_id = client.post(f"/dishes/{plate}/fish", json={}).json()["fish_id"]
+        first = client.post(f"/fish/{fish_id}/assign", json={"unit_id": a1})
+        second = client.post(f"/fish/{fish_id}/assign", json={"unit_id": a2})
+        assert second.json()["current_unit_id"] == a2
+        assert _count(client, plate) == 2
+        history = client.get(f"/fish/{fish_id}/history").json()["items"]
+        assert [h["reason"] for h in sorted(history, key=lambda h: h["moved_in_at"])][:1] == ["initial"]
+        assert first.json()["origin_dish_id"] == plate
+
+    def test_move_into_other_cross_is_refused_and_fish_unchanged(self, client):
+        source = _full_dish(f"CROSS_{uuid.uuid4().hex[:6]}", 1)
+        other = _full_dish(f"CROSS_{uuid.uuid4().hex[:6]}", 1, container="well_plate", fish_count=0)
+        b1 = _well(client, other, "B1")
+        fish = client.post(f"/dishes/{source}/fish", json={}).json()
+
+        resp = client.post(f"/fish/{fish['fish_id']}/assign", json={"unit_id": b1})
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["error"] == "transfer_refused"
+        after = client.get(f"/fish/{fish['fish_id']}").json()
+        assert (after["dish_id"], after["current_unit_id"]) == (source, None)
+        assert _count(client, source) == 10
+
+    def test_unknown_unit_is_structured_404(self, client, seed_dish):
+        fish_id = client.post(f"/dishes/{seed_dish}/fish", json={}).json()["fish_id"]
+        resp = client.post(f"/fish/{fish_id}/assign", json={"unit_id": "nope:Z9"})
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["error"] == "unit_not_found"
+
+    def test_fish_without_stored_origin_reads_its_dish(self, client, seed_dish):
+        fish_id = str(uuid.uuid4())
+        with data_manager.get_connection() as conn:
+            conn.execute("INSERT INTO fish_subjects (fish_id, dish_id) VALUES (?, ?)", (fish_id, seed_dish))
+            conn.commit()
+        assert client.get(f"/fish/{fish_id}").json()["origin_dish_id"] == seed_dish
+
+    def test_revision_history_records_origin(self, client):
+        cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+        source = _full_dish(cross, 1)
+        plate = _full_dish(cross, 2, container="well_plate", fish_count=0)
+        a1 = _well(client, plate, "A1")
+        fish_id = client.post(f"/dishes/{source}/fish", json={}).json()["fish_id"]
+        client.post(f"/fish/{fish_id}/assign", json={"unit_id": a1})
+        last = client.get(f"/fish/{fish_id}/revisions").json()["items"][-1]
+        assert (last["dish_id"], last["origin_dish_id"]) == (plate, source)

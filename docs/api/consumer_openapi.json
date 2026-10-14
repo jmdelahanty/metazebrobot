@@ -845,6 +845,17 @@
             ],
             "title": "Notes"
           },
+          "origin_dish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Dish Id"
+          },
           "recorded_at": {
             "title": "Recorded At",
             "type": "string"
@@ -961,6 +972,21 @@
             ],
             "title": "Notes"
           },
+          "origin_dish_id": {
+            "title": "Origin Dish Id",
+            "type": "string"
+          },
+          "origin_dish_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Dish Uuid"
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -1007,7 +1033,8 @@
           "fish_id",
           "dish_id",
           "revision",
-          "updated_at"
+          "updated_at",
+          "origin_dish_id"
         ],
         "title": "FishSubjectResponse",
         "type": "object"

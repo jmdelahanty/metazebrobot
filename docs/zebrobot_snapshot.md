@@ -109,6 +109,22 @@ each dish also carries:
 Fish responses (`GET /fish/{fish_id}`, `GET /dishes/{dish_id}/fish`) carry
 `dish_uuid`, `revision`, and `updated_at` the same way.
 
+**Fish origin and location** (re-pin after `50e578ea`):
+
+- A fish's `dish_id` is the dish it is in **now**; moving the fish to a
+  unit in another dish changes it.
+- `origin_dish_id` / `origin_dish_uuid` name the dish it came from, set at
+  registration and never changed. A fish that has never moved has
+  `origin_dish_id == dish_id`.
+- **`GET /dishes/{dish_id}/fish` therefore means "fish in this dish now".**
+  Before this re-pin it meant "fish registered to this dish", because moves
+  never changed `dish_id`. A list sealed at record start (e.g. Orange's
+  `dish_fish`) means one or the other depending on the sealed
+  `consumer_schema_sha256`.
+- The idempotent `POST /dishes/{dish_id}/fish` compares the path dish with
+  the fish's **origin**, so a replay after a move still returns 200 (with the
+  current `dish_id`).
+
 - `dish_id` (`{cross_id}_{n}`) stays the human-facing id and the lookup key,
   but it is only unique within this database and could be reused after a
   delete. `dish_uuid` is the durable reference.

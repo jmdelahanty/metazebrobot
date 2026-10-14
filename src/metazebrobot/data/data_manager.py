@@ -210,6 +210,7 @@ class DataManager:
     # idempotent client-minted creates compare against.
     FISH_HISTORY_COLUMNS = (
         "dish_id", "subject_label", "sex", "genotype", "species", "notes", "current_unit_id",
+        "origin_dish_id",
     )
 
     def _ensure_fish_revision_history(self, conn) -> None:
@@ -226,6 +227,10 @@ class DataManager:
                 PRIMARY KEY (fish_id, revision)
             )
         """)
+        history_cols = {r[1] for r in conn.execute("PRAGMA table_info(fish_subject_revisions)")}
+        for col in self.FISH_HISTORY_COLUMNS:
+            if col not in history_cols:
+                conn.execute(f"ALTER TABLE fish_subject_revisions ADD COLUMN {col} TEXT")
         conn.execute("DROP TRIGGER IF EXISTS trg_fish_subjects_history_insert")
         conn.execute(f"""
             CREATE TRIGGER trg_fish_subjects_history_insert
@@ -913,6 +918,13 @@ class DataManager:
                     cursor.execute(
                         "ALTER TABLE fish_subjects ADD COLUMN current_unit_id TEXT REFERENCES housing_units(unit_id)"
                     )
+                # Origin (docs/fish_origin_and_location_design.md): the dish a
+                # fish came from, set at registration and never changed. NULL
+                # means it has never moved, so its origin is its dish_id.
+                if 'origin_dish_id' not in fish_cols:
+                    cursor.execute("ALTER TABLE fish_subjects ADD COLUMN origin_dish_id TEXT")
+                if 'origin_dish_uuid' not in fish_cols:
+                    cursor.execute("ALTER TABLE fish_subjects ADD COLUMN origin_dish_uuid TEXT")
 
                 # Housing units — physical positions within a dish
                 cursor.execute("""
@@ -3339,10 +3351,13 @@ class DataManager:
                 conn.execute(
                     """
                     INSERT INTO fish_subjects
-                        (fish_id, dish_id, subject_label, sex, genotype, species, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (fish_id, dish_id, subject_label, sex, genotype, species, notes,
+                         origin_dish_id, origin_dish_uuid)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+                            (SELECT dish_uuid FROM dishes WHERE dish_id = ?))
                     """,
-                    (fish_id, dish_id, subject_label, sex, genotype, species, notes),
+                    (fish_id, dish_id, subject_label, sex, genotype, species, notes,
+                     dish_id, dish_id),
                 )
                 conn.commit()
                 return fish_id
@@ -3366,9 +3381,12 @@ class DataManager:
                     """
                     SELECT f.fish_id, f.dish_id, d.dish_uuid, f.subject_label,
                            f.sex, f.genotype, f.species, f.created_at, f.notes,
-                           f.current_unit_id, f.revision, f.updated_at
+                           f.current_unit_id, f.revision, f.updated_at,
+                           COALESCE(f.origin_dish_id, f.dish_id) AS origin_dish_id,
+                           COALESCE(f.origin_dish_uuid, od.dish_uuid) AS origin_dish_uuid
                     FROM fish_subjects f
                     LEFT JOIN dishes d ON d.dish_id = f.dish_id
+                    LEFT JOIN dishes od ON od.dish_id = COALESCE(f.origin_dish_id, f.dish_id)
                     WHERE f.dish_id = ?
                     ORDER BY f.created_at
                     """,
@@ -3470,9 +3488,12 @@ class DataManager:
                     """
                     SELECT f.fish_id, f.dish_id, d.dish_uuid, f.subject_label,
                            f.sex, f.genotype, f.species, f.created_at, f.notes,
-                           f.current_unit_id, f.revision, f.updated_at
+                           f.current_unit_id, f.revision, f.updated_at,
+                           COALESCE(f.origin_dish_id, f.dish_id) AS origin_dish_id,
+                           COALESCE(f.origin_dish_uuid, od.dish_uuid) AS origin_dish_uuid
                     FROM fish_subjects f
                     LEFT JOIN dishes d ON d.dish_id = f.dish_id
+                    LEFT JOIN dishes od ON od.dish_id = COALESCE(f.origin_dish_id, f.dish_id)
                     WHERE f.fish_id = ?
                     """,
                     (fish_id,),
@@ -3736,6 +3757,52 @@ class DataManager:
                 return True
         except Exception as e:
             logger.error(f"Error assigning fish to unit: {e}")
+            return False
+
+    def relocate_fish(self, fish_id: str, unit_id: str, reason: str = "transfer") -> bool:
+        """Put a fish in a unit: its dish becomes the unit's dish, in one transaction.
+
+        Closes any open occupancy, fixes the origin if it was implicit
+        (``origin_dish_id`` NULL means "never moved"), sets ``dish_id`` and
+        ``current_unit_id`` from the unit, and opens a new occupancy. Dish
+        counts are the caller's job (a dish transfer), done first.
+        """
+        if not self.is_initialized:
+            logger.error("DataManager not initialized.")
+            return False
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """UPDATE housing_unit_occupancy SET moved_out_at = CURRENT_TIMESTAMP
+                       WHERE fish_id = ? AND moved_out_at IS NULL""",
+                    (fish_id,),
+                )
+                cursor = conn.execute(
+                    """
+                    UPDATE fish_subjects
+                    SET origin_dish_uuid = COALESCE(origin_dish_uuid,
+                            (SELECT dish_uuid FROM dishes
+                             WHERE dish_id = COALESCE(fish_subjects.origin_dish_id,
+                                                      fish_subjects.dish_id))),
+                        origin_dish_id = COALESCE(origin_dish_id, dish_id),
+                        dish_id = (SELECT dish_id FROM housing_units WHERE unit_id = ?),
+                        current_unit_id = ?
+                    WHERE fish_id = ?
+                    """,
+                    (unit_id, unit_id, fish_id),
+                )
+                if cursor.rowcount != 1:
+                    conn.rollback()
+                    return False
+                conn.execute(
+                    """INSERT INTO housing_unit_occupancy (fish_id, unit_id, moved_in_at, reason)
+                       VALUES (?, ?, CURRENT_TIMESTAMP, ?)""",
+                    (fish_id, unit_id, reason),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error relocating fish {fish_id}: {e}")
             return False
 
     def move_fish(

@@ -324,18 +324,28 @@ Content-Type: application/json
 }
 ```
 
-`unit_id` is required (`422` if missing). `reason` is stored as free text and
-not validated; the conventional values are `initial`, `transfer`,
-`terminated`, `experiment`. It defaults to `transfer` when omitted, including
-on a first assignment.
+`unit_id` is required (`422` `unit_id_required`). `reason` is stored on the
+occupancy record as free text; it defaults to `initial` for a fish's first
+placement and `transfer` otherwise. The conventional values are `initial`,
+`transfer`, `terminated` and `experiment`. `transfer_reason` (optional,
+default `manual_transfer`) is the dish-transfer reason when the unit is in
+another dish.
 
-If the fish already has a `current_unit_id`, this is treated as a move: the old
-occupancy record is closed and a new one is opened. If this is the first
-assignment, a new occupancy record is created. The unit may belong to any
-dish; the fish's `dish_id` does not change.
+A fish's `dish_id` is where it is now, and it follows the fish into the
+unit's dish. `origin_dish_id` never changes
+([origin and location](fish_origin_and_location_design.md)).
 
-Returns the updated fish object; its `revision` increases because
-`current_unit_id` changed. `404` if the fish or the unit does not exist.
+- **Unit in the fish's dish** (e.g. well A1 to A2 on one plate): the old
+  occupancy record is closed and a new one opened. Dish counts don't change.
+- **Unit in another dish:** first a dish transfer of one fish is recorded,
+  which updates both dishes' `current_fish_count` and closes the source dish
+  if that was its last fish. Then the fish moves: its `dish_id` becomes the
+  unit's dish. The transfer has the same rules as any dish transfer: both
+  dishes active, same cross. Otherwise `409` `{"error": "transfer_refused",
+  "message": ...}` and nothing changes.
+
+Returns the updated fish; its `revision` increases. `404` `fish_not_found` or
+`unit_not_found`.
 
 There is no web UI control for assignment yet; use this endpoint.
 

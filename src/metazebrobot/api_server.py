@@ -259,6 +259,8 @@ class FishSubjectResponse(BaseModel):
     current_unit_id: Optional[str] = None
     revision: int
     updated_at: str
+    origin_dish_id: str
+    origin_dish_uuid: Optional[str] = None
 
 
 class FishListResponse(BaseModel):
@@ -279,6 +281,7 @@ class FishRevisionResponse(BaseModel):
     species: Optional[str] = None
     notes: Optional[str] = None
     current_unit_id: Optional[str] = None
+    origin_dish_id: Optional[str] = None
 
 
 class FishRevisionListResponse(BaseModel):
@@ -5455,14 +5458,17 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     def _creation_conflict(fish_id: str, dish_id: str, body: Dict[str, Any]) -> bool:
         """Do the supplied creation values differ from the fish's first revision?
 
-        Only values the request supplied are compared (plus ``dish_id`` from
-        the path, and ``subject_label``, where absent means null). Values
+        Only values the request supplied are compared (plus the path dish
+        against the fish's origin dish, and ``subject_label``, where absent
+        means null). Values
         defaulted from the dish at creation aren't, so a replay can't conflict
         just because the dish's genotype changed meanwhile.
         """
         revisions = data_manager.get_fish_revisions(fish_id)
-        first = revisions[0] if revisions else data_manager.get_fish_subject(fish_id)
-        if first.get("dish_id") != dish_id:
+        current = data_manager.get_fish_subject(fish_id)
+        first = revisions[0] if revisions else current
+        # The origin, never the current dish: a replay after a move must match.
+        if current.get("origin_dish_id") != dish_id:
             return True
         if body.get("subject_label") != first.get("subject_label"):
             return True
@@ -5991,23 +5997,46 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         fish_id: str,
         body: Dict[str, Any] = {},
     ) -> Dict[str, Any]:
-        """Assign a fish to a housing unit, or move it if already assigned."""
+        """Put a fish in a housing unit; its dish becomes the unit's dish.
+
+        Body: ``unit_id`` (required); ``reason`` for the occupancy record
+        (default ``initial`` for a first placement, else ``transfer``);
+        ``transfer_reason`` for the dish transfer when the unit is in another
+        dish (default ``manual_transfer``).
+
+        Moving into another dish first records a dish transfer of one fish,
+        which updates both dishes' counts (and closes the source dish if that
+        was its last fish), then moves the fish: ``dish_id`` follows the fish;
+        ``origin_dish_id`` never changes (docs/fish_origin_and_location_design.md).
+        """
         _require_db_path()
         fish = data_manager.get_fish_subject(fish_id)
         if fish is None:
-            raise HTTPException(status_code=404, detail="Fish not found")
+            raise _not_found("fish", fish_id=fish_id)
         new_unit_id = body.get("unit_id")
         if not new_unit_id:
-            raise HTTPException(status_code=422, detail="unit_id is required")
-        if data_manager.get_housing_unit(new_unit_id) is None:
-            raise HTTPException(status_code=404, detail="Housing unit not found")
-        reason = body.get("reason", "transfer")
-        if fish.get("current_unit_id"):
-            success = data_manager.move_fish(fish_id, new_unit_id, reason)
-        else:
-            success = data_manager.assign_fish_to_unit(fish_id, new_unit_id, reason)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to assign fish")
+            raise HTTPException(status_code=422, detail={"error": "unit_id_required"})
+        unit = data_manager.get_housing_unit(new_unit_id)
+        if unit is None:
+            raise _not_found("unit", unit_id=new_unit_id)
+        reason = body.get("reason") or ("transfer" if fish.get("current_unit_id") else "initial")
+
+        if unit["dish_id"] != fish["dish_id"]:
+            ok, message, _ = fish_dish_ctrl.transfer_fish_between_dishes(
+                source_dish_id=fish["dish_id"],
+                destination_dish_id=unit["dish_id"],
+                count=1,
+                reason=body.get("transfer_reason") or "manual_transfer",
+                notes=f"Fish {fish.get('subject_label') or fish_id} moved to {new_unit_id}",
+            )
+            if not ok:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"error": "transfer_refused", "fish_id": fish_id,
+                            "unit_id": new_unit_id, "message": message},
+                )
+        if not data_manager.relocate_fish(fish_id, new_unit_id, reason):
+            raise HTTPException(status_code=500, detail="Failed to move fish")
         return data_manager.get_fish_subject(fish_id)
 
     @app.get(
