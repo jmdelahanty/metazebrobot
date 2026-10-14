@@ -25,7 +25,7 @@ treat it as background, not ground truth. Schema: agent-contracts
 
 | Doc | What it's for | Review |
 |---|---|---|
-| [Linking Screening Indicators to Constructs](construct_screening_link_design.md) | Proposal: screening steps point at a dish's transgene constructs instead of free text, the catalog records how each fluorescent readout relates to its transgene, and the API and Citrus snapshot serve the result. | checked at `96f00f5` |
+| [Linking Screening Indicators to Constructs](construct_screening_link_design.md) | Proposal: screening steps point at a dish's transgene constructs instead of free text, the catalog records how each fluorescent readout relates to its transgene, and the API and Citrus snapshot serve the result. | checked at `64f4a6c` |
 | [Cross Parent Strain and Background Design](cross_parent_background_design.md) | Per-parent strain and background model for PyRAT crosses (cross_parents, background parser). | checked at `384a366` |
 | [Dish Lineage Graph](dish_lineage_graph.md) | Dish lineage as a directed graph built from transfer and screening records. | checked at `384a366` |
 | [Fish Origin and Location](fish_origin_and_location_design.md) | Proposal: give each tracked fish a fixed origin (the dish it came from, whose screening results it inherits) and a changing location (container and well), so mixed plates and post-session isolation keep provenance. | checked at `62b2b9b` |

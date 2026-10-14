@@ -4,7 +4,7 @@ summary: "Proposal: screening steps point at a dish's transgene constructs inste
 owner: metazebrobot
 status: current
 kind: design
-verified_against: 96f00f5
+verified_against: 64f4a6c
 ---
 
 # Linking Screening Indicators to Constructs
@@ -62,21 +62,54 @@ that construct.
 
 ### 1. Curate the catalog
 
-Add the missing constructs and a `readout_link` column to the catalog. Correct
-roles to the set `sensor | effector | reporter | marker`. The biology is
-Jeremy's to confirm. Proposed starting values:
+Replace `construct_catalog` with a table whose fields are exact: closed value
+sets enforced by `CHECK` constraints, and fields required by role and readout.
+SQLite can't add constraints to an existing table, so this is a new table
+migrated from the current seven entries. Aliases (`construct_aliases`) carry
+over. The same value sets are `Literal` types in the API models, so they appear
+in the pinned OpenAPI schema and change only by a deliberate re-pin.
 
-| Construct | Role | Readout | `readout_link` | Confirm |
-|---|---|---|---|---|
-| PMCA2-mCherry | effector | mCherry, red | fusion | supported: "CalEx" mCherry-hPMCA2w/b in Nagai et al. 2021 |
-| jGCaMP8f, GCaMP7ff, GCaMP6s | sensor | green | intrinsic | |
-| jRGECO1b | sensor | red | intrinsic | |
-| GRAB-5HT, GRABATP1.0 | sensor | green (cpGFP) | intrinsic | |
-| iGluSnFR3 | sensor | green | intrinsic | |
-| CaMPARI | sensor | green→red | intrinsic | |
-| TRPV1-T2A-GFP | effector | GFP, green | co_expressed | |
-| CoChR-eGFP | effector | eGFP, green | fusion | |
-| b-ARK (iβARK) | effector | mCherry, red | co_expressed (P2A) | confirmed 2026-10-14: iβARK-p2A-mCherry (genetics expert; Nagai et al. 2021, Addgene #117688) |
+| Field | Type / values | Required when |
+|---|---|---|
+| `key` | text, unique: today's `normalized_name` (e.g. `bark`) | always |
+| `canonical_name` | text (e.g. `iβARK-P2A-mCherry`) | always |
+| `role` | `sensor` \| `effector` \| `reporter` \| `marker` | always |
+| `payload` | text: the protein of interest (e.g. `GRK2 RGS fragment`, `hPMCA2w/b`) | role ≠ reporter |
+| `sensor_target` | text (e.g. `calcium`, `serotonin`, `ATP`) | role = sensor |
+| `mechanism` | short text: what an effector does | optional for effectors |
+| `readout_fluorophore` | text: the fluorescent protein (e.g. `mCherry`, `cpGFP`) | readout_link ≠ none |
+| `readout_link` | `intrinsic` \| `fusion` \| `co_expressed` \| `cis_marker` \| `none` | always |
+| `linker` | `P2A` \| `T2A` \| `E2A` \| `F2A` \| `IRES` | readout_link = co_expressed (null otherwise) |
+| `fusion_terminus` | `N` \| `C` \| `unknown`: which end of the payload carries the fluorophore | readout_link = fusion (null otherwise) |
+| `marker_promoter` | text (e.g. `cmlc2`) | readout_link = cis_marker (null otherwise) |
+| `variant_of` | catalog key: e.g. an inactive control's active parent | optional |
+| `excitation_nm`, `emission_nm` | integers | readout_link ≠ none |
+| `screen_color` | `green` \| `red` \| `far_red` \| `blue` \| `yellow` \| `photoconvertible` | readout_link ≠ none |
+| `notes` | text | optional |
+
+`fusion_terminus` exists so the orientation is answered or explicitly
+`unknown`, never inferred from the name: the published CalEx construct is
+mCherry-hPMCA2w/b (N-terminal), while the lab's line is named "PMCA2-mCherry".
+
+Proposed values; the biology is Jeremy's to confirm. External ids (DOIs,
+Addgene, ZFIN, FPbase) go in `construct_references` (next section).
+
+| Key | Role | Payload / target | Readout | `readout_link` | Detail | Status |
+|---|---|---|---|---|---|---|
+| `bark` | effector | GRK2 (βARK1) RGS fragment; attenuates Gq GPCR signaling | mCherry, red | co_expressed | `linker` P2A; HA-FLAG N-terminal tags | **confirmed from plasmid B0078** (Tol2, zebrafish gfap promoter) and Nagai et al. 2021 |
+| `bark_d110a` | effector (inactive control) | as above, D→A at RGS-fragment codon 66 (consistent with D110A) | mCherry, red | co_expressed | `linker` P2A; `variant_of` `bark` | **confirmed from plasmid B0077**: one base differs from B0078 |
+| `pmca2mcherry` | effector | hPMCA2w/b; Ca²⁺ extrusion ("CalEx") | mCherry, red | fusion | `fusion_terminus` to determine | published CalEx is N-terminal; lab line orientation unknown |
+| `jgcamp8f`, `gcamp7ff`, `gcamp6s` | sensor | calcium | green | intrinsic | | to confirm ("GCaMP7ff" naming to check) |
+| `jrgeco1b` | sensor | calcium | red | intrinsic | | to confirm |
+| `grab5ht`, `grabatp10` | sensor | serotonin, ATP | green (cpGFP) | intrinsic | | to confirm |
+| `iglusnfr3` | sensor | glutamate | green | intrinsic | | to confirm |
+| `campari` | sensor | activity integrator | green→red | intrinsic | `screen_color` photoconvertible | to confirm |
+| `trpv1t2agfp` | effector | TRPV1; capsaicin-gated cation channel | GFP, green | co_expressed | `linker` T2A | to confirm |
+| `cochregfp` | effector | CoChR; blue-light-gated cation channel | eGFP, green | fusion | `fusion_terminus` C (from name; to confirm) | to confirm |
+
+An inactive control such as `bark_d110a` screens exactly like its active
+parent, so screening can't tell them apart. Only line identity (strain or
+plasmid records) can, which is why it's a separate catalog entry.
 
 Construct identity in the catalog is the reporter or effector. The promoter
 stays per dish construct (`Tg(gfap:jRGECO1b)` and `Tg(elavl3:jRGECO1b)` share a
