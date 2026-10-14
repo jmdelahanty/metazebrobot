@@ -1563,14 +1563,43 @@ class DataManager:
             return "crossing", dish_data.get("cross_id")
         return "manual_genotype", None
 
+    @staticmethod
+    def _parent_tank_transgenes(cursor, cross_id: Optional[str]) -> List[Dict[str, Any]]:
+        """Constructs parsed from a cross's parent tank strains (cross_parents)."""
+        if not cross_id:
+            return []
+        try:
+            rows = cursor.execute(
+                """
+                SELECT tank_id, parsed_transgenes FROM cross_parents
+                WHERE cross_id = ? ORDER BY parent_index
+                """,
+                (str(cross_id),),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []  # cross_parents is created by the API server
+        transgenes = []
+        for row in rows:
+            for tg in json.loads(row["parsed_transgenes"] or "[]"):
+                if tg.get("construct"):
+                    transgenes.append({**tg, "parent_tank_id": str(row["tank_id"])})
+        return transgenes
+
     def _save_dish_transgenes(self, cursor, dish_data: Dict[str, Any]):
         """Parse genotype and save normalized transgene rows with spectral data."""
         dish_id = dish_data.get("dish_id")
         genotype = dish_data.get("genotype", "")
-        source_type, source_id = self._dish_transgene_source(dish_data)
         cursor.execute("DELETE FROM dish_transgenes WHERE dish_id = ?", (dish_id,))
         transgenes = self.parse_genotype(genotype)
+        if not transgenes:
+            # Unparsed strain (e.g. PyRAT "EXPERIMENTAL"): the dish may carry its
+            # parent tanks' constructs; its screening steps decide which.
+            transgenes = self._parent_tank_transgenes(cursor, dish_data.get("cross_id"))
         for tg in transgenes:
+            if tg.get("parent_tank_id"):
+                source_type, source_id = "parent_tank", tg["parent_tank_id"]
+            else:
+                source_type, source_id = self._dish_transgene_source(dish_data)
             spectra = self.get_fluorophore_spectra(tg.get("fluorophore"))
             catalog_id, match_method = self.resolve_construct_catalog_match(
                 tg.get("reporter_raw") or tg.get("reporter")

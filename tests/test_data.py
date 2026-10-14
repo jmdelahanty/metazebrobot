@@ -781,6 +781,76 @@ class TestDishTransgenes:
         assert tgs[0]["spectra"]["em"] == 520
 
 
+class TestParentTankTransgenes:
+    """Unparsed strains (EXPERIMENTAL) take candidate constructs from parent tanks."""
+
+    @staticmethod
+    def _seed_parents(cross_id, parents):
+        from metazebrobot.api_server import _upsert_cross_parent_provenance
+
+        payload = {"crossing_id": int(cross_id), "tanks": {"parents": parents}}
+        with data_manager.get_connection() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO crosses (cross_id, data) VALUES (?, ?)",
+                (cross_id, json.dumps(payload)),
+            )
+            _upsert_cross_parent_provenance(conn, cross_id, payload)
+            conn.commit()
+
+    @staticmethod
+    def _save_dish(cross_id, genotype):
+        dish_id = f"{cross_id}_{uuid.uuid4().hex[:6]}"
+        assert data_manager.save_fish_dish({
+            "dish_id": dish_id,
+            "cross_id": cross_id,
+            "date_created": "20261001",
+            "dof": "20260930",
+            "genotype": genotype,
+            "responsible": "test-user",
+            "fish_count": 10,
+            "species": "Danio rerio",
+            "sex": "unknown",
+            "status": "active",
+        })
+        return dish_id
+
+    def test_experimental_dish_gets_parent_tank_construct(self, client):
+        self._seed_parents("91234", [
+            {"tank_id": 8130, "strain_name": "Casper_HHMI [AB-C] DEC25",
+             "number_of_male": 5, "generation": "F1"},
+            {"tank_id": 7472, "strain_name": "Tg(gfap:PMCA2-mCherry-zf)",
+             "number_of_female": 10, "generation": "F2"},
+        ])
+        dish_id = self._save_dish("91234", "EXPERIMENTAL")
+
+        tgs = data_manager.get_dish_transgenes(dish_id)
+
+        assert [t["construct"] for t in tgs] == ["Tg(gfap:PMCA2-mCherry-zf)"]
+        assert tgs[0]["source_type"] == "parent_tank"
+        assert tgs[0]["source_id"] == "7472"
+        assert tgs[0]["promoter"] == "gfap"
+        assert tgs[0]["fluorophore"] == "mcherry"
+
+    def test_background_parents_add_nothing(self, client):
+        self._seed_parents("91235", [
+            {"tank_id": 6482, "strain_name": "AB Casper_HHMI", "generation": "F1"},
+        ])
+        dish_id = self._save_dish("91235", "EXPERIMENTAL")
+
+        assert data_manager.get_dish_transgenes(dish_id) == []
+
+    def test_parsed_genotype_wins_over_parent_tanks(self, client):
+        self._seed_parents("91236", [
+            {"tank_id": 7472, "strain_name": "Tg(gfap:PMCA2-mCherry-zf)", "generation": "F2"},
+        ])
+        dish_id = self._save_dish("91236", "Tg(elavl3:jGCaMP8f)")
+
+        tgs = data_manager.get_dish_transgenes(dish_id)
+
+        assert [t["construct"] for t in tgs] == ["Tg(elavl3:jGCaMP8f)"]
+        assert tgs[0]["source_type"] == "crossing"
+
+
 class TestCrossingIndicatorNormalization:
     """crossing indicator rows should persist normalized construct metadata."""
 

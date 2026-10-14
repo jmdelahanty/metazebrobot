@@ -229,6 +229,10 @@ link. Pigment calls work the same way.
 
 ### 4. Unparsed strains take constructs from the parent tanks
 
+Status: built (2026-10-14, `DataManager._parent_tank_transgenes`). Applied at
+service start to dishes with no construct rows; on prod that is the three
+19234 dishes.
+
 When a cross's own strain parses to no constructs (PyRAT's `EXPERIMENTAL`,
 strain 564), a dish's candidate constructs come from its **parent tanks'
 strains** instead. `cross_parents.parsed_transgenes` already holds them.
