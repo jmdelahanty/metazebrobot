@@ -63,8 +63,10 @@ One row per fish per recording:
 |---|---|
 | `fish_id` | The fish |
 | `recording_ref` | The recording's id in the system that owns it (Palette recording id, or Citrus session/run id + camera) |
+| `dish_id` | The dish recorded (always set; the only subject when no fish is named) |
+| `unit_id` | The well the fish was picked from (its `current_unit_id` when Citrus picked it), or null |
 | `rig_id`, `arena_id` | Where |
-| `started_at` | Lab-local start time |
+| `started_at`, `ended_at` | Lab-local start and end (end filled when the recording stops, or at intake) |
 | `fish_revision` | The fish revision the recording sealed |
 | `status` | `declared` (Citrus said so at start) or `confirmed` (Palette admitted the recording) |
 | `source` | `citrus` or `palette` |
@@ -77,10 +79,18 @@ Rules:
   registers or verifies the fish (subject identity v4). Palette upgrades a
   link to `confirmed` at intake, or adds it if Citrus couldn't reach MZB.
   Jeremy leaned toward Palette confirming at intake (2026-10-14).
-- **Gaps:** a recording of a dish or plate with no fish named is also
-  worth a row (`fish_id` null, `dish_id` set). The timeline of every fish in
-  that dish then shows "possibly used in recording R (fish not recorded)",
-  instead of nothing. That's what the 17:20 recording needs.
+- **Dish-level rows** (decided 2026-10-15): a recording that names no
+  individual fish still gets a row, with `fish_id` null and `dish_id` set.
+  That makes queries like "recordings of this dish" or "recordings of fish
+  never minted" (including v4 `dish_group` subjects) possible. The timeline
+  of every fish in that dish shows "possibly used in recording R (fish not
+  recorded)". That's what the 17:20 recording needs.
+- **Out of the well, without manual moves** (decided 2026-10-15): a fish
+  picked from a well for an arena isn't moved in MetaZebrobot. Its link
+  records `unit_id`, `started_at` and `ended_at`, so the timeline shows "out
+  of C1 for recording R, 16:00–16:35" and "which wells were empty at 17:20"
+  is answered from the links active then. The fish's location stays the
+  well, where it returns. Nobody has to record moves.
 - **Writes are idempotent** on (`fish_id` or `dish_id`, `recording_ref`), like
   the v4 fish create.
 
@@ -107,9 +117,3 @@ Citrus".
 
 - **Who writes usage links:** Citrus at start (`declared`) and Palette at
   intake (`confirmed`), or only one of them?
-- **Taking a fish out of its well for a recording:** model it as a move (well
-  → rig arena → well, so the well shows empty during the recording), or only
-  as the usage link? A move makes "which well was empty at 17:20" answerable,
-  but every recording would need two extra moves.
-- **Dish-only recordings:** should they always create a dish-level usage
-  row, so gaps like 17:20 surface automatically?
