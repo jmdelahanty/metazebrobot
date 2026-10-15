@@ -1,0 +1,23 @@
+{# Linked screening images (docs/screening_images_design.md). #}
+{% if items %}
+<div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));">
+{% for img in items %}
+    <figure style="margin:0">
+        <a href="/image-links/{{ img.id }}/preview.png" target="_blank">
+            <img src="/image-links/{{ img.id }}/preview.png" alt="{{ img.name }}" loading="lazy"
+                 style="width:100%; border-radius:4px">
+        </a>
+        <figcaption><small>
+            {% if img.well_label %}<strong>{{ img.well_label }}</strong>{% endif %}
+            {% if img.fish_id %} · <a href="/fish/{{ img.fish_id }}/view">{{ labels.get(img.fish_id) or img.fish_id[:8] }}</a>{% endif %}
+            · {{ img.kind }} · {{ img.taken_at_lab }}
+            {% for c in img.channels %}<br>{{ c.fluor or c.name }}{% endfor %}
+            <br><a href="/image-links/{{ img.id }}/file">original OME-TIFF</a>
+        </small></figcaption>
+    </figure>
+{% endfor %}
+</div>
+{% else %}
+<p><em>No screening images linked.</em></p>
+{% endif %}
+<p><small><a href="/image-links/import{% if dish_id %}?folder={{ dish_id }}{% endif %}">Link screening images…</a></small></p>

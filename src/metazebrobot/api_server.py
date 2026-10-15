@@ -19,12 +19,12 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
-from .data import fish_endings, fish_observations, usage_links
+from .data import fish_endings, fish_observations, image_links, usage_links
 from .data.fish_timeline import fish_timeline as build_fish_timeline
 from .data.screening_calls import dish_calls as dish_screening_calls
 from .data.screening_calls import fish_calls as fish_screening_calls
@@ -2517,6 +2517,12 @@ async def lifespan(app: FastAPI):
         ome_staging_root = Path(os.environ.get("METAZEBROBOT_OME_STAGING_ROOT", str(DEFAULT_OME_STAGING_ROOT)))
         app.state.ome_staging_root = ome_staging_root
         logger.info(f"OME staging browser root: {ome_staging_root}")
+
+        image_cache = Path(os.environ.get("METAZEBROBOT_IMAGE_CACHE",
+                                          str(db_path.parent / "metazebrobot_image_cache")))
+        image_cache.mkdir(parents=True, exist_ok=True)
+        app.state.image_cache_dir = image_cache
+        logger.info(f"Screening image preview cache: {image_cache}")
 
     yield
 
@@ -6607,6 +6613,123 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if result["changed"]:
             _refresh_dish_counts(result["dish_id"])
         return data_manager.get_fish_subject(fish_id)
+
+    # ------------------------------------------------------------------
+    # Screening images (docs/screening_images_design.md)
+    # ------------------------------------------------------------------
+
+    def _image_root() -> Path:
+        return Path(app.state.ome_staging_root)
+
+    @app.get("/image-links/import", response_class=HTMLResponse)
+    def images_import_page(request: Request, folder: Optional[str] = None,
+                           dish_id: Optional[str] = None):
+        """Scan a screening-staging folder and review proposed dish/fish links."""
+        db_path = _require_db_path()
+        root = _image_root()
+        scan = None
+        error = None
+        if folder:
+            try:
+                with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                    scan = image_links.scan(conn, root, folder, dish_id or None)
+            except (ValueError, OSError) as exc:
+                error = str(exc)
+        return templates.TemplateResponse(request, "images/import.html", {
+            "root": str(root),
+            "folders": image_links.list_folders(root),
+            "folder": folder or "",
+            "scan": scan,
+            "error": error,
+            "kinds": image_links.KINDS,
+        })
+
+    @app.post("/image-links/import", response_class=HTMLResponse)
+    async def images_import(request: Request):
+        """Link the reviewed files of a folder to a dish (and fish where matched)."""
+        _require_db_path()
+        form = await request.form()
+        dish_id = (form.get("dish_id") or "").strip()
+        kind = form.get("kind") or "screening"
+        _dish_context_for_fish_page(dish_id)  # validates the dish
+        root = _image_root()
+        linked = 0
+        with data_manager.get_connection() as conn:
+            for key in form.keys():
+                if not key.startswith("include_"):
+                    continue
+                index = key.split("_", 1)[1]
+                rel_path = form.get(f"rel_{index}")
+                fish_id = (form.get(f"fish_{index}") or "").strip() or None
+                try:
+                    image_links.link(conn, root, rel_path, dish_id, kind, fish_id,
+                                     _selected_user(request), read_ome_tiff_metadata)
+                    linked += 1
+                except (ValueError, OSError) as exc:
+                    logger.warning("Image link skipped for %s: %s", rel_path, exc)
+            conn.commit()
+        return RedirectResponse(url=f"/dishes/{dish_id}/fish/?images_linked={linked}",
+                                status_code=303)
+
+    def _image_link_or_404(link_id: int) -> Dict[str, Any]:
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            link = image_links.get(conn, link_id)
+        if link is None:
+            raise _not_found("image_link", image_link_id=link_id)
+        return link
+
+    @app.get("/image-links/{link_id}/preview.png")
+    def image_link_preview(link_id: int):
+        """Composite PNG preview, rendered once and cached."""
+        link = _image_link_or_404(link_id)
+        try:
+            path = image_links.preview_path(_image_root(), app.state.image_cache_dir, link,
+                                            export_reference_pngs_from_ome_tiff)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=404, detail={
+                "error": "image_unavailable", "image_link_id": link_id, "message": str(exc)})
+        return FileResponse(path, media_type="image/png")
+
+    @app.get("/image-links/{link_id}/file")
+    def image_link_file(link_id: int):
+        """The original OME-TIFF (byte-range requests supported, for viewers)."""
+        link = _image_link_or_404(link_id)
+        try:
+            path = image_links.resolve_under(_image_root(), link["rel_path"])
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail={"error": "image_unavailable",
+                                                         "message": str(exc)})
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail={"error": "image_unavailable",
+                                                         "message": "file moved or deleted"})
+        return FileResponse(path, media_type="image/tiff", filename=path.name)
+
+    @app.get("/dishes/{dish_id}/image-links")
+    def dish_image_links(dish_id: str) -> Dict[str, Any]:
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            return {"items": image_links.for_dish(conn, dish_id)}
+
+    @app.get("/fish/{fish_id}/image-links")
+    def fish_image_links(fish_id: str) -> Dict[str, Any]:
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            return {"items": image_links.for_fish(conn, fish_id)}
+
+    @app.get("/fish/{fish_id}/image-links/gallery", response_class=HTMLResponse)
+    def fish_image_gallery(request: Request, fish_id: str):
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            items = image_links.for_fish(conn, fish_id)
+        return templates.TemplateResponse(request, "images/_gallery.html", {
+            "items": items, "labels": {}, "dish_id": None})
+
+    @app.get("/dishes/{dish_id}/image-links/gallery", response_class=HTMLResponse)
+    def dish_image_gallery(request: Request, dish_id: str):
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            items = image_links.for_dish(conn, dish_id)
+            labels = {r["fish_id"]: r["subject_label"] for r in conn.execute(
+                "SELECT fish_id, subject_label FROM fish_subjects WHERE fish_id IN "
+                f"({','.join('?' for _ in items) or 'NULL'})", [i["fish_id"] for i in items])}
+        return templates.TemplateResponse(request, "images/_gallery.html", {
+            "items": items, "labels": labels, "dish_id": dish_id})
 
     @app.get("/fish/{fish_id}/timeline", response_model=FishTimelineResponse,
              responses=_LOOKUP_ERROR_RESPONSES)

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Link screening images{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Link screening images</h2>
+    <p>OME-TIFFs stay where they are under <code>{{ root }}</code>; MetaZebrobot only stores links and previews.</p>
+</hgroup>
+
+<form method="get" action="/image-links/import">
+    <fieldset role="group">
+        <select name="folder" aria-label="Folder">
+            <option value="">Choose a folder…</option>
+            {% for f in folders %}<option value="{{ f }}"{% if f == folder %} selected{% endif %}>{{ f }}</option>{% endfor %}
+        </select>
+        <input type="text" name="dish_id" placeholder="Dish (if the folder isn't named after one)"
+               value="{{ scan.dish_id if scan and scan.dish_id else '' }}">
+        <button type="submit">Scan</button>
+    </fieldset>
+</form>
+
+{% if error %}<p><mark>{{ error }}</mark></p>{% endif %}
+
+{% if scan %}
+{% if not scan.dish_id %}
+<p><mark>No dish named {{ scan.folder }}. Enter the dish these images belong to and scan again.</mark></p>
+{% else %}
+<form method="post" action="/image-links/import">
+    <input type="hidden" name="dish_id" value="{{ scan.dish_id }}">
+    <div class="grid">
+        <p>Linking to dish <a href="/dishes/{{ scan.dish_id }}/fish/"><strong>{{ scan.dish_id }}</strong></a></p>
+        <label>Kind
+            <select name="kind">
+                {% for k in kinds %}<option value="{{ k }}"{% if (k == "plate" and scan.files | selectattr("well") | list) or (k == "screening" and not (scan.files | selectattr("well") | list)) %} selected{% endif %}>{{ k }}</option>{% endfor %}
+            </select>
+        </label>
+    </div>
+    <table>
+        <thead><tr><th>Link</th><th>File</th><th>Well</th><th>Fish</th><th>Size</th></tr></thead>
+        <tbody>
+        {% for f in scan.files %}
+        <tr>
+            <td><input type="checkbox" name="include_{{ loop.index }}" {% if not f.already_linked %}checked{% endif %}>
+                <input type="hidden" name="rel_{{ loop.index }}" value="{{ f.rel_path }}"></td>
+            <td><small>{{ f.name }}</small>{% if f.already_linked %} <mark>linked</mark>{% endif %}</td>
+            <td>{{ f.well or "—" }}</td>
+            <td>{% if f.fish %}{{ f.fish.subject_label }}
+                <input type="hidden" name="fish_{{ loop.index }}" value="{{ f.fish.fish_id }}">
+                {% elif f.well %}<small>no fish in {{ f.well }}</small>{% else %}<small>dish only</small>{% endif %}</td>
+            <td><small>{{ (f.size_bytes / 1048576) | round(1) }} MB</small></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <button type="submit">Link {{ scan.files | length }} file(s)</button>
+</form>
+{% endif %}
+{% endif %}
+{% endblock %}

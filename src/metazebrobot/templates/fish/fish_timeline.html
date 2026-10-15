@@ -14,6 +14,9 @@
     </tbody>
 </table>
 
+<h3>Images</h3>
+<div hx-get="/fish/{{ t.fish_id }}/image-links/gallery" hx-trigger="revealed" hx-swap="innerHTML">Loading images...</div>
+
 <h3>Timeline</h3>
 <table>
     <thead><tr><th>When (lab time)</th><th>What</th><th>Source</th></tr></thead>

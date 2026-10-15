@@ -115,6 +115,16 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
             confidence=call["confidence"], dish_id=call["established_in_dish"], basis=call["basis"],
         ))
 
+    from .image_links import for_fish as fish_images
+    for img in fish_images(conn, fish_id):
+        entries.append(_entry(
+            _utc_iso(img["file_mtime"]), "imaged",
+            f"Imaged ({img['kind']})" + (f" in well {img['well_label']}" if img["well_label"] else "")
+            + f": {img['name']}",
+            "image_links",
+            image_link_id=img["id"], rel_path=img["rel_path"], dish_id=img["dish_id"],
+        ))
+
     from .fish_observations import all_for as all_observations
     for obs in all_observations(conn, fish_id):
         entries.append(_entry(
