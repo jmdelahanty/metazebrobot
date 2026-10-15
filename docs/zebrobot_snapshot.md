@@ -77,6 +77,14 @@ the DB host.
   - `POST /dishes/{dish_id}/fish` (see [fish tracking API](fish_tracking_api.md#register-a-new-fish))
 - A fish's content at each revision:
   - `GET /fish/{fish_id}/revisions`
+- A fish's structured record by id, for any workload:
+  - `GET /fish/{fish_id}/screening`: per-construct calls inherited from its
+    origin dish (result, confidence, step, basis);
+    [rules](construct_screening_link_design.md#3-results-per-construct-inherited-by-fish)
+  - `GET /fish/{fish_id}/timeline`: its history, each entry naming its source
+  - `GET /dishes/{dish_id}/screening-calls`: the same calls at dish level
+  - `GET /constructs`, `GET /constructs/{construct_key}`: what each construct
+    is (role, readout and linkage, references)
 - Record which recording used a dish/fish (Citrus at Start and Stop):
   - `POST /usage-links`, `PATCH /usage-links/{recording_ref}`
   - `GET /usage-links/{recording_ref}`, `GET /usage-links?fish_id=|dish_id=|active_at=`
@@ -220,7 +228,9 @@ Field-level shapes are generated from the code, not written by hand:
   `/dishes/{dish_id}/citrus-snapshot`, `/acquisition/dishes`,
   `/dishes/{dish_id}`, `/dishes/by-uuid/{dish_uuid}`,
   `/dishes/{dish_id}/fish` (GET and POST), `/fish/{fish_id}`,
-  `/fish/{fish_id}/revisions`, `/fish/{fish_id}/end`, `/usage-links` (POST, GET),
+  `/fish/{fish_id}/revisions`, `/fish/{fish_id}/end`, `/fish/{fish_id}/screening`,
+  `/fish/{fish_id}/timeline`, `/dishes/{dish_id}/screening-calls`, `/constructs`,
+  `/constructs/{construct_key}`, `/usage-links` (POST, GET),
   `/usage-links/{recording_ref}` (PATCH, GET) and `/version`, including
   their error models.
 - `tests/test_consumer_contract.py` fails if the code and that file

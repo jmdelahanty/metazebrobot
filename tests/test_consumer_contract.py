@@ -97,7 +97,7 @@ def test_lookup_errors_are_declared(schema, method, path):
     assert responses["503"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/ApiErrorResponse"
     )
-    if path != "/acquisition/dishes":
+    if path not in ("/acquisition/dishes", "/constructs"):  # lists: no 404
         assert "404" in responses
 
 

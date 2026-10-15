@@ -299,6 +299,94 @@ class FishRevisionListResponse(BaseModel):
     items: List[FishRevisionResponse] = Field(default_factory=list)
 
 
+class ScreeningCallResponse(BaseModel):
+    """What a screening step established for a construct (or pigment)."""
+
+    kind: Literal["construct", "pigment"]
+    construct_key: Optional[str] = None
+    dish_construct: Optional[str] = None
+    result: Literal["positive", "negative", "pigmented"]
+    confidence: Literal["high", "medium", "low", "none"]
+    established_in_dish: str
+    screening_datetime: str
+    dpf: Optional[int] = None
+    basis: str
+    note: Optional[str] = None
+    source: Optional[Literal["inherited"]] = None
+
+
+class FishScreeningResponse(BaseModel):
+    fish_id: str
+    origin_dish_id: str
+    left_origin_at: Optional[str] = None
+    status: Literal["ok", "partial_mixed_sources", "unknown_dish"]
+    calls: List[ScreeningCallResponse] = Field(default_factory=list)
+
+
+class DishScreeningCallsResponse(BaseModel):
+    dish_id: str
+    status: Literal["ok", "partial_mixed_sources", "unknown_dish"]
+    calls: List[ScreeningCallResponse] = Field(default_factory=list)
+
+
+class ConstructReferenceResponse(BaseModel):
+    kind: Literal["doi", "zotero", "addgene", "zfin", "fpbase", "internal"]
+    value: str
+    note: Optional[str] = None
+
+
+class ConstructResponse(BaseModel):
+    """A construct catalog entry (config/construct_catalog.json)."""
+
+    key: str
+    canonical_name: str
+    role: Literal["sensor", "effector", "reporter", "marker"]
+    family: Optional[str] = None
+    payload: Optional[str] = None
+    sensor_target: Optional[str] = None
+    mechanism: Optional[str] = None
+    readout_fluorophore: Optional[str] = None
+    readout_link: Literal["intrinsic", "fusion", "co_expressed", "cis_marker", "none"]
+    linker: Optional[Literal["P2A", "T2A", "E2A", "F2A", "IRES"]] = None
+    fusion_terminus: Optional[Literal["N", "C", "unknown"]] = None
+    marker_promoter: Optional[str] = None
+    variant_of: Optional[str] = None
+    localization: Optional[Literal["cytosolic", "nuclear", "soma", "membrane", "synaptic",
+                                   "unknown"]] = None
+    excitation_nm: Optional[int] = None
+    emission_nm: Optional[int] = None
+    screen_color: Optional[Literal["green", "red", "far_red", "blue", "yellow",
+                                   "photoconvertible"]] = None
+    notes: Optional[str] = None
+    aliases: List[str] = Field(default_factory=list)
+    references: List[ConstructReferenceResponse] = Field(default_factory=list)
+
+
+class ConstructListResponse(BaseModel):
+    items: List[ConstructResponse] = Field(default_factory=list)
+
+
+class TimelineEntryResponse(BaseModel):
+    at: Optional[str] = Field(None, description="Lab-local YYYY-MM-DDTHH:MM:SS, or YYYY-MM-DD")
+    kind: str = Field(..., description="fertilized, screening, registered, placed, edited, "
+                                       "recorded, possibly_recorded, ended")
+    summary: str
+    source: str = Field(..., description="Table(s) the entry comes from")
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FishTimelineResponse(BaseModel):
+    fish_id: str
+    subject_label: Optional[str] = None
+    dish_id: str
+    current_unit_id: Optional[str] = None
+    origin_dish_id: str
+    revision: int
+    status: Optional[str] = None
+    entries: List[TimelineEntryResponse] = Field(default_factory=list)
+    not_yet_recorded: List[str] = Field(default_factory=list)
+
+
 class UsageLinkResponse(BaseModel):
     """A recording's use of a dish (and fish); docs/fish_timeline_design.md."""
 
@@ -4057,17 +4145,25 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     # JSON API — construct catalog (docs/construct_screening_link_design.md)
     # ------------------------------------------------------------------
 
-    @app.get("/constructs")
+    @app.get("/constructs", response_model=ConstructListResponse,
+             responses=_DATABASE_ERROR_RESPONSE)
     def list_constructs() -> Dict[str, Any]:
         """The construct catalog: readout, linkage, localization, references."""
         _require_db_path()
-        return {"items": data_manager.list_constructs()}
+        try:
+            return {"items": data_manager.list_constructs()}
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
 
-    @app.get("/constructs/{construct_key}")
+    @app.get("/constructs/{construct_key}", response_model=ConstructResponse,
+             responses=_LOOKUP_ERROR_RESPONSES)
     def get_construct(construct_key: str) -> Dict[str, Any]:
         """One catalog entry by key (e.g. ``bark``, ``jgcamp8p``)."""
         _require_db_path()
-        entry = data_manager.get_construct(construct_key)
+        try:
+            entry = data_manager.get_construct(construct_key)
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
         if entry is None:
             raise _not_found("construct", construct_key=construct_key)
         return entry
@@ -6361,12 +6457,16 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             _refresh_dish_counts(result["dish_id"])
         return data_manager.get_fish_subject(fish_id)
 
-    @app.get("/fish/{fish_id}/timeline")
+    @app.get("/fish/{fish_id}/timeline", response_model=FishTimelineResponse,
+             responses=_LOOKUP_ERROR_RESPONSES)
     def get_fish_timeline(fish_id: str) -> Dict[str, Any]:
         """One fish's timeline from MetaZebrobot's records (docs/fish_timeline_design.md)."""
         db_path = _require_db_path()
-        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
-            timeline = build_fish_timeline(conn, fish_id)
+        try:
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                timeline = build_fish_timeline(conn, fish_id)
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
         if timeline is None:
             raise _not_found("fish", fish_id=fish_id)
         return timeline
@@ -6381,28 +6481,35 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Fish not found")
         return templates.TemplateResponse(request, "fish/fish_timeline.html", {"t": timeline})
 
-    @app.get("/fish/{fish_id}/screening")
+    @app.get("/fish/{fish_id}/screening", response_model=FishScreeningResponse,
+             responses=_LOOKUP_ERROR_RESPONSES)
     def get_fish_screening(fish_id: str) -> Dict[str, Any]:
         """Per-construct screening calls a fish inherits from its origin dish.
 
         Each call: construct, result (positive | negative | pigmented),
         confidence, the dish and step that established it, and its basis.
-        See docs/construct_screening_link_design.md. Not in the pinned
-        consumer slice yet.
+        See docs/construct_screening_link_design.md.
         """
         db_path = _require_db_path()
-        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
-            result = fish_screening_calls(conn, fish_id)
+        try:
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                result = fish_screening_calls(conn, fish_id)
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
         if result is None:
             raise _not_found("fish", fish_id=fish_id)
         return result
 
-    @app.get("/dishes/{dish_id}/screening-calls")
+    @app.get("/dishes/{dish_id}/screening-calls", response_model=DishScreeningCallsResponse,
+             responses=_LOOKUP_ERROR_RESPONSES)
     def get_dish_screening_calls(dish_id: str) -> Dict[str, Any]:
         """Per-construct screening calls established for the fish in a dish."""
         db_path = _require_db_path()
-        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
-            result = dish_screening_calls(conn, dish_id)
+        try:
+            with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                result = dish_screening_calls(conn, dish_id)
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
         if result["status"] == "unknown_dish":
             raise _not_found("dish", dish_id=dish_id)
         return {"dish_id": dish_id, **result}
