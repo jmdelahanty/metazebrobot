@@ -27,7 +27,9 @@
 <form id="plate-add-form" hx-post="/dishes/{{ dish_id }}/plate/add-fish" hx-target="#plate-map" hx-swap="innerHTML">
     <div class="grid">
         <label>Fish comes from
-            <select name="source_dish_id">
+            <select name="source_dish_id"
+                    hx-get="/dishes/{{ dish_id }}/plate/steps" hx-trigger="change"
+                    hx-target="#plate-step" hx-swap="innerHTML" hx-include="this">
                 {% if own_group %}<option value="">{{ own_group }}</option>{% endif %}
                 {% for d in sources %}<option value="{{ d }}"{% if d == default_source %} selected{% endif %}>{{ d }}</option>{% endfor %}
             </select>
@@ -42,6 +44,13 @@
         <label>Label prefix
             <input type="text" name="label_prefix" value="Z">
         </label>
+    </div>
+    <div id="plate-step">
+        {% if own_group %}
+        <small>Fish from {{ own_group }} are booked into that screening step.</small>
+        {% else %}
+        {% with source_dish_id=default_source %}{% include "fish/_plate_step_picker.html" %}{% endwith %}
+        {% endif %}
     </div>
     <button type="submit">Add fish to next empty well (next: {{ next_label }})</button>
     <small>Or click an empty well to put the next fish there, with the choices above.</small>

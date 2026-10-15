@@ -276,6 +276,13 @@ the pinned consumer slice yet. As built:
   result, the fish is booked into the source's latest screening step (as an
   allocation to the plate) and the result is recorded on the fish. Without a
   result it moves by a one-fish transfer. Its origin is the source dish.
+- **Which screening step a placement books into** (2026-10-15): the plate page
+  shows the source's steps and books into **today's latest step** by default,
+  never silently an older one. Alternatives are "Start a new screening step
+  now" or an explicitly chosen earlier step. A step started from the plate
+  page takes its time from now, its dpf from the dish and its indicators from
+  the dish's constructs, and its screened count grows by one with each placed
+  fish. Other steps refuse placements beyond their screened count.
 - **Not built:** pigment results for fish that stayed after a pigment step.
 
 With step 2, a dish's screening history becomes a set of calls per construct:

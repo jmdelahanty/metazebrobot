@@ -476,6 +476,29 @@ def _short_construct(construct: Optional[str]) -> str:
     return match.group(1) if match else (construct or "?")
 
 
+def _source_steps(dish_id: str) -> List[Dict[str, Any]]:
+    """A dish's screening steps for the plate page's step picker, newest first."""
+    today = lab_today().strftime("%Y%m%d")
+    steps = []
+    for st in sorted(data_manager.get_screening_steps(dish_id),
+                     key=lambda x: x.get("screening_datetime") or "", reverse=True):
+        t = st.get("screening_datetime") or ""
+        allocated = sum(int(a.get("count") or 0) for a in st.get("allocations") or [])
+        indicators = st.get("indicators_screened") or []
+        if isinstance(indicators, str):
+            try:
+                indicators = json.loads(indicators)
+            except ValueError:
+                indicators = [indicators]
+        steps.append({
+            "value": t,
+            "today": t.startswith(today),
+            "label": (f"{t[4:6]}-{t[6:8]} {t[9:14]} · {', '.join(indicators) or 'no indicator'} · "
+                      f"{st.get('count_screened_this_step') or 0} screened, {allocated} allocated"),
+        })
+    return steps
+
+
 def _next_fish_label(dish_id: str, prefix: str) -> str:
     """Next '<prefix><n>' among this dish's fish (ended ones included)."""
     pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
@@ -5818,11 +5841,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                      "pigmented_screened": "pigmented"}.get(row["source_screening_bucket"], "group")
             own_group = (f"{row['parent_dish_id']} (screen {t[4:6]}-{t[6:8]} {t[9:14]}, {group})")
         default_source = None if own_group else (row["parent_dish_id"] if row else None)
+        if default_source and default_source not in sources:
+            default_source = sources[0] if sources else None
         return templates.TemplateResponse(request, "fish/_plate_map.html", {
             "dish_id": dish_id,
             "sources": sources,
             "own_group": own_group,
             "default_source": default_source,
+            "source_steps": _source_steps(default_source) if default_source else [],
             "units": units,
             "unassigned_fish": unassigned,
             "plate_formats": sorted(PLATE_FORMATS),
@@ -5831,6 +5857,56 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "flash_level": flash_level,
             "fish": fish if refresh_fish_table else None,
             "results": results,
+        })
+
+    def _step_for_placement(source: str, source_dish: Dict[str, Any], choice: str):
+        """(step datetime, problem) for booking a placed fish into ``source``'s screen.
+
+        ``new`` starts a step now (indicator from the dish's constructs, screened
+        count growing with each placement); a datetime picks that step; empty
+        means today's latest step, never silently an older one.
+        """
+        steps = _source_steps(source)
+        if choice == "new":
+            with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+                dish_row = conn.execute("SELECT dof FROM dishes WHERE dish_id = ?", (source,)).fetchone()
+                constructs = [r["construct"] for r in conn.execute(
+                    "SELECT construct FROM dish_transgenes WHERE dish_id = ?", (source,))]
+            if not constructs:
+                return None, f"{source} has no construct to screen for; add a step on its screening page."
+            now = lab_now()
+            dof = (dish_row["dof"] if dish_row else None) or ""
+            try:
+                dpf = (now.date() - datetime.strptime(dof, "%Y%m%d").date()).days
+            except ValueError:
+                dpf = 0
+            step_time = now.strftime("%Y%m%dT%H:%M:%S")
+            ok, message, _ = fish_dish_ctrl.add_screening_step(source, {
+                "screening_datetime": step_time,
+                "dpf_screened": max(dpf, 0),
+                "indicators_screened": [_short_construct(c) for c in constructs],
+                "pigment_screened": False,
+                "count_screened_this_step": 0,
+                "notes": fish_dish_ctrl.GROWING_STEP_NOTE,
+            })
+            return (step_time, None) if ok else (None, message)
+        if choice:
+            if not any(st["value"] == choice for st in steps):
+                return None, f"Screening step {choice} isn't on {source}."
+            return choice, None
+        todays = [st for st in steps if st["today"]]
+        if not todays:
+            return None, (f"{source} has no screening step today. Choose 'Start a new screening "
+                          "step now' (or an earlier step explicitly).")
+        return todays[0]["value"], None
+
+    @app.get("/dishes/{dish_id}/plate/steps", response_class=HTMLResponse)
+    def plate_step_picker(request: Request, dish_id: str,
+                          source_dish_id: Optional[str] = Query(default=None)):
+        """HTMX partial: which screening step a placement from this source books into."""
+        return templates.TemplateResponse(request, "fish/_plate_step_picker.html", {
+            "source_dish_id": source_dish_id or "",
+            "source_steps": _source_steps(source_dish_id) if source_dish_id else [],
         })
 
     @app.post("/dishes/{dish_id}/plate/new", response_class=HTMLResponse)
@@ -5875,6 +5951,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         subject_label: Optional[str] = Form(default=None),
         source_dish_id: Optional[str] = Form(default=None),
         result: Optional[str] = Form(default=None),
+        step: Optional[str] = Form(default=None),
     ):
         """Register one fish and place it in a well: the given one, or the next empty.
 
@@ -5921,14 +5998,25 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         else:
             origin_dish = _dish_context_for_fish_page(source)
             if result:
+                step_time, problem = _step_for_placement(source, origin_dish, (step or "").strip())
+                if problem:
+                    return plate_map(request, dish_id, problem, "error")
                 with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
-                    step_time = fish_observations.latest_step(conn, source)
-                    constructs = (fish_observations.step_constructs(conn, source, step_time)
-                                  if step_time else [])
-                if not step_time or not constructs:
-                    return plate_map(request, dish_id, f"{source} has no screening step with a "
-                                     "construct to record this result against. Add the step "
-                                     "first, or place the fish without a result.", "error")
+                    constructs = fish_observations.step_constructs(conn, source, step_time)
+                if not constructs:
+                    return plate_map(request, dish_id, f"{source}'s step {step_time} has no "
+                                     "construct indicator to record this result against.", "error")
+                source_dish_obj = fish_dish_ctrl.get_dish(source)
+                st = source_dish_obj.get_screening_step(step_time) if source_dish_obj else None
+                if st and st.total_allocated_count + 1 > st.count_screened_this_step:
+                    if fish_dish_ctrl.GROWING_STEP_NOTE not in (st.notes or ""):
+                        return plate_map(request, dish_id, f"{source}'s step {step_time} screened "
+                                         f"{st.count_screened_this_step} fish and all are allocated. "
+                                         "Start a new screening step, or raise its screened count.",
+                                         "error")
+                    grown, grow_msg = fish_dish_ctrl.grow_step_screened(source, step_time)
+                    if not grown:
+                        return plate_map(request, dish_id, grow_msg, "error")
                 ok, message, _ = fish_dish_ctrl.allocate_screening_step_to_existing_dish(
                     source, step_time, f"{result}_screened", 1, dish_id,
                     notes=f"{label} placed in {target['position_label']}")
@@ -5958,10 +6046,6 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                                  refresh_fish_table=True)
         if result:
             with data_manager.get_connection() as conn:
-                if not constructs:
-                    step_time = fish_observations.latest_step(conn, source) or step_time
-                    constructs = (fish_observations.step_constructs(conn, source, step_time)
-                                  if step_time else [])
                 if not constructs:  # a plate split from a step: use that step's constructs
                     plate_row = conn.execute(
                         "SELECT parent_dish_id, source_screening_datetime FROM dishes "

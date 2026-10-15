@@ -46,7 +46,8 @@ def test_mixed_plate_with_positives_negatives_and_unscreened(client):
 
     for result in ("positive", "positive", "negative"):
         page = client.post(f"/dishes/{plate}/plate/add-fish",
-                           data={"source_dish_id": screened, "result": result})
+                           data={"source_dish_id": screened, "result": result,
+                                 "step": "20261015T15:13:00"})
         assert f"from {screened}" in page.text
     client.post(f"/dishes/{plate}/plate/add-fish", data={"source_dish_id": other})
 
@@ -77,7 +78,7 @@ def test_result_needs_a_screening_step_on_the_source(client):
     client.post(f"/dishes/{source}/plate/new", data={"wells": 6})
     resp = client.post(f"/dishes/{source}_plate1/plate/add-fish",
                        data={"source_dish_id": source, "result": "positive"})
-    assert "no screening step" in resp.text
+    assert "no screening step today" in resp.text
     assert client.get(f"/dishes/{source}_plate1/fish").json()["items"] == []
 
 
@@ -136,3 +137,58 @@ def test_source_option_names_the_screening_group_and_mixed_plates_need_a_source(
     refused = client.post(f"/dishes/{mixed}/plate/add-fish", data={"source_dish_id": ""})
     assert "choose which dish the fish comes from" in refused.text
     assert client.get(f"/dishes/{mixed}/fish").json()["items"] == []
+
+
+def test_start_a_new_step_while_filling_the_plate(client):
+    cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+    source = _dish(cross, 1)  # no screening step yet
+    client.post(f"/dishes/{source}/plate/new", data={"wells": 12})
+    plate = f"{source}_plate1"
+
+    first = client.post(f"/dishes/{plate}/plate/add-fish",
+                        data={"source_dish_id": source, "result": "positive", "step": "new"})
+    assert "Placed Z1 (positive)" in first.text
+    second = client.post(f"/dishes/{plate}/plate/add-fish",
+                         data={"source_dish_id": source, "result": "negative"})  # today's step
+    assert "Placed Z2 (negative)" in second.text
+
+    steps = client.get(f"/dishes/{source}").json()["data"]["screening_results"]["screenings"]
+    assert len(steps) == 1
+    step = steps[0]
+    assert step["indicators_screened"] == ["PMCA2-mCherry-zf"]
+    assert step["count_screened_this_step"] == 2
+    assert sorted((a["bucket"], a["count"]) for a in step["allocations"]) == [
+        ("negative_screened", 1), ("positive_screened", 1)]
+    assert (_count(client, source), _count(client, plate)) == (8, 2)
+    fish = _by_label(client, plate)
+    assert _calls(client, fish["Z1"]["fish_id"]) == [(GENOTYPE, "positive", "observed")]
+
+
+def test_older_step_is_never_used_silently(client):
+    cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+    source = FishDish.create_new(
+        cross_id=cross, dish_number=1, genotype=GENOTYPE, responsible="t",
+        fish_count=10, dof="20260920", container_type="petri_dish",
+    ).model_dump(mode="json", exclude_none=True)
+    source["screening_results"] = {"screenings": [{
+        "screening_datetime": "20261001T10:00:00", "dpf_screened": 11,
+        "indicators_screened": ["mCherry"], "count_screened_this_step": 3, "allocations": []}]}
+    data_manager.save_fish_dish(source)
+    source = source["dish_id"]
+    client.post(f"/dishes/{source}/plate/new", data={"wells": 6})
+    plate = f"{source}_plate1"
+
+    refused = client.post(f"/dishes/{plate}/plate/add-fish",
+                          data={"source_dish_id": source, "result": "positive"})
+    assert "no screening step today" in refused.text
+
+    picker = client.get(f"/dishes/{plate}/plate/steps", params={"source_dish_id": source}).text
+    assert "Start a new screening step now" in picker and "Earlier: 10-01 10:00" in picker
+
+    for _ in range(3):  # explicit earlier step, within its 3 screened fish
+        client.post(f"/dishes/{plate}/plate/add-fish",
+                    data={"source_dish_id": source, "result": "positive", "step": "20261001T10:00:00"})
+    full = client.post(f"/dishes/{plate}/plate/add-fish",
+                       data={"source_dish_id": source, "result": "positive", "step": "20261001T10:00:00"})
+    assert "all are allocated" in full.text
+    assert len(client.get(f"/dishes/{plate}/fish").json()["items"]) == 3

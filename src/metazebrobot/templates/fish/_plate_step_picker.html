@@ -1,0 +1,16 @@
+{# Which screening step of the source dish a placement with a result books into. #}
+{% if source_dish_id %}
+{% set todays = source_steps | selectattr("today") | list %}
+<label>Screening step on {{ source_dish_id }}
+    <select name="step">
+        {% for st in todays %}
+        <option value="{{ st.value }}"{% if loop.first %} selected{% endif %}>Today {{ st.label }}</option>
+        {% endfor %}
+        <option value="new"{% if not todays %} selected{% endif %}>Start a new screening step now</option>
+        {% for st in source_steps if not st.today %}
+        <option value="{{ st.value }}">Earlier: {{ st.label }}</option>
+        {% endfor %}
+    </select>
+</label>
+<small>Used only when you choose a result. A new step's screened count grows by one with each fish you place.</small>
+{% endif %}

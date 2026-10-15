@@ -626,6 +626,22 @@ class FishDishController:
             )
             return False, f"An unexpected error occurred: {str(e)}", None
 
+    GROWING_STEP_NOTE = "Started while filling a well plate; screened count grows with each placed fish."
+
+    def grow_step_screened(self, dish_id: str, screening_datetime: str) -> Tuple[bool, str]:
+        """Raise a step's screened count by one (steps started while filling a plate)."""
+        dish = self.get_dish(dish_id)
+        step = dish.get_screening_step(screening_datetime) if dish else None
+        if step is None:
+            return False, f"Screening step {screening_datetime} not found on {dish_id}."
+        step.count_screened_this_step += 1
+        dish.refresh_screening_state()
+        payload = dish.model_dump(mode='json', exclude_none=True)
+        if not data_manager.save_fish_dish(payload):
+            return False, f"Failed to save {dish_id}."
+        data_manager.data_cache.setdefault('fish_dishes', {})[dish_id] = payload
+        return True, "screened count raised by one"
+
     def plate_growth_check(self, plate_dish_id: str, living_fish: int) -> Tuple[bool, str]:
         """Can one more fish be placed? Refuses when it would exceed the screen.
 
