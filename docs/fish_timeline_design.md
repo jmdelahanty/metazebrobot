@@ -222,5 +222,9 @@ if an end with different values is already recorded. `404 usage_link_not_found`.
   recorded yet", and `GET /usage-links?active_at=` includes it for every later
   instant. Read `ended_at: null` in that query as "end unknown", not "still
   running".
+- **`X-Delivered-By`** (Palette, 2026-10-15): an optional request header
+  (`palette` on Palette's intake replays; Citrus sends none). It's recorded on
+  first creation as `delivered_by` and never part of the idempotency
+  comparison, so a replay of the sealed request stays a 200.
 - **Stable request bytes:** Citrus seals the exact start POST (method, path,
   body) in snapshot v4.x, so the request carries no server-filled fields.

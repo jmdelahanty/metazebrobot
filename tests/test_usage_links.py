@@ -163,3 +163,13 @@ def test_link_for_fish_that_has_since_died_is_accepted(client, fish):
     assert client.post(f"/fish/{fish_id}/end", json={"reason": "found_dead"}).status_code == 200
     body = _link(dish_id, fish_id=fish_id, started_at="2026-10-09T20:00:18Z")
     assert client.post("/usage-links", json=body).status_code == 201
+
+
+def test_delivered_by_recorded_on_first_creation_and_not_compared(client, seed_dish):
+    body = _link(seed_dish)
+    first = client.post("/usage-links", json=body, headers={"X-Delivered-By": "palette"})
+    assert first.status_code == 201 and first.json()["delivered_by"] == "palette"
+    replay = client.post("/usage-links", json=body, headers={"X-Delivered-By": "citrus"})
+    assert replay.status_code == 200 and replay.json()["delivered_by"] == "palette"
+    no_header = _link(seed_dish)
+    assert client.post("/usage-links", json=no_header).json()["delivered_by"] is None

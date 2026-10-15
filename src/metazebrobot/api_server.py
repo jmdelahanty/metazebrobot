@@ -317,6 +317,7 @@ class UsageLinkResponse(BaseModel):
     end_status: Optional[Literal["completed", "aborted", "interrupted"]] = None
     received_at: str
     updated_at: str
+    delivered_by: Optional[str] = None
 
 
 class UsageLinkListResponse(BaseModel):
@@ -6150,14 +6151,19 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
               responses={200: {"model": UsageLinkResponse,
                                "description": "Identical replay; the current link"},
                          **_USAGE_LINK_ERRORS})
-    def create_usage_link(response: Response, body: Dict[str, Any] = {}) -> Dict[str, Any]:
+    def create_usage_link(request: Request, response: Response,
+                          body: Dict[str, Any] = {}) -> Dict[str, Any]:
         """Record that an arena recording used a dish (and fish), at Start.
 
         Idempotent on ``recording_ref``: an identical replay is 200, a
         different body 409. An existing ref is answered before any dish or
-        fish check. No server-filled fields in the request.
+        fish check. No server-filled fields in the request. An optional
+        ``X-Delivered-By`` header (e.g. ``citrus``, ``palette``) is recorded on
+        first creation as ``delivered_by`` and isn't compared on replays.
         """
-        status, link = _usage_call(usage_links.create_link, body)
+        status, link = _usage_call(
+            usage_links.create_link, body,
+            usage_links.delivered_by_from_header(request.headers.get("X-Delivered-By")))
         response.status_code = status
         return link
 

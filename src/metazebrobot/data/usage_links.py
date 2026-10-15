@@ -69,10 +69,22 @@ class UsageLinkError(Exception):
         self.detail = detail
 
 
+_DELIVERED_BY = re.compile(r"^[a-z0-9_-]{1,32}$")
+
+
 def ensure_schema(conn) -> None:
     conn.execute(SCHEMA)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(usage_links)")}
+    if "delivered_by" not in cols:
+        conn.execute("ALTER TABLE usage_links ADD COLUMN delivered_by TEXT")
     for statement in INDEXES:
         conn.execute(statement)
+
+
+def delivered_by_from_header(value: Optional[str]) -> Optional[str]:
+    """``X-Delivered-By`` (e.g. citrus, palette); unusable values are ignored."""
+    value = (value or "").strip().lower()
+    return value if _DELIVERED_BY.match(value) else None
 
 
 def now_utc() -> str:
@@ -151,8 +163,14 @@ def get_link(conn, recording_ref: str) -> Optional[Dict[str, Any]]:
     return _row(row) if row else None
 
 
-def create_link(conn, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
-    """(201 | 200, link) or UsageLinkError. An existing ref is answered first."""
+def create_link(conn, body: Dict[str, Any],
+                delivered_by: Optional[str] = None) -> Tuple[int, Dict[str, Any]]:
+    """(201 | 200, link) or UsageLinkError. An existing ref is answered first.
+
+    ``delivered_by`` (from the ``X-Delivered-By`` header) is recorded on first
+    creation only and isn't part of the idempotency comparison, so a backup
+    delivery by Palette of Citrus's sealed request is still a 200 replay.
+    """
     values = validate_create(body)
     existing = conn.execute(
         "SELECT creation_body FROM usage_links WHERE recording_ref = ?", (values["recording_ref"],)
@@ -170,11 +188,11 @@ def create_link(conn, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
     stamp = now_utc()
     conn.execute(
         f"""INSERT INTO usage_links ({', '.join(CREATE_FIELDS)}, started_norm,
-                                      received_at, updated_at, creation_body)
-            VALUES ({', '.join('?' for _ in CREATE_FIELDS)}, ?, ?, ?, ?)""",
+                                      received_at, updated_at, creation_body, delivered_by)
+            VALUES ({', '.join('?' for _ in CREATE_FIELDS)}, ?, ?, ?, ?, ?)""",
         [values[k] for k in CREATE_FIELDS]
         + [normalize_time(values["started_at"]), stamp, stamp,
-           json.dumps(values, sort_keys=True)],
+           json.dumps(values, sort_keys=True), delivered_by],
     )
     return 201, get_link(conn, values["recording_ref"])
 
