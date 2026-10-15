@@ -71,7 +71,7 @@ One row per arena per recording. Field choices follow Citrus's review
 | `fish_id` | The fish, or null for `dish_group` arenas and v3-era runs |
 | `fish_revision` | The revision the snapshot sealed |
 | `unit_id` | The well the fish was picked from (Citrus's sealed `mzb_fish_unit_id`) |
-| `rig_id`, `arena_id` | Where (`rig_id` source to be decided) |
+| `rig_id`, `arena_id` | Where: Citrus's configured rig id (the arena's `rig_name`, e.g. `omnifin0`), as written to the H5 root and used in the Orange binding |
 | `started_at`, `ended_at` | RFC 3339 UTC on the wire (`Z`); MZB displays lab time |
 | `end_status` | `completed` \| `aborted` \| `interrupted`, so an aborted run isn't read as a normal absence |
 
@@ -125,5 +125,3 @@ Citrus".
 
 ## Open questions (Jeremy)
 
-- **`rig_id`:** Orange's rig id, the hostname, or a configured rig name? Citrus
-  seals no rig id today.
