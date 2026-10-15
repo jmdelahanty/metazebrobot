@@ -147,6 +147,19 @@ Returns the fish object (same shape as the list items above). Errors use the
 structured shape: `404` `fish_not_found`, `503` `database_error` (see
 [API errors](zebrobot_snapshot.md#api-errors)).
 
+#### Screening calls a fish inherits
+
+```
+GET /fish/{fish_id}/screening
+GET /dishes/{dish_id}/screening-calls
+```
+
+Per-construct calls (`result`: `positive` | `negative` | `pigmented`) with
+`confidence`, the dish and step that established them, and the `basis`. A
+fish inherits from its origin dish up to when it left it. Rules:
+[linking screening indicators to constructs](construct_screening_link_design.md#3-results-per-construct-inherited-by-fish).
+Not in the pinned consumer slice yet.
+
 #### Fish revision history
 
 ```

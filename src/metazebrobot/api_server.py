@@ -24,6 +24,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
+from .data.screening_calls import dish_calls as dish_screening_calls
+from .data.screening_calls import fish_calls as fish_screening_calls
 from .consumer_contract import consumer_openapi, digest, render
 from .controllers.fish_dish_controller import FishDishController
 from .data.data_manager import data_manager
@@ -6038,6 +6040,32 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if not data_manager.relocate_fish(fish_id, new_unit_id, reason):
             raise HTTPException(status_code=500, detail="Failed to move fish")
         return data_manager.get_fish_subject(fish_id)
+
+    @app.get("/fish/{fish_id}/screening")
+    def get_fish_screening(fish_id: str) -> Dict[str, Any]:
+        """Per-construct screening calls a fish inherits from its origin dish.
+
+        Each call: construct, result (positive | negative | pigmented),
+        confidence, the dish and step that established it, and its basis.
+        See docs/construct_screening_link_design.md. Not in the pinned
+        consumer slice yet.
+        """
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            result = fish_screening_calls(conn, fish_id)
+        if result is None:
+            raise _not_found("fish", fish_id=fish_id)
+        return result
+
+    @app.get("/dishes/{dish_id}/screening-calls")
+    def get_dish_screening_calls(dish_id: str) -> Dict[str, Any]:
+        """Per-construct screening calls established for the fish in a dish."""
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            result = dish_screening_calls(conn, dish_id)
+        if result["status"] == "unknown_dish":
+            raise _not_found("dish", dish_id=dish_id)
+        return {"dish_id": dish_id, **result}
 
     @app.get(
         "/fish/{fish_id}/revisions",

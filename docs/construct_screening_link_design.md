@@ -241,6 +241,32 @@ and is flagged. It doesn't guess.
 
 ### 3. Results per construct, inherited by fish
 
+Status: built (2026-10-15, `data/screening_calls.py`). `GET /fish/{fish_id}/screening`
+and `GET /dishes/{dish_id}/screening-calls` serve the calls; they're not in
+the pinned consumer slice yet. As built:
+
+- **What establishes a call:**
+  - a step's construct indicators, with the remainder all in one classified
+    bucket (`remained_in_dish_as_…`);
+  - a dish split from its parent's step (`moved_out_of_parent_as_…`),
+    including `pigmented` for `_pig` dishes;
+  - legacy steps with no allocations but a `number_kept` > 0
+    (`legacy_number_kept`, capped at medium).
+- **Unknown, never guessed:** an unclassified remainder (`remaining_in_parent`)
+  and steps with neither allocations nor a kept count.
+- **Confidence:** a call's confidence is its indicator match confidence, so
+  "mCherry" matched by readout colour is medium. A later step confirming the
+  same result keeps the stronger confidence; a different result replaces it.
+- **Transfers in:** a dish that received fish from other dishes keeps only
+  the calls every contributor agrees on (status `partial_mixed_sources` if any
+  were dropped). The 19234_3 plate therefore has no dish-level call.
+- **Fish:** a fish inherits its origin dish's calls from steps before it left
+  that dish (its first unit outside the origin; occupancy UTC times are
+  converted to lab time). Example: Z1 is `Tg(gfap:PMCA2-mCherry-zf)` positive
+  (medium, 2026-10-05, 19234_1); Z10 is negative.
+- **Not built:** fish-level observations that override inherited calls, and
+  pigment results for fish that stayed after a pigment step.
+
 With step 2, a dish's screening history becomes a set of calls per construct:
 "carries Tg(her4.1:PMCA2-mCherry): positive, 4 dpf, 2026-05-26 (dish
 18300_2), via fusion
