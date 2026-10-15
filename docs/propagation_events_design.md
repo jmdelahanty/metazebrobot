@@ -9,9 +9,9 @@ verified_against: 6577bdb
 
 # Propagation Events and Reference Galleries
 
-Status (2026-10-15): events, the Propagation page and line history are
-built (see "Built"). Reference flags on linked images and the extended
-References gallery come next.
+Status (2026-10-15): built (see "Built"): events, the Propagation page, line
+history, reference flags on linked images and the extended References
+gallery.
 
 ## Problem
 
@@ -104,4 +104,11 @@ hand, separate from the linked originals.
   line is promoter + construct key** (`gfap-grabatp10`), not the construct
   key alone, which names the reporter and would merge e.g.
   `Tg(elavl3:GRABATP1.0)` with `Tg(gfap:GRABATP1.0)`.
+- **Reference images:** every dish/fish/event gallery image has "☆
+  reference" with an optional caption (`image_links.is_reference`,
+  `reference_caption`, `reference_by`, `reference_at`); unmarking clears
+  them. A reference's lines are its dish's lines. `/references/` lists
+  linked references first, filterable by line (`?line=gfap-pmca2mcherryzf`),
+  above the curated genotype PNGs, which are unchanged. The screening page's
+  reference strip adds linked references sharing a line with the dish.
 - HTML only for now; nothing is in the pinned consumer slice.

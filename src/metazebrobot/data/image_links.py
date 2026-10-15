@@ -40,8 +40,22 @@ CREATE TABLE IF NOT EXISTS image_links (
 """
 
 
+REFERENCE_COLUMNS = (
+    ("is_reference", "INTEGER NOT NULL DEFAULT 0"),
+    ("reference_caption", "TEXT"),
+    ("reference_by", "TEXT"),
+    ("reference_at", "TEXT"),
+)
+
+
 def ensure_schema(conn) -> None:
     conn.execute(SCHEMA)
+    # Any linked image can be marked as a reference for its dish's lines
+    # (docs/propagation_events_design.md, "Reference images").
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(image_links)")}
+    for name, sql in REFERENCE_COLUMNS:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE image_links ADD COLUMN {name} {sql}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_image_links_dish ON image_links(dish_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_image_links_fish ON image_links(fish_id)")
 
@@ -190,3 +204,40 @@ def preview_path(root: Path, cache_dir: Path, link: Dict[str, Any], render) -> P
         if produced != target:
             produced.rename(target)
     return target
+
+
+def set_reference(conn, link_id: int, is_reference: bool, caption: Optional[str] = None,
+                  marked_by: Optional[str] = None) -> bool:
+    """Mark (with an optional caption) or unmark a linked image as a reference."""
+    if is_reference:
+        cursor = conn.execute(
+            """UPDATE image_links SET is_reference = 1, reference_caption = ?, reference_by = ?,
+                   reference_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            ((caption or "").strip() or None, marked_by, link_id))
+    else:
+        cursor = conn.execute(
+            """UPDATE image_links SET is_reference = 0, reference_caption = NULL,
+                   reference_by = NULL, reference_at = NULL WHERE id = ?""", (link_id,))
+    return cursor.rowcount > 0
+
+
+def references(conn, line: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Linked images marked as references, each with its dish's lines; optionally one line."""
+    from .propagation import constructs_for
+
+    items = []
+    for row in conn.execute(
+            "SELECT * FROM image_links WHERE is_reference = 1 ORDER BY file_mtime DESC, id"):
+        item = _row(row)
+        item["lines"] = constructs_for(conn, [item["dish_id"]])
+        if line is None or any(c["line_key"] == line for c in item["lines"]):
+            items.append(item)
+    return items
+
+
+def references_for_dish(conn, dish_id: str) -> List[Dict[str, Any]]:
+    """References sharing a line with this dish (what a positive of its lines looks like)."""
+    from .propagation import constructs_for
+
+    keys = {c["line_key"] for c in constructs_for(conn, [dish_id])}
+    return [r for r in references(conn) if keys & {c["line_key"] for c in r["lines"]}]

@@ -15,6 +15,21 @@
             <br><a href="/viewer/?image_url={{ request.base_url }}image-links/{{ img.id }}/image.ome.tiff"
                    target="_blank">open in viewer</a> · <a href="/image-links/{{ img.id }}/file">download</a>
         </small></figcaption>
+        <form method="post" action="/image-links/{{ img.id }}/reference" style="margin:0.25rem 0 0">
+            <input type="hidden" name="return_to" value="{{ return_to or request.url.path }}">
+            {% if img.is_reference %}
+            <small>★ <strong>reference</strong>{% if img.reference_caption %}: {{ img.reference_caption }}{% endif %}</small>
+            <button type="submit" name="action" value="unmark" class="outline secondary"
+                    style="padding:0.1rem 0.4rem; font-size:0.75rem">unmark</button>
+            {% else %}
+            <fieldset role="group" style="margin:0">
+                <input type="text" name="caption" placeholder="caption (optional)" aria-label="Reference caption"
+                       style="font-size:0.75rem; padding:0.2rem 0.4rem; height:auto">
+                <button type="submit" name="action" value="mark" class="outline"
+                        style="padding:0.1rem 0.4rem; font-size:0.75rem">☆ reference</button>
+            </fieldset>
+            {% endif %}
+        </form>
     </figure>
 {% endfor %}
 </div>

@@ -1,0 +1,21 @@
+{# Linked images marked as references (docs/propagation_events_design.md). #}
+<div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));">
+{% for img in linked_references %}
+    <figure style="margin:0">
+        <a href="/image-links/{{ img.id }}/preview.png" target="_blank">
+            <img src="/image-links/{{ img.id }}/preview.png" alt="{{ img.reference_caption or img.name }}" loading="lazy"
+                 style="width:100%; border-radius:4px">
+        </a>
+        <figcaption><small>
+            {% if img.reference_caption %}<strong>{{ img.reference_caption }}</strong><br>{% endif %}
+            {% for c in img.lines %}<a href="/references/?line={{ c.line_key }}">{{ c.construct }}</a><br>{% endfor %}
+            <a href="/dishes/{{ img.dish_id }}/fish/">{{ img.dish_id }}</a>{% if img.well_label %} {{ img.well_label }}{% endif %}
+            {% if img.fish_id %} · <a href="/fish/{{ img.fish_id }}/view">fish</a>{% endif %}
+            · {{ img.kind }} · {{ img.taken_at_lab }}
+            {% for c in img.channels %}<br>{{ c.fluor or c.name }}{% endfor %}
+            <br><a href="/viewer/?image_url={{ request.base_url }}image-links/{{ img.id }}/image.ome.tiff"
+                   target="_blank">open in viewer</a>
+        </small></figcaption>
+    </figure>
+{% endfor %}
+</div>

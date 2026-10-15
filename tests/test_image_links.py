@@ -7,6 +7,7 @@ import pytest
 from PIL import Image, TiffImagePlugin
 
 from metazebrobot.data.image_links import well_from_filename
+from metazebrobot.data.propagation import constructs_for
 from metazebrobot.data.data_manager import data_manager
 from metazebrobot.models.fish_dish import FishDish
 
@@ -122,3 +123,30 @@ def test_viewer_is_served_and_gallery_links_to_it(client, plate_with_images):
     assert f"/viewer/?image_url=http://testserver/image-links/{link_id}/image.ome.tiff" in gallery
     tiff = client.get(f"/image-links/{link_id}/image.ome.tiff", headers={"Range": "bytes=0-3"})
     assert tiff.status_code == 206 and tiff.headers["content-type"] == "image/tiff"
+
+
+def test_mark_reference_shows_by_line_on_references_and_screening(client, plate_with_images):
+    plate, fish = plate_with_images
+    with data_manager.get_connection() as conn:  # the genotype's construct, parsed on save
+        assert [c["line_key"] for c in constructs_for(conn, [plate])] == ["gfap-pmca2mcherryzf"]
+    client.post("/image-links/import", data={
+        "dish_id": plate, "kind": "plate", "include_1": "on",
+        "rel_1": f"{plate}/{plate}_A1-OME TIFF-Export-01.ome.tiff", "fish_1": fish["Z1"]})
+    link_id = client.get(f"/dishes/{plate}/image-links").json()["items"][0]["id"]
+
+    resp = client.post(f"/image-links/{link_id}/reference",
+                       data={"caption": "bright gfap+ positive", "return_to": f"/dishes/{plate}/fish/"},
+                       follow_redirects=False)
+    assert resp.status_code == 303 and resp.headers["location"] == f"/dishes/{plate}/fish/"
+    item = next(i for i in client.get(f"/dishes/{plate}/image-links").json()["items"] if i["id"] == link_id)
+    assert item["is_reference"] == 1 and item["reference_caption"] == "bright gfap+ positive"
+
+    refs = client.get("/references/?line=gfap-pmca2mcherryzf").text
+    assert "bright gfap+ positive" in refs
+    assert "bright gfap+ positive" not in client.get("/references/?line=elavl3-grabatp10").text
+    assert "bright gfap+ positive" in client.get(f"/screening/{plate}/genotype-reference").text
+    assert "★" in client.get(f"/dishes/{plate}/image-links/gallery").text
+
+    client.post(f"/image-links/{link_id}/reference", data={"action": "unmark", "return_to": "//evil"})
+    assert "bright gfap+ positive" not in client.get("/references/").text
+    assert client.post("/image-links/999999/reference", data={}).status_code == 404

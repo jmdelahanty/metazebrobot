@@ -3269,15 +3269,24 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         uploaded: Optional[str] = Query(default=None),
         deactivated: Optional[str] = Query(default=None),
         deactivated_set: Optional[str] = Query(default=None),
+        line: Optional[str] = Query(default=None),
     ):
-        """Read-only reference library page."""
+        """Reference library: linked reference images by line, and curated genotype PNGs."""
         include_inactive = status == "all"
         references = data_manager.list_genotype_reference_images(
             active_only=not include_inactive,
         )
         reference_groups = _prepare_genotype_reference_groups(references)
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            all_linked = image_links.references(conn)
+        lines = {c["line_key"]: c["construct"] for r in all_linked for c in r["lines"]}
+        linked = [r for r in all_linked
+                  if not line or any(c["line_key"] == line for c in r["lines"])]
 
         return templates.TemplateResponse(request, "references/index.html", {
+            "linked_references": linked,
+            "linked_lines": sorted(lines.items(), key=lambda kv: kv[1].lower()),
+            "line_filter": line or "",
             "references": references,
             "reference_groups": reference_groups,
             "status_filter": status,
@@ -4994,8 +5003,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
         references = data_manager.get_genotype_reference_images(dish.genotype)
         reference_groups = _prepare_genotype_reference_groups(references)
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            linked = image_links.references_for_dish(conn, dish_id)
 
         return templates.TemplateResponse(request, "screening/_genotype_reference.html", {
+            "linked_references": linked,
             "display_genotype": dish.genotype,
             "references": references,
             "reference_groups": reference_groups,
@@ -6724,7 +6736,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
             items = image_links.for_fish(conn, fish_id)
         return templates.TemplateResponse(request, "images/_gallery.html", {
-            "items": items, "labels": {}, "dish_id": None})
+            "items": items, "labels": {}, "dish_id": None, "return_to": f"/fish/{fish_id}/view"})
 
     @app.get("/dishes/{dish_id}/image-links/gallery", response_class=HTMLResponse)
     def dish_image_gallery(request: Request, dish_id: str):
@@ -6734,7 +6746,22 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "SELECT fish_id, subject_label FROM fish_subjects WHERE fish_id IN "
                 f"({','.join('?' for _ in items) or 'NULL'})", [i["fish_id"] for i in items])}
         return templates.TemplateResponse(request, "images/_gallery.html", {
-            "items": items, "labels": labels, "dish_id": dish_id})
+            "items": items, "labels": labels, "dish_id": dish_id,
+            "return_to": f"/dishes/{dish_id}/fish/"})
+
+    @app.post("/image-links/{link_id}/reference")
+    async def image_link_reference(request: Request, link_id: int):
+        """Mark a linked image as a reference (optional caption), or unmark it."""
+        _image_link_or_404(link_id)
+        form = await request.form()
+        with data_manager.get_connection() as conn:
+            image_links.set_reference(conn, link_id, form.get("action") != "unmark",
+                                      form.get("caption"), _selected_user(request))
+            conn.commit()
+        return_to = form.get("return_to") or ""
+        if not return_to.startswith("/") or return_to.startswith("//"):
+            return_to = "/references/"
+        return RedirectResponse(url=return_to, status_code=303)
 
     # ------------------------------------------------------------------
     # Propagation events (docs/propagation_events_design.md)

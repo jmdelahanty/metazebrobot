@@ -17,6 +17,29 @@
 <div class="flash flash-success">Deactivated {{ deactivated_set }} genotype reference image(s).</div>
 {% endif %}
 
+<section id="linked-references">
+    <h3>Linked reference images</h3>
+    <p><small>Screening and propagation OME-TIFFs marked "☆ reference" in any dish or fish gallery. They stay
+    links to the originals on lab storage, grouped by line (promoter + construct).</small></p>
+    {% if linked_lines %}
+    <form method="get" action="/references/">
+        <fieldset role="group">
+            <select name="line" aria-label="Line">
+                <option value="">All lines</option>
+                {% for key, name in linked_lines %}<option value="{{ key }}"{% if key == line_filter %} selected{% endif %}>{{ name }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="outline">Filter</button>
+        </fieldset>
+    </form>
+    {% endif %}
+    {% if linked_references %}
+    {% include "images/_reference_cards.html" %}
+    {% else %}
+    <p><em>No linked images marked as references{% if line_filter %} for this line{% endif %} yet.</em></p>
+    {% endif %}
+</section>
+
+<h3>Curated genotype references</h3>
 <details class="protocol-box">
     <summary><strong>Upload Genotype Reference</strong></summary>
     <form method="post" action="/references/genotype" enctype="multipart/form-data">
