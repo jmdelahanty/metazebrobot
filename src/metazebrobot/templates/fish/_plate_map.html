@@ -24,12 +24,27 @@
     </fieldset>
 </form>
 {% else %}
-<form hx-post="/dishes/{{ dish_id }}/plate/add-fish" hx-target="#plate-map" hx-swap="innerHTML">
-    <fieldset role="group">
-        <input type="text" name="label_prefix" value="Z" aria-label="Label prefix" style="max-width:6rem">
-        <button type="submit">Add fish to next empty well (next: {{ next_label }})</button>
-    </fieldset>
-    <small>Or click an empty well to put the next fish there.</small>
+<form id="plate-add-form" hx-post="/dishes/{{ dish_id }}/plate/add-fish" hx-target="#plate-map" hx-swap="innerHTML">
+    <div class="grid">
+        <label>Fish comes from
+            <select name="source_dish_id">
+                <option value="">this plate ({{ dish_id }})</option>
+                {% for d in sources %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>This fish's result
+            <select name="result">
+                <option value="">from its dish / not screened</option>
+                <option value="positive">positive</option>
+                <option value="negative">negative</option>
+            </select>
+        </label>
+        <label>Label prefix
+            <input type="text" name="label_prefix" value="Z">
+        </label>
+    </div>
+    <button type="submit">Add fish to next empty well (next: {{ next_label }})</button>
+    <small>Or click an empty well to put the next fish there, with the choices above.</small>
 </form>
 {% endif %}
 
@@ -85,6 +100,7 @@
                         title="Put the next fish ({{ next_label }}) in {{ label }}"
                         hx-post="/dishes/{{ dish_id }}/plate/add-fish"
                         hx-vals='{"unit_id": "{{ unit.unit_id }}"}'
+                        hx-include="#plate-add-form"
                         hx-target="#plate-map" hx-swap="innerHTML">
                     <div class="plate-well__label">{{ label }}</div>
                     <small>+ {{ next_label }}</small>

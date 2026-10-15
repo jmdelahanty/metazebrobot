@@ -78,8 +78,9 @@ the DB host.
 - A fish's content at each revision:
   - `GET /fish/{fish_id}/revisions`
 - A fish's structured record by id, for any workload:
-  - `GET /fish/{fish_id}/screening`: per-construct calls inherited from its
-    origin dish (result, confidence, step, basis);
+  - `GET /fish/{fish_id}/screening`: per-construct calls, inherited from its
+    origin dish (`source: inherited`) or recorded on the fish itself
+    (`source: observed`, which wins for that construct);
     [rules](construct_screening_link_design.md#3-results-per-construct-inherited-by-fish)
   - `GET /fish/{fish_id}/timeline`: its history, each entry naming its source
   - `GET /dishes/{dish_id}/screening-calls`: the same calls at dish level

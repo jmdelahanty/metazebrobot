@@ -77,6 +77,28 @@
     {% include "screening/_steps_table.html" %}
 </div>
 
+{% if dish and dish.status == "active" %}
+<details>
+    <summary><strong>New well plate from this dish</strong></summary>
+    <p><small>An empty plate you fill one fish at a time, choosing each fish's source dish
+    and result (positive, negative or not screened). Use this when a plate mixes results;
+    to put only one step's positives (or negatives) in a plate, use the step's
+    "Create Derived Dish" instead.</small></p>
+    <form method="post" action="/dishes/{{ dish_id }}/plate/new">
+        <fieldset role="group">
+            <select name="wells" aria-label="Plate size">
+                <option value="6">6 (A1–B3)</option>
+                <option value="12" selected>12 (A1–C4)</option>
+                <option value="24">24 (A1–D6)</option>
+                <option value="48">48 (A1–F8)</option>
+                <option value="96">96 (A1–H12)</option>
+            </select>
+            <button type="submit">Create plate</button>
+        </fieldset>
+    </form>
+</details>
+{% endif %}
+
 {# Image galleries per step #}
 {% if steps %}
 <h3>Step Images</h3>

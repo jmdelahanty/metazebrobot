@@ -103,6 +103,8 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
 
     calls = fish_calls(conn, fish_id)
     for call in calls["calls"]:
+        if call.get("source") == "observed":
+            continue  # shown below as the observation itself
         what = call["dish_construct"] if call["kind"] == "construct" else "pigment"
         entries.append(_entry(
             _iso(call["screening_datetime"]), "screening",
@@ -111,6 +113,19 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
             "screening_steps, screening_step_allocations, screening_step_indicators",
             construct_key=call.get("construct_key"), result=call["result"],
             confidence=call["confidence"], dish_id=call["established_in_dish"], basis=call["basis"],
+        ))
+
+    from .fish_observations import all_for as all_observations
+    for obs in all_observations(conn, fish_id):
+        entries.append(_entry(
+            _utc_iso(obs["observed_at"]), "observed",
+            f"Observed {obs['dish_construct']}: {obs['result']}"
+            + (f" (screening {obs['source_dish_id']})" if obs["source_dish_id"] else "")
+            + (f" by {obs['observed_by']}" if obs["observed_by"] else "")
+            + (f"; {obs['notes']}" if obs["notes"] else ""),
+            "fish_screening_observations",
+            dish_construct=obs["dish_construct"], construct_key=obs["construct_key"],
+            result=obs["result"], source_dish_id=obs["source_dish_id"],
         ))
 
     revisions = [dict(r) for r in conn.execute(

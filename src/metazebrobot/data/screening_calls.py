@@ -228,6 +228,28 @@ def fish_calls(conn, fish_id: str) -> Optional[Dict[str, Any]]:
     result = dish_calls(conn, origin, before=left_origin)
     for call in result["calls"]:
         call["source"] = "inherited"
+    # A result recorded on the fish replaces the inherited one for that construct.
+    from .fish_observations import current as current_observations
+    calls = result["calls"]
+    for obs in current_observations(conn, fish_id):
+        observed = {
+            "kind": "construct",
+            "construct_key": obs["construct_key"],
+            "dish_construct": obs["dish_construct"],
+            "result": obs["result"],
+            "confidence": "high",
+            "established_in_dish": obs["source_dish_id"] or origin,
+            "screening_datetime": obs["screening_datetime"] or utc_to_lab_compact(obs["observed_at"]),
+            "dpf": (_step_dpf(conn, obs["source_dish_id"], obs["screening_datetime"])
+                    if obs["source_dish_id"] and obs["screening_datetime"] else None),
+            "basis": "observed_on_fish",
+            "note": obs["notes"],
+            "source": "observed",
+        }
+        calls = [c for c in calls
+                 if not (c["kind"] == "construct" and c.get("dish_construct") == obs["dish_construct"])]
+        calls.append(observed)
+    result["calls"] = calls
     return {
         "fish_id": fish_id,
         "origin_dish_id": origin,

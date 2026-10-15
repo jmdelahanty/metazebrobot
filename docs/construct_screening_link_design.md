@@ -264,8 +264,19 @@ the pinned consumer slice yet. As built:
   that dish (its first unit outside the origin; occupancy UTC times are
   converted to lab time). Example: Z1 is `Tg(gfap:PMCA2-mCherry-zf)` positive
   (medium, 2026-10-05, 19234_1); Z10 is negative.
-- **Not built:** fish-level observations that override inherited calls, and
-  pigment results for fish that stayed after a pigment step.
+- **Fish-level observations** (built 2026-10-15, `data/fish_observations.py`):
+  a result recorded on one fish (`POST /fish/{fish_id}/observations`, or by
+  choosing a result when placing a fish in a plate) replaces the inherited
+  call for that construct. These calls have `source: observed`, confidence
+  high and basis `observed_on_fish`. The latest observation per construct
+  wins, and all of them appear on the timeline.
+- **Mixed plates:** "New well plate from this dish" on the screening page
+  creates an empty plate (`<dish>_plate<n>`, population `manual_transfer`).
+  Each placed fish names its source dish and an optional result. With a
+  result, the fish is booked into the source's latest screening step (as an
+  allocation to the plate) and the result is recorded on the fish. Without a
+  result it moves by a one-fish transfer. Its origin is the source dish.
+- **Not built:** pigment results for fish that stayed after a pigment step.
 
 With step 2, a dish's screening history becomes a set of calls per construct:
 "carries Tg(her4.1:PMCA2-mCherry): positive, 4 dpf, 2026-05-26 (dish

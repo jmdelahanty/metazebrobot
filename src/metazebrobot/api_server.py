@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
-from .data import fish_endings, usage_links
+from .data import fish_endings, fish_observations, usage_links
 from .data.fish_timeline import fish_timeline as build_fish_timeline
 from .data.screening_calls import dish_calls as dish_screening_calls
 from .data.screening_calls import fish_calls as fish_screening_calls
@@ -312,7 +312,7 @@ class ScreeningCallResponse(BaseModel):
     dpf: Optional[int] = None
     basis: str
     note: Optional[str] = None
-    source: Optional[Literal["inherited"]] = None
+    source: Optional[Literal["inherited", "observed"]] = None
 
 
 class FishScreeningResponse(BaseModel):
@@ -5803,8 +5803,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     ("pig" if c["kind"] == "pigment" else _short_construct(c["dish_construct"]))
                     + {"positive": "+", "negative": "−", "pigmented": ""}.get(c["result"], "?")
                     for c in calls)
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            row = conn.execute("SELECT cross_id FROM dishes WHERE dish_id = ?", (dish_id,)).fetchone()
+            sources = [r["dish_id"] for r in conn.execute(
+                "SELECT dish_id FROM dishes WHERE cross_id = ? AND status = 'active' AND dish_id <> ? "
+                "ORDER BY dish_id", (row["cross_id"] if row else None, dish_id))]
         return templates.TemplateResponse(request, "fish/_plate_map.html", {
             "dish_id": dish_id,
+            "sources": sources,
             "units": units,
             "unassigned_fish": unassigned,
             "plate_formats": sorted(PLATE_FORMATS),
@@ -5814,6 +5820,25 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "fish": fish if refresh_fish_table else None,
             "results": results,
         })
+
+    @app.post("/dishes/{dish_id}/plate/new", response_class=HTMLResponse)
+    def new_plate_from_dish(request: Request, dish_id: str, wells: int = Form(12)):
+        """An empty well plate fed from this dish (any result), with its wells."""
+        if wells not in PLATE_FORMATS:
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": f"Unsupported plate size {wells}.", "level": "error"})
+        ok, message, plate = fish_dish_ctrl.create_derived_dish(
+            parent_dish_id=dish_id, population_type="manual_transfer", fish_count=0,
+            container_type="well_plate", allow_empty=True,
+            notes=f"Well plate filled from {dish_id} and other dishes of its cross",
+        )
+        if not ok or plate is None:
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": message, "level": "error"})
+        for label in _plate_labels(wells):
+            data_manager.create_housing_unit(
+                dish_id=plate.dish_id, unit_kind="well", position_label=label, capacity=1)
+        return RedirectResponse(url=f"/dishes/{plate.dish_id}/fish/", status_code=303)
 
     @app.post("/dishes/{dish_id}/plate/setup", response_class=HTMLResponse)
     def plate_setup(request: Request, dish_id: str, wells: int = Form(...)):
@@ -5836,8 +5861,21 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         unit_id: Optional[str] = Form(default=None),
         label_prefix: str = Form(default="Z"),
         subject_label: Optional[str] = Form(default=None),
+        source_dish_id: Optional[str] = Form(default=None),
+        result: Optional[str] = Form(default=None),
     ):
-        """Register one fish and place it in a well: the given one, or the next empty."""
+        """Register one fish and place it in a well: the given one, or the next empty.
+
+        ``source_dish_id`` (default: this plate) is where the fish comes from; it
+        becomes the fish's origin. ``result`` (positive / negative) records this
+        fish's screening result on the fish; from another dish it also books the
+        fish into that dish's latest screening step. Without a result the fish
+        moves by a plain one-fish transfer.
+        """
+        source = (source_dish_id or "").strip() or dish_id
+        result = (result or "").strip() or None
+        if result not in (None, "positive", "negative"):
+            return plate_map(request, dish_id, f"Unknown result {result!r}.", "error")
         dish = _dish_context_for_fish_page(dish_id)
         wells = [u for u in data_manager.get_housing_units_with_fish(dish_id)
                  if u["unit_kind"] == "well"]
@@ -5852,31 +5890,123 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             target = empty[0]
         else:
             return plate_map(request, dish_id, "No empty wells left on this plate.", "error")
-        living = len(data_manager.get_fish_subjects(dish_id))
-        room_ok, room_message = fish_dish_ctrl.plate_growth_check(dish_id, living)
-        if not room_ok:
-            return plate_map(request, dish_id, room_message, "error")
         label = (subject_label or "").strip() or _next_fish_label(dish_id, label_prefix.strip() or "Z")
         if _subject_label_error(label):
             return plate_map(request, dish_id, f"Labels are at most {SUBJECT_LABEL_MAX_LENGTH} "
                                                "characters, with no control characters.", "error")
+        db_path = _require_db_path()
+        step_time, constructs = None, []
+        if source == dish_id:
+            # From this plate's own population (e.g. a plate split from a step's group).
+            living = len(data_manager.get_fish_subjects(dish_id))
+            room_ok, room_message = fish_dish_ctrl.plate_growth_check(dish_id, living)
+            if not room_ok:
+                return plate_map(request, dish_id, room_message, "error")
+            origin_dish = dish
+        else:
+            origin_dish = _dish_context_for_fish_page(source)
+            if result:
+                with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+                    step_time = fish_observations.latest_step(conn, source)
+                    constructs = (fish_observations.step_constructs(conn, source, step_time)
+                                  if step_time else [])
+                if not step_time or not constructs:
+                    return plate_map(request, dish_id, f"{source} has no screening step with a "
+                                     "construct to record this result against. Add the step "
+                                     "first, or place the fish without a result.", "error")
+                ok, message, _ = fish_dish_ctrl.allocate_screening_step_to_existing_dish(
+                    source, step_time, f"{result}_screened", 1, dish_id,
+                    notes=f"{label} placed in {target['position_label']}")
+            else:
+                ok, message, _ = fish_dish_ctrl.transfer_fish_between_dishes(
+                    source_dish_id=source, destination_dish_id=dish_id, count=1,
+                    reason="well_plate_setup",
+                    notes=f"{label} placed in {target['position_label']}")
+            if not ok:
+                return plate_map(request, dish_id, message, "error")
+
         fish_id = data_manager.create_fish_subject(
-            dish_id=dish_id,
+            dish_id=source,
             subject_label=label,
-            genotype=dish.get("genotype"),
-            species=dish.get("species") or "Danio rerio",
+            genotype=origin_dish.get("genotype"),
+            species=origin_dish.get("species") or "Danio rerio",
             created_via="plate_setup",
             created_by=_selected_user(request),
         )
         if fish_id is None or not data_manager.relocate_fish(fish_id, target["unit_id"], "initial"):
             return plate_map(request, dish_id, "Couldn't place the fish.", "error")
-        grown, grow_message = fish_dish_ctrl.grow_plate_for_placed_fish(dish_id, living + 1)
-        if not grown:
-            return plate_map(request, dish_id, f"Placed {label} in {target['position_label']}, but "
-                             f"the dish counts weren't updated: {grow_message}", "error",
-                             refresh_fish_table=True)
-        return plate_map(request, dish_id, f"Placed {label} in {target['position_label']}.",
+        if source == dish_id:
+            grown, grow_message = fish_dish_ctrl.grow_plate_for_placed_fish(dish_id, living + 1)
+            if not grown:
+                return plate_map(request, dish_id, f"Placed {label} in {target['position_label']}, "
+                                 f"but the dish counts weren't updated: {grow_message}", "error",
+                                 refresh_fish_table=True)
+        if result:
+            with data_manager.get_connection() as conn:
+                if not constructs:
+                    step_time = fish_observations.latest_step(conn, source) or step_time
+                    constructs = (fish_observations.step_constructs(conn, source, step_time)
+                                  if step_time else [])
+                if not constructs:  # a plate split from a step: use that step's constructs
+                    plate_row = conn.execute(
+                        "SELECT parent_dish_id, source_screening_datetime FROM dishes "
+                        "WHERE dish_id = ?", (dish_id,)).fetchone()
+                    if plate_row and plate_row["source_screening_datetime"]:
+                        step_time = plate_row["source_screening_datetime"]
+                        constructs = fish_observations.step_constructs(
+                            conn, plate_row["parent_dish_id"], step_time)
+                        source_for_obs = plate_row["parent_dish_id"]
+                    else:
+                        source_for_obs = source
+                else:
+                    source_for_obs = source
+                if constructs:
+                    fish_observations.record(
+                        conn, fish_id, result, constructs, observed_by=_selected_user(request),
+                        source_dish_id=source_for_obs, screening_datetime=step_time,
+                        notes="Recorded when placed in the well plate")
+                    conn.commit()
+        where = f" from {source}" if source != dish_id else ""
+        what = f" ({result})" if result else ""
+        return plate_map(request, dish_id, f"Placed {label}{what}{where} in {target['position_label']}.",
                          refresh_fish_table=True)
+
+    @app.post("/fish/{fish_id}/observations", response_model=FishScreeningResponse,
+              responses={404: {"model": ApiErrorResponse, "description": "fish_not_found"},
+                         422: {"model": ApiErrorResponse, "description": "invalid_observation"},
+                         **_DATABASE_ERROR_RESPONSE})
+    def observe_fish(request: Request, fish_id: str, body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Record a screening result on one fish (e.g. a re-check); returns its calls.
+
+        Body: ``result`` (positive | negative), ``dish_construct`` (as on its
+        origin dish, e.g. ``Tg(gfap:PMCA2-mCherry-zf)``), optional ``notes``.
+        """
+        _require_db_path()
+        try:
+            with data_manager.get_connection() as conn:
+                fish = conn.execute(
+                    "SELECT COALESCE(origin_dish_id, dish_id) AS origin FROM fish_subjects "
+                    "WHERE fish_id = ?", (fish_id,)).fetchone()
+                if not fish:
+                    raise _not_found("fish", fish_id=fish_id)
+                construct = (body.get("dish_construct") or "").strip()
+                known = {r["construct"]: r["construct_key"] for r in conn.execute(
+                    "SELECT construct, construct_key FROM dish_transgenes WHERE dish_id = ?",
+                    (fish["origin"],))}
+                if construct not in known:
+                    raise HTTPException(status_code=422, detail={
+                        "error": "invalid_observation", "field": "dish_construct",
+                        "message": f"one of: {', '.join(sorted(known)) or 'none on its origin dish'}"})
+                fish_observations.record(
+                    conn, fish_id, body.get("result"),
+                    [{"dish_construct": construct, "construct_key": known[construct]}],
+                    observed_by=_selected_user(request), notes=body.get("notes"))
+                conn.commit()
+                return fish_screening_calls(conn, fish_id)
+        except fish_observations.ObservationError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
 
     @app.post("/dishes/{dish_id}/fish/register", response_class=HTMLResponse)
     def register_fish_htmx(

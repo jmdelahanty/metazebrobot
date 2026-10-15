@@ -263,6 +263,9 @@ class FishDishController:
                 "primary": "_split",
             }
             id_suffix_base = suffix_map.get(population_type, "_derived")
+            if container_type == "well_plate" and population_type not in (
+                    "positive_screened", "negative_screened", "pigmented_screened"):
+                id_suffix_base = "_plate"  # a plate that can hold fish of any result
 
             # Generate unique dish ID
             i = 1

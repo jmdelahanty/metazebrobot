@@ -1666,7 +1666,10 @@
           "source": {
             "anyOf": [
               {
-                "const": "inherited",
+                "enum": [
+                  "inherited",
+                  "observed"
+                ],
                 "type": "string"
               },
               {
