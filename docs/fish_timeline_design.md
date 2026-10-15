@@ -122,6 +122,3 @@ Citrus".
    dish), agreed with Citrus and Palette as an additive contract change.
 4. **Deaths ([#13](https://github.com/jmdelahanty/metazebrobot/issues/13)):**
    status events on the timeline.
-
-## Open questions (Jeremy)
-
