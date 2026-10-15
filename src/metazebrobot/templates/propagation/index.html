@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Propagation{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Propagation</h2>
+    <p>Dishes of positives handed to aquatics to raise a line. Group the dishes of one propagation into an event; nothing is grouped automatically.</p>
+</hgroup>
+
+<h3>Dishes not in an event</h3>
+{% if unassigned %}
+<form method="post" action="/propagation/events">
+    <table>
+        <thead><tr><th></th><th>Dish</th><th>Handed over</th><th>Fish</th><th>Genotype</th></tr></thead>
+        <tbody>
+        {% for d in unassigned %}
+        <tr>
+            <td><input type="checkbox" name="dish_id" value="{{ d.dish_id }}" aria-label="{{ d.dish_id }}"></td>
+            <td><a href="/dishes/{{ d.dish_id }}/fish/">{{ d.dish_id }}</a></td>
+            <td>{{ d.handover or "—" }}</td>
+            <td>{{ d.current_fish_count if d.current_fish_count is not none else "—" }}</td>
+            <td><small>{{ d.genotype or "" }}</small></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <fieldset role="group">
+        <select name="event_id" aria-label="Event">
+            <option value="">New event from the selected dishes</option>
+            {% for e in events %}<option value="{{ e.event_id }}">Add to {{ e.first_handover or "?" }} · {{ e.dishes | map(attribute="dish_id") | join(", ") }}</option>{% endfor %}
+        </select>
+        <button type="submit">Group</button>
+    </fieldset>
+</form>
+{% else %}
+<p><em>Every propagation dish is in an event.</em></p>
+{% endif %}
+
+<h3>Events</h3>
+{% if events %}
+<table>
+    <thead><tr><th>Handed over</th><th>Dishes</th><th>Fish</th><th>Line</th><th>Generation</th><th>Tank</th></tr></thead>
+    <tbody>
+    {% for event in events %}
+    <tr>
+        <td><a href="/propagation/events/{{ event.event_id }}">{{ event.first_handover or "?" }}{% if event.last_handover != event.first_handover %} – {{ event.last_handover }}{% endif %}</a></td>
+        <td>{{ event.dishes | map(attribute="dish_id") | join(", ") }}</td>
+        <td>{{ event.fish_count }}</td>
+        <td>{% for c in event.constructs %}<a href="/lines/{{ c.line_key }}">{{ c.construct }}</a>{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+        <td>{% include "propagation/_generation.html" %}</td>
+        <td>{{ event.resulting_tank_id or "—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p><em>No propagation events yet.</em></p>
+{% endif %}
+{% endblock %}

@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
-from .data import fish_endings, fish_observations, image_links, usage_links
+from .data import fish_endings, fish_observations, image_links, propagation, usage_links
 from .data.fish_timeline import fish_timeline as build_fish_timeline
 from .data.screening_calls import dish_calls as dish_screening_calls
 from .data.screening_calls import fish_calls as fish_screening_calls
@@ -6735,6 +6735,85 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 f"({','.join('?' for _ in items) or 'NULL'})", [i["fish_id"] for i in items])}
         return templates.TemplateResponse(request, "images/_gallery.html", {
             "items": items, "labels": labels, "dish_id": dish_id})
+
+    # ------------------------------------------------------------------
+    # Propagation events (docs/propagation_events_design.md)
+    # ------------------------------------------------------------------
+
+    def _propagation_call(fn, *args, **kwargs):
+        with data_manager.get_connection() as conn:
+            try:
+                result = fn(conn, *args, **kwargs)
+            except propagation.PropagationError as exc:
+                conn.rollback()
+                raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+            conn.commit()
+            return result
+
+    @app.get("/propagation/", response_class=HTMLResponse)
+    def propagation_page(request: Request):
+        """Propagation dishes not yet in an event, and the events so far."""
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            unassigned = propagation.unassigned_dishes(conn)
+            events = propagation.list_events(conn)
+        return templates.TemplateResponse(request, "propagation/index.html", {
+            "unassigned": unassigned, "events": events})
+
+    @app.post("/propagation/events")
+    async def propagation_group(request: Request):
+        """Create an event from the selected dishes, or add them to an existing one."""
+        _require_db_path()
+        form = await request.form()
+        dish_ids = [d for d in form.getlist("dish_id") if d]
+        event_id = (form.get("event_id") or "").strip()
+        if event_id:
+            _propagation_call(propagation.add_dishes, event_id, dish_ids)
+        else:
+            event_id = _propagation_call(propagation.create_event, dish_ids,
+                                         _selected_user(request))
+        return RedirectResponse(url=f"/propagation/events/{event_id}", status_code=303)
+
+    @app.get("/propagation/events/{event_id}", response_class=HTMLResponse)
+    def propagation_event_page(request: Request, event_id: str):
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            event = propagation.get_event(conn, event_id)
+            if event is None:
+                raise HTTPException(status_code=404, detail="Propagation event not found")
+            images = {d["dish_id"]: image_links.for_dish(conn, d["dish_id"]) for d in event["dishes"]}
+            unassigned = propagation.unassigned_dishes(conn)
+        return templates.TemplateResponse(request, "propagation/event.html", {
+            "event": event, "images": images, "unassigned": unassigned})
+
+    @app.post("/propagation/events/{event_id}")
+    async def propagation_event_update(request: Request, event_id: str):
+        """Generation (entered or back to suggested), resulting tank, notes."""
+        _require_db_path()
+        form = await request.form()
+        _propagation_call(propagation.update_details, event_id, form.get("generation"),
+                          form.get("resulting_tank_id"), form.get("notes"))
+        return RedirectResponse(url=f"/propagation/events/{event_id}", status_code=303)
+
+    @app.post("/propagation/events/{event_id}/dishes/{dish_id}/remove")
+    def propagation_event_remove_dish(event_id: str, dish_id: str):
+        _require_db_path()
+        _propagation_call(propagation.remove_dish, event_id, dish_id)
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            still = conn.execute("SELECT 1 FROM propagation_events WHERE event_id = ?",
+                                 (event_id,)).fetchone()
+        target = f"/propagation/events/{event_id}" if still else "/propagation/"
+        return RedirectResponse(url=target, status_code=303)
+
+    @app.get("/lines/{line_key}", response_class=HTMLResponse)
+    def line_history_page(request: Request, line_key: str):
+        """Every propagation of a line (promoter + construct), oldest first."""
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            events = propagation.line_history(conn, line_key)
+            images = {d["dish_id"]: image_links.for_dish(conn, d["dish_id"])
+                      for e in events for d in e["dishes"]}
+        names = [c["construct"] for e in events for c in e["constructs"] if c["line_key"] == line_key]
+        return templates.TemplateResponse(request, "propagation/line.html", {
+            "line_key": line_key, "construct": names[0] if names else line_key,
+            "events": events, "images": images})
 
     @app.get("/fish/{fish_id}/timeline", response_model=FishTimelineResponse,
              responses=_LOOKUP_ERROR_RESPONSES)

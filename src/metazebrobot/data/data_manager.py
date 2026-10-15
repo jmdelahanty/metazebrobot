@@ -17,7 +17,7 @@ from pydantic import NonNegativeInt, TypeAdapter
 
 from ..utils.config import config
 from ..utils.indicator_match import match_step
-from . import fish_endings, fish_observations, image_links, usage_links
+from . import fish_endings, fish_observations, image_links, propagation, usage_links
 from ..utils.file_operations import ensure_directory, load_json_file
 
 logger = logging.getLogger(__name__)
@@ -941,6 +941,8 @@ class DataManager:
 
                 # Screening images linked by reference (files stay on lab storage)
                 image_links.ensure_schema(cursor)
+                # Propagation events: dishes handed to aquatics to raise a line
+                propagation.ensure_schema(cursor)
 
                 # Housing units — physical positions within a dish
                 cursor.execute("""

@@ -9,7 +9,9 @@ verified_against: 6577bdb
 
 # Propagation Events and Reference Galleries
 
-Status (2026-10-15): decisions below; being built.
+Status (2026-10-15): events, the Propagation page and line history are
+built (see "Built"). Reference flags on linked images and the extended
+References gallery come next.
 
 ## Problem
 
@@ -86,3 +88,20 @@ hand, separate from the linked originals.
 - **No automatic PyRAT tank link.** There's no way to tie a set of dishes to
   the tank they became, so `resulting_tank_id` is optional, entered by hand,
   and labelled as such.
+
+## Built
+
+- Tables `propagation_events` (generation, `generation_source` suggested |
+  entered | none, basis text, `resulting_tank_id`, notes) and
+  `propagation_event_dishes` (one event per dish). Code:
+  `src/metazebrobot/data/propagation.py`.
+- `/propagation/`: propagation-terminated dishes not yet in an event (tick
+  dishes, then "New event" or "Add to" an existing one) and the events list.
+- `/propagation/events/{id}`: dishes with hand-over date, count and source
+  screen, each dish's linked images, generation with its basis, resulting
+  tank and notes. Removing an event's last dish deletes the event.
+- `/lines/{line key}`: a line's events oldest first with their images. **A
+  line is promoter + construct key** (`gfap-grabatp10`), not the construct
+  key alone, which names the reporter and would merge e.g.
+  `Tg(elavl3:GRABATP1.0)` with `Tg(gfap:GRABATP1.0)`.
+- HTML only for now; nothing is in the pinned consumer slice.

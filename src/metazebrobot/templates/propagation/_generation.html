@@ -1,0 +1,4 @@
+{# Generation with its source, so a suggestion is never mistaken for a record. #}
+{% if event.generation %}<strong>{{ event.generation }}</strong>
+<small>({% if event.generation_source == "suggested" %}suggested: {{ event.generation_basis }}{% else %}{{ event.generation_basis or "entered by hand" }}{% endif %})</small>
+{% else %}<small>no generation (parents have none in PyRAT)</small>{% endif %}

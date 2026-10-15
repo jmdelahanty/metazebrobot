@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Propagation {{ event.first_handover or "" }}{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Propagation {{ event.first_handover or "" }}{% if event.last_handover != event.first_handover %} – {{ event.last_handover }}{% endif %}</h2>
+    <p>{{ event.fish_count }} fish in {{ event.dishes | length }} dish(es) ·
+        {% for c in event.constructs %}<a href="/lines/{{ c.line_key }}">{{ c.construct }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+        · <a href="/propagation/">all propagation</a></p>
+</hgroup>
+
+<p>Generation: {% include "propagation/_generation.html" %}</p>
+
+<form method="post" action="/propagation/events/{{ event.event_id }}">
+    <div class="grid">
+        <label>Generation
+            <input type="text" name="generation" value="{{ event.generation if event.generation_source == 'entered' else '' }}"
+                   placeholder="{{ event.generation ~ ' (suggested)' if event.generation else 'e.g. F3' }}">
+            <small>Leave empty to use the suggestion. An entered value isn't recomputed.</small>
+        </label>
+        <label>Resulting PyRAT tank (entered by hand)
+            <input type="text" name="resulting_tank_id" value="{{ event.resulting_tank_id or '' }}" placeholder="optional">
+        </label>
+    </div>
+    <label>Notes
+        <textarea name="notes" rows="2">{{ event.notes or "" }}</textarea>
+    </label>
+    <button type="submit">Save</button>
+</form>
+
+<h3>Dishes</h3>
+{% for d in event.dishes %}
+<article>
+    <header>
+        <strong><a href="/dishes/{{ d.dish_id }}/fish/">{{ d.dish_id }}</a></strong>
+        · handed over {{ d.handover or "?" }} · {{ d.current_fish_count if d.current_fish_count is not none else "?" }} fish
+        {% if d.parent_dish_id %}· from {{ d.parent_dish_id }}{% if d.source_screening_datetime %} (screen {{ d.source_screening_datetime }}){% endif %}{% endif %}
+        <form method="post" action="/propagation/events/{{ event.event_id }}/dishes/{{ d.dish_id }}/remove" style="display:inline; float:right; margin:0">
+            <button type="submit" class="outline secondary" style="padding:0.1rem 0.5rem; font-size:0.8rem">remove from event</button>
+        </form>
+    </header>
+    {% with items=images[d.dish_id], labels={}, dish_id=d.dish_id %}{% include "images/_gallery.html" %}{% endwith %}
+</article>
+{% endfor %}
+
+{% if unassigned %}
+<form method="post" action="/propagation/events">
+    <input type="hidden" name="event_id" value="{{ event.event_id }}">
+    <fieldset role="group">
+        <select name="dish_id" aria-label="Dish to add">
+            {% for d in unassigned %}<option value="{{ d.dish_id }}">{{ d.dish_id }} (handed over {{ d.handover or "?" }})</option>{% endfor %}
+        </select>
+        <button type="submit">Add dish to this event</button>
+    </fieldset>
+</form>
+{% endif %}
+{% endblock %}
