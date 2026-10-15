@@ -177,7 +177,7 @@
 {% endif %}
 
 {% if steps %}
-{% set source_dish_id = dish_id %}
+{% set source_dish_id = dish_id or (dish.dish_id if dish else "") %}
 <figure>
 <table class="screening-steps-table" role="grid">
     <thead>

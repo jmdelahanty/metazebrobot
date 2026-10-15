@@ -4917,6 +4917,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         )
 
         return templates.TemplateResponse(request, "screening/screening_form.html", {
+            "dish_id": dish_id,
             "dish": dish,
             "dpf": dpf,
             "protocol": protocol,
@@ -4984,51 +4985,13 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             ),
         })
 
-    def _dish_id_for_unique_screening_step(screening_datetime: str) -> Optional[str]:
-        """Recover a dish id for stale malformed step forms with an empty path id."""
-        try:
-            with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
-                rows = conn.execute(
-                    """
-                    SELECT dish_id
-                    FROM screening_steps
-                    WHERE screening_datetime = ?
-                    ORDER BY dish_id
-                    LIMIT 2
-                    """,
-                    (screening_datetime,),
-                ).fetchall()
-            if len(rows) == 1:
-                return rows[0]["dish_id"]
-        except Exception:
-            logger.exception("Could not recover dish id for screening step %s", screening_datetime)
-        return None
-
     @app.post("/screening//steps/{screening_datetime}/allocations", response_class=HTMLResponse)
-    def add_screening_step_allocation_missing_dish_id(
-        request: Request,
-        screening_datetime: str,
-        bucket: str = Form(...),
-        disposition: str = Form(...),
-        count: int = Form(...),
-        notes: Optional[str] = Form(default=None),
-    ):
-        """Compatibility handler for stale forms that rendered with an empty dish id."""
-        recovered_dish_id = _dish_id_for_unique_screening_step(screening_datetime)
-        if not recovered_dish_id:
-            return templates.TemplateResponse(request, "screening/_flash_message.html", {
-                "message": "Could not determine the source dish for this screening step. Refresh the page and try again.",
-                "level": "error",
-            })
-        return add_screening_step_allocation(
-            request,
-            recovered_dish_id,
-            screening_datetime,
-            bucket,
-            disposition,
-            count,
-            notes,
-        )
+    def stale_allocations_form(request: Request, screening_datetime: str):
+        """A form rendered without its dish id (pages from before the fix): ask for a reload."""
+        return templates.TemplateResponse(request, "screening/_flash_message.html", {
+            "message": "This page is out of date. Reload it and try again; nothing was saved.",
+            "level": "error",
+        })
 
     @app.post("/screening/{dish_id}/steps", response_class=HTMLResponse)
     def add_screening_step(
@@ -5168,30 +5131,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         })
 
     @app.post("/screening//steps/{screening_datetime}/destination", response_class=HTMLResponse)
-    def allocate_screening_step_to_existing_dish_missing_dish_id(
-        request: Request,
-        screening_datetime: str,
-        bucket: str = Form(...),
-        count: int = Form(...),
-        destination_dish_id: str = Form(...),
-        notes: Optional[str] = Form(default=None),
-    ):
-        """Compatibility handler for stale destination forms with an empty path id."""
-        recovered_dish_id = _dish_id_for_unique_screening_step(screening_datetime)
-        if not recovered_dish_id:
-            return templates.TemplateResponse(request, "screening/_flash_message.html", {
-                "message": "Could not determine the source dish for this screening step. Refresh the page and try again.",
-                "level": "error",
-            })
-        return allocate_screening_step_to_existing_dish(
-            request,
-            recovered_dish_id,
-            screening_datetime,
-            bucket,
-            count,
-            destination_dish_id,
-            notes,
-        )
+    def stale_destination_form(request: Request, screening_datetime: str):
+        """A form rendered without its dish id (pages from before the fix): ask for a reload."""
+        return templates.TemplateResponse(request, "screening/_flash_message.html", {
+            "message": "This page is out of date. Reload it and try again; nothing was saved.",
+            "level": "error",
+        })
 
     @app.post("/screening/{dish_id}/finalize", response_class=HTMLResponse)
     def finalize_screening(
@@ -5302,35 +5247,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         )
 
     @app.post("/screening//steps/{screening_datetime}/split", response_class=HTMLResponse)
-    def split_dish_from_screening_step_missing_dish_id(
-        request: Request,
-        screening_datetime: str,
-        fish_count: int = Form(...),
-        population_type: str = Form(...),
-        container_type: Optional[str] = Form(default=None),
-        notes: Optional[str] = Form(default=None),
-    ):
-        """Compatibility handler for stale split forms with an empty path id."""
-        recovered_dish_id = _dish_id_for_unique_screening_step(screening_datetime)
-        if not recovered_dish_id:
-            return templates.TemplateResponse(request, "screening/_flash_message.html", {
-                "message": "Could not determine the source dish for this screening step. Refresh the page and try again.",
-                "level": "error",
-            })
-        return split_dish_from_screening_step(
-            request,
-            recovered_dish_id,
-            screening_datetime,
-            str(fish_count),
-            population_type,
-            container_type,
-            notes,
-            None,
-        )
-
-    # ------------------------------------------------------------------
-    # Daily care (web UI)
-    # ------------------------------------------------------------------
+    def stale_split_form(request: Request, screening_datetime: str):
+        """A form rendered without its dish id (pages from before the fix): ask for a reload."""
+        return templates.TemplateResponse(request, "screening/_flash_message.html", {
+            "message": "This page is out of date. Reload it and try again; nothing was saved.",
+            "level": "error",
+        })
 
     @app.get("/care/", response_class=HTMLResponse)
     def care_dish_list(request: Request):

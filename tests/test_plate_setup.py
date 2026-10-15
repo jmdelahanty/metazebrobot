@@ -150,3 +150,15 @@ def test_count_still_required_for_other_containers(client):
                        data={"population_type": "positive_screened", "container_type": "petri_dish",
                              "fish_count": ""})
     assert "Enter a count" in resp.text
+
+
+def test_screening_page_forms_carry_the_dish_id(client):
+    parent, _ = _empty_plate(client)  # creates _pos1 and a step at 20261014T10:00:00
+    page = client.get(f"/screening/{parent}").text
+    assert "/screening//" not in page
+    assert f'action="/screening/{parent}/steps/20261014T10:00:00/split"' in page
+
+    # A stale page (rendered before the fix) gets a reload message; nothing is saved.
+    for action in ("split", "allocations", "destination"):
+        resp = client.post(f"/screening//steps/20261014T10:00:00/{action}", data={})
+        assert resp.status_code == 200 and "out of date" in resp.text
