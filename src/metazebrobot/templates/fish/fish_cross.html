@@ -47,7 +47,7 @@
             {% for f in fish_list %}
                 <tr>
                     <td>{{ f.subject_label or "—" }}</td>
-                    <td><a href="/fish/{{ f.fish_id }}">{{ f.fish_id[:8] }}</a></td>
+                    <td><a href="/fish/{{ f.fish_id }}/view">{{ f.fish_id[:8] }}</a></td>
                     <td>{{ f.sex or "—" }}</td>
                     <td>{{ f.genotype or "—" }}</td>
                     <td>{{ f.current_unit_id or "—" }}</td>

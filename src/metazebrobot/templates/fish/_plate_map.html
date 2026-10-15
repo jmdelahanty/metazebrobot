@@ -45,7 +45,7 @@
                 <div class="plate-well plate-well--occupied">
                     <div class="plate-well__label">{{ label }}</div>
                     {% for f in unit.fish %}
-                    <div class="plate-well__fish">{{ f.subject_label or f.fish_id[:8] }}</div>
+                    <div class="plate-well__fish"><a href="/fish/{{ f.fish_id }}/view">{{ f.subject_label or f.fish_id[:8] }}</a></div>
                     {% endfor %}
                 </div>
                 {% else %}
@@ -75,7 +75,7 @@
 <p>{{ all_fish | length }} fish in this container:</p>
 <ul>
     {% for f in all_fish %}
-    <li>{{ f.subject_label or f.fish_id[:8] }} <code>{{ f.fish_id[:8] }}&hellip;</code></li>
+    <li><a href="/fish/{{ f.fish_id }}/view">{{ f.subject_label or f.fish_id[:8] }}</a> <code>{{ f.fish_id[:8] }}&hellip;</code></li>
     {% endfor %}
 </ul>
 {% else %}
@@ -93,7 +93,7 @@
     <strong>Unassigned fish</strong> ({{ unassigned_fish | length }}):
     <ul>
         {% for f in unassigned_fish %}
-        <li>{{ f.subject_label or f.fish_id[:8] }} <code>{{ f.fish_id[:8] }}&hellip;</code></li>
+        <li><a href="/fish/{{ f.fish_id }}/view">{{ f.subject_label or f.fish_id[:8] }}</a> <code>{{ f.fish_id[:8] }}&hellip;</code></li>
         {% endfor %}
     </ul>
 </div>

@@ -9,7 +9,9 @@ verified_against: c6a88c1
 
 # Fish Timeline and Experiment Usage
 
-Status (2026-10-15): proposal; nothing below is built.
+Status (2026-10-15): step 1 built (`data/fish_timeline.py`; `GET /fish/{fish_id}/timeline`
+and the page `/fish/{fish_id}/view`, linked from the plate map, fish tables and
+cross view). Steps 2–4 are proposals.
 
 Goal (Jeremy): follow where an individual fish went, inspectably. For example:
 minted during screening or at an experiment, started in parent A, moved to a

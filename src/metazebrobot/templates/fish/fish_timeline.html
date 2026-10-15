@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Fish {{ t.subject_label or t.fish_id[:8] }}{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Fish {{ t.subject_label or t.fish_id[:8] }}</h2>
+    <p><code>{{ t.fish_id }}</code> · revision {{ t.revision }}</p>
+</hgroup>
+
+<table>
+    <tbody>
+        <tr><th>Now in</th><td>dish <a href="/dishes/{{ t.dish_id }}/fish/">{{ t.dish_id }}</a>{% if t.current_unit_id %}, well {{ t.current_unit_id.split(":")[-1] }}{% endif %}</td></tr>
+        <tr><th>Came from</th><td>dish <a href="/screening/{{ t.origin_dish_id }}">{{ t.origin_dish_id }}</a></td></tr>
+    </tbody>
+</table>
+
+<h3>Timeline</h3>
+<table>
+    <thead><tr><th>When (lab time)</th><th>What</th><th>Source</th></tr></thead>
+    <tbody>
+    {% for e in t.entries %}
+        <tr>
+            <td><small>{{ e.at | replace("T", " ") }}</small></td>
+            <td><mark style="background:none;padding:0"><strong>{{ e.kind }}</strong></mark> · {{ e.summary }}</td>
+            <td><small><code>{{ e.source }}</code></small></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+<p><small>Not recorded yet: {{ t.not_yet_recorded | join(", ") }}.
+JSON: <a href="/fish/{{ t.fish_id }}/timeline">/fish/{{ t.fish_id }}/timeline</a></small></p>
+{% endblock %}

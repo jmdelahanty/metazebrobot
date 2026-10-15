@@ -22,7 +22,7 @@
     <tbody>
         {% for f in fish %}
         <tr>
-            <td>{{ f.subject_label or "-" }}</td>
+            <td><a href="/fish/{{ f.fish_id }}/view">{{ f.subject_label or "-" }}</a></td>
             <td><code>{{ f.fish_id[:8] }}&hellip;</code></td>
             <td>{{ f.sex or "-" }}</td>
             <td>{{ f.genotype or "-" }}</td>

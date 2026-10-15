@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
+from .data.fish_timeline import fish_timeline as build_fish_timeline
 from .data.screening_calls import dish_calls as dish_screening_calls
 from .data.screening_calls import fish_calls as fish_screening_calls
 from .consumer_contract import consumer_openapi, digest, render
@@ -6040,6 +6041,26 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if not data_manager.relocate_fish(fish_id, new_unit_id, reason):
             raise HTTPException(status_code=500, detail="Failed to move fish")
         return data_manager.get_fish_subject(fish_id)
+
+    @app.get("/fish/{fish_id}/timeline")
+    def get_fish_timeline(fish_id: str) -> Dict[str, Any]:
+        """One fish's timeline from MetaZebrobot's records (docs/fish_timeline_design.md)."""
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            timeline = build_fish_timeline(conn, fish_id)
+        if timeline is None:
+            raise _not_found("fish", fish_id=fish_id)
+        return timeline
+
+    @app.get("/fish/{fish_id}/view", response_class=HTMLResponse)
+    def fish_timeline_page(request: Request, fish_id: str):
+        """Human-readable fish page: where it is, where it came from, its timeline."""
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            timeline = build_fish_timeline(conn, fish_id)
+        if timeline is None:
+            raise HTTPException(status_code=404, detail="Fish not found")
+        return templates.TemplateResponse(request, "fish/fish_timeline.html", {"t": timeline})
 
     @app.get("/fish/{fish_id}/screening")
     def get_fish_screening(fish_id: str) -> Dict[str, Any]:
