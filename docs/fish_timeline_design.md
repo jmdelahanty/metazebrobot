@@ -77,10 +77,14 @@ Rules:
 
 - **MZB never stores recording content.** No paths, no behaviour results,
   no frames: only the reference and the fields above.
-- **Writers:** Citrus writes `declared` at record start, the same moment it
-  registers or verifies the fish (subject identity v4). Palette upgrades a
-  link to `confirmed` at intake, or adds it if Citrus couldn't reach MZB.
-  Jeremy leaned toward Palette confirming at intake (2026-10-14).
+- **Writer (decided 2026-10-15): Citrus only, at record start.** It writes
+  the link at the same moment it registers or verifies the fish (subject
+  identity v4), and fills `ended_at` when the recording stops. Links are
+  `declared`. Palette confirmation (`confirmed`, or adding links Citrus
+  couldn't deliver) can be added later without changing what's built.
+- **Recording identifier:** `recording_ref` is the id Citrus seals in the H5
+  and Palette keys on at intake (likely Citrus run/session id + camera; to be
+  agreed with Citrus and Palette).
 - **Dish-level rows** (decided 2026-10-15): a recording that names no
   individual fish still gets a row, with `fish_id` null and `dish_id` set.
   That makes queries like "recordings of this dish" or "recordings of fish
@@ -117,5 +121,4 @@ Citrus".
 
 ## Open questions (Jeremy)
 
-- **Who writes usage links:** Citrus at start (`declared`) and Palette at
-  intake (`confirmed`), or only one of them?
+- **Recording identifier:** which id Citrus and Palette both use (see above).
