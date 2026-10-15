@@ -77,6 +77,10 @@ the DB host.
   - `POST /dishes/{dish_id}/fish` (see [fish tracking API](fish_tracking_api.md#register-a-new-fish))
 - A fish's content at each revision:
   - `GET /fish/{fish_id}/revisions`
+- Record which recording used a dish/fish (Citrus at Start and Stop):
+  - `POST /usage-links`, `PATCH /usage-links/{recording_ref}`
+  - `GET /usage-links/{recording_ref}`, `GET /usage-links?fish_id=|dish_id=|active_at=`
+  - Fields, idempotency and errors: [fish timeline design](fish_timeline_design.md#proposed-endpoints-for-review-2026-10-15)
 - Fetch its cross:
   - `GET /crosses/{cross_id}`
 - Fetch cached parent/background provenance:
@@ -155,6 +159,9 @@ JSON read endpoints return structured errors in FastAPI's `detail` field:
 | 409 | `{"detail": {"error": "dish_inactive", "dish_id": "..."}}` | `POST /dishes/{dish_id}/fish`: new `fish_id` on an inactive dish |
 | 422 | `{"detail": {"error": "invalid_fish_id", "fish_id": "..."}}` | `POST`: `fish_id` isn't a lowercase canonical UUID v4 |
 | 422 | `{"detail": {"error": "invalid_subject_label", "message": "..."}}` | `POST`/`PATCH`: label over 64 characters or with control characters |
+| 409 | `{"detail": {"error": "usage_link_conflict" \| "usage_link_end_conflict", "recording_ref": "..."}}` | `/usage-links`: a different body for an existing link, or a different end |
+| 404 | `{"detail": {"error": "usage_link_not_found", "recording_ref": "..."}}` | `/usage-links/{recording_ref}`: no such link |
+| 422 | `{"detail": {"error": "invalid_usage_link", "field": "...", "message": "..."}}` | `/usage-links`: field fails the contract's rules |
 | 422 | `{"detail": [...]}` | Invalid query parameters or malformed body |
 
 A 404 means the record does not exist; a 503 means the lookup failed and
@@ -196,7 +203,9 @@ Field-level shapes are generated from the code, not written by hand:
   `/dishes/{dish_id}/citrus-snapshot`, `/acquisition/dishes`,
   `/dishes/{dish_id}`, `/dishes/by-uuid/{dish_uuid}`,
   `/dishes/{dish_id}/fish` (GET and POST), `/fish/{fish_id}`,
-  `/fish/{fish_id}/revisions` and `/version`, including their error models.
+  `/fish/{fish_id}/revisions`, `/usage-links` (POST, GET),
+  `/usage-links/{recording_ref}` (PATCH, GET) and `/version`, including
+  their error models.
 - `tests/test_consumer_contract.py` fails if the code and that file
   disagree, and asserts the identity fields explicitly.
 - `pixi run python scripts/export_consumer_openapi.py --check` verifies it

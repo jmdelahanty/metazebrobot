@@ -1052,6 +1052,154 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "UsageLinkListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UsageLinkResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "title": "UsageLinkListResponse",
+        "type": "object"
+      },
+      "UsageLinkResponse": {
+        "description": "A recording's use of a dish (and fish); docs/fish_timeline_design.md.",
+        "properties": {
+          "arena_id": {
+            "title": "Arena Id",
+            "type": "string"
+          },
+          "dish_id": {
+            "title": "Dish Id",
+            "type": "string"
+          },
+          "end_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "completed",
+                  "aborted",
+                  "interrupted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Status"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "fish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fish Id"
+          },
+          "fish_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fish Revision"
+          },
+          "received_at": {
+            "title": "Received At",
+            "type": "string"
+          },
+          "recording_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Id"
+          },
+          "recording_ref": {
+            "title": "Recording Ref",
+            "type": "string"
+          },
+          "ref_kind": {
+            "enum": [
+              "observation_context",
+              "citrus_session"
+            ],
+            "title": "Ref Kind",
+            "type": "string"
+          },
+          "rig_id": {
+            "title": "Rig Id",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "subject_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Count"
+          },
+          "unit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Id"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recording_ref",
+          "ref_kind",
+          "dish_id",
+          "rig_id",
+          "arena_id",
+          "started_at",
+          "received_at",
+          "updated_at"
+        ],
+        "title": "UsageLinkResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -1712,6 +1860,343 @@
           }
         },
         "summary": "Get Fish Revisions"
+      }
+    },
+    "/usage-links": {
+      "get": {
+        "description": "Links by fish, by dish (including dish-level rows), or open at an instant.",
+        "operationId": "list_usage_links_usage_links_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "fish_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fish Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dish_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dish Id"
+            }
+          },
+          {
+            "description": "RFC 3339 UTC instant; links open then",
+            "in": "query",
+            "name": "active_at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "RFC 3339 UTC instant; links open then",
+              "title": "Active At"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageLinkListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "dish_not_found / fish_not_found (new link) or usage_link_not_found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "usage_link_conflict (different creation body) or usage_link_end_conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_usage_link (with field)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Lookup failed (database_error)"
+          }
+        },
+        "summary": "List Usage Links"
+      },
+      "post": {
+        "description": "Record that an arena recording used a dish (and fish), at Start.\n\nIdempotent on ``recording_ref``: an identical replay is 200, a\ndifferent body 409. An existing ref is answered before any dish or\nfish check. No server-filled fields in the request.",
+        "operationId": "create_usage_link_usage_links_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "default": {},
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageLinkResponse"
+                }
+              }
+            },
+            "description": "Identical replay; the current link"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageLinkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "dish_not_found / fish_not_found (new link) or usage_link_not_found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "usage_link_conflict (different creation body) or usage_link_end_conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_usage_link (with field)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Lookup failed (database_error)"
+          }
+        },
+        "summary": "Create Usage Link"
+      }
+    },
+    "/usage-links/{recording_ref}": {
+      "get": {
+        "operationId": "get_usage_link_usage_links__recording_ref__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recording_ref",
+            "required": true,
+            "schema": {
+              "title": "Recording Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageLinkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "dish_not_found / fish_not_found (new link) or usage_link_not_found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "usage_link_conflict (different creation body) or usage_link_end_conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_usage_link (with field)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Lookup failed (database_error)"
+          }
+        },
+        "summary": "Get Usage Link"
+      },
+      "patch": {
+        "description": "Record a link's end (``ended_at``, ``end_status``), at Stop.\n\nClients percent-encode ``recording_ref``. An identical replay is 200;\na different end once one is recorded is 409; no link is 404.",
+        "operationId": "end_usage_link_usage_links__recording_ref__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recording_ref",
+            "required": true,
+            "schema": {
+              "title": "Recording Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "default": {},
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageLinkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "dish_not_found / fish_not_found (new link) or usage_link_not_found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "usage_link_conflict (different creation body) or usage_link_end_conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_usage_link (with field)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Lookup failed (database_error)"
+          }
+        },
+        "summary": "End Usage Link"
       }
     },
     "/version": {

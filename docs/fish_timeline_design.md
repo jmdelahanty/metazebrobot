@@ -9,9 +9,10 @@ verified_against: c6a88c1
 
 # Fish Timeline and Experiment Usage
 
-Status (2026-10-15): steps 1 and 2 built (`data/fish_timeline.py`; `GET /fish/{fish_id}/timeline`
+Status (2026-10-15): steps 1–3 built (`data/fish_timeline.py`; `GET /fish/{fish_id}/timeline`
 and the page `/fish/{fish_id}/view`, linked from the plate map, fish tables and
-cross view). Steps 3 and 4 are proposals.
+cross view). Step 3 is `data/usage_links.py` with the endpoints below. Step 4 (deaths) is a
+proposal.
 
 Goal (Jeremy): follow where an individual fish went, inspectably. For example:
 minted during screening or at an experiment, started in parent A, moved to a
@@ -125,7 +126,8 @@ Citrus".
 
 ## Proposed endpoints (for review, 2026-10-15)
 
-Additive; joins the pinned consumer slice when built.
+Built as proposed, with the refinements below. They're in the pinned consumer
+slice.
 
 **`POST /usage-links`**: record that an arena recording used a dish (and
 fish), at Start.

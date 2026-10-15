@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
+from .data import usage_links
 from .data.fish_timeline import fish_timeline as build_fish_timeline
 from .data.screening_calls import dish_calls as dish_screening_calls
 from .data.screening_calls import fish_calls as fish_screening_calls
@@ -291,6 +292,30 @@ class FishRevisionListResponse(BaseModel):
     items: List[FishRevisionResponse] = Field(default_factory=list)
 
 
+class UsageLinkResponse(BaseModel):
+    """A recording's use of a dish (and fish); docs/fish_timeline_design.md."""
+
+    recording_ref: str
+    ref_kind: Literal["observation_context", "citrus_session"]
+    recording_id: Optional[str] = None
+    dish_id: str
+    fish_id: Optional[str] = None
+    fish_revision: Optional[int] = None
+    unit_id: Optional[str] = None
+    rig_id: str
+    arena_id: str
+    subject_count: Optional[int] = None
+    started_at: str
+    ended_at: Optional[str] = None
+    end_status: Optional[Literal["completed", "aborted", "interrupted"]] = None
+    received_at: str
+    updated_at: str
+
+
+class UsageLinkListResponse(BaseModel):
+    items: List[UsageLinkResponse] = Field(default_factory=list)
+
+
 class ApiErrorDetail(BaseModel):
     """Structured error: ``error`` code plus identifiers or ``message``."""
 
@@ -311,6 +336,15 @@ _DATABASE_ERROR_RESPONSE = {
     503: {"model": ApiErrorResponse, "description": "Lookup failed (database_error)"},
 }
 _LOOKUP_ERROR_RESPONSES = {**_NOT_FOUND_RESPONSE, **_DATABASE_ERROR_RESPONSE}
+
+_USAGE_LINK_ERRORS = {
+    404: {"model": ApiErrorResponse,
+          "description": "dish_not_found / fish_not_found (new link) or usage_link_not_found"},
+    409: {"model": ApiErrorResponse,
+          "description": "usage_link_conflict (different creation body) or usage_link_end_conflict"},
+    422: {"model": ApiErrorResponse, "description": "invalid_usage_link (with field)"},
+    **_DATABASE_ERROR_RESPONSE,
+}
 
 _CREATE_FISH_RESPONSES = {
     200: {"model": FishSubjectResponse,
@@ -6053,6 +6087,67 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if not data_manager.relocate_fish(fish_id, new_unit_id, reason):
             raise HTTPException(status_code=500, detail="Failed to move fish")
         return data_manager.get_fish_subject(fish_id)
+
+    # ------------------------------------------------------------------
+    # Usage links (docs/fish_timeline_design.md)
+    # ------------------------------------------------------------------
+
+    def _usage_call(fn, *args):
+        _require_db_path()
+        try:
+            with data_manager.get_connection() as conn:
+                result = fn(conn, *args)
+                conn.commit()
+                return result
+        except usage_links.UsageLinkError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
+
+    @app.post("/usage-links", status_code=201, response_model=UsageLinkResponse,
+              responses={200: {"model": UsageLinkResponse,
+                               "description": "Identical replay; the current link"},
+                         **_USAGE_LINK_ERRORS})
+    def create_usage_link(response: Response, body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Record that an arena recording used a dish (and fish), at Start.
+
+        Idempotent on ``recording_ref``: an identical replay is 200, a
+        different body 409. An existing ref is answered before any dish or
+        fish check. No server-filled fields in the request.
+        """
+        status, link = _usage_call(usage_links.create_link, body)
+        response.status_code = status
+        return link
+
+    @app.patch("/usage-links/{recording_ref}", response_model=UsageLinkResponse,
+               responses=_USAGE_LINK_ERRORS)
+    def end_usage_link(recording_ref: str, body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Record a link's end (``ended_at``, ``end_status``), at Stop.
+
+        Clients percent-encode ``recording_ref``. An identical replay is 200;
+        a different end once one is recorded is 409; no link is 404.
+        """
+        return _usage_call(usage_links.end_link, recording_ref, body)
+
+    @app.get("/usage-links/{recording_ref}", response_model=UsageLinkResponse,
+             responses=_USAGE_LINK_ERRORS)
+    def get_usage_link(recording_ref: str) -> Dict[str, Any]:
+        link = _usage_call(usage_links.get_link, recording_ref)
+        if link is None:
+            raise HTTPException(status_code=404, detail={
+                "error": "usage_link_not_found", "recording_ref": recording_ref})
+        return link
+
+    @app.get("/usage-links", response_model=UsageLinkListResponse,
+             responses=_USAGE_LINK_ERRORS)
+    def list_usage_links(
+        fish_id: Optional[str] = Query(default=None),
+        dish_id: Optional[str] = Query(default=None),
+        active_at: Optional[str] = Query(default=None,
+                                         description="RFC 3339 UTC instant; links open then"),
+    ) -> Dict[str, Any]:
+        """Links by fish, by dish (including dish-level rows), or open at an instant."""
+        return {"items": _usage_call(usage_links.list_links, fish_id, dish_id, active_at)}
 
     @app.get("/fish/{fish_id}/timeline")
     def get_fish_timeline(fish_id: str) -> Dict[str, Any]:

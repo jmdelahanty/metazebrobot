@@ -10,6 +10,9 @@ day-precision facts), so entries from different tables sort together.
 
 from typing import Any, Dict, List, Optional
 
+from datetime import datetime
+
+from ..utils.lab_time import LAB_TIMEZONE
 from .screening_calls import fish_calls, utc_to_lab_compact
 
 _VIA_LABELS = {
@@ -32,6 +35,29 @@ def _iso(compact: Optional[str]) -> Optional[str]:
 
 def _utc_iso(value: Optional[str]) -> Optional[str]:
     return _iso(utc_to_lab_compact(value))
+
+
+def _rfc3339_to_lab_iso(value: Optional[str]) -> Optional[str]:
+    """'...Z' (UTC) -> lab-local 'YYYY-MM-DDTHH:MM:SS'."""
+    if not value:
+        return None
+    instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return instant.astimezone(LAB_TIMEZONE).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _sqlite_utc_to_norm(value: Optional[str]) -> Optional[str]:
+    """'YYYY-MM-DD HH:MM:SS' (UTC) -> usage_links' normalized form."""
+    return f"{value[:10]}T{value[11:19]}.000000Z" if value else None
+
+
+def _dish_at(revisions: List[Dict[str, Any]], created_norm: Optional[str], instant: str) -> Optional[str]:
+    """The fish's dish at a normalized UTC instant, from its revision history."""
+    before = [r for r in revisions if _sqlite_utc_to_norm(r["recorded_at"]) <= instant]
+    if before:
+        return before[-1]["dish_id"]
+    if revisions and created_norm and created_norm <= instant:
+        return revisions[0]["dish_id"]
+    return None
 
 
 def _entry(at, kind, summary, source, **details):
@@ -133,6 +159,44 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
                 ))
         previous = rev
 
+    try:
+        own_links = [dict(r) for r in conn.execute(
+            "SELECT * FROM usage_links WHERE fish_id = ? ORDER BY started_norm", (fish_id,))]
+        dish_links = [dict(r) for r in conn.execute(
+            "SELECT * FROM usage_links WHERE fish_id IS NULL ORDER BY started_norm")]
+    except Exception:  # usage_links absent (older database)
+        own_links, dish_links = [], []
+    for link in own_links:
+        where = f"rig {link['rig_id']} arena {link['arena_id']}"
+        ref = link["recording_id"] or link["recording_ref"]
+        end = (f", ended {_rfc3339_to_lab_iso(link['ended_at']).replace('T', ' ')} ({link['end_status']})"
+               if link["ended_at"] else ", end not recorded yet")
+        entries.append(_entry(
+            _rfc3339_to_lab_iso(link["started_at"]), "recorded",
+            f"Used in recording {ref} on {where}"
+            + (f", taken from well {link['unit_id'].split(':')[-1]}" if link["unit_id"] else "")
+            + end,
+            "usage_links",
+            recording_ref=link["recording_ref"], recording_id=link["recording_id"],
+            rig_id=link["rig_id"], arena_id=link["arena_id"], unit_id=link["unit_id"],
+            fish_revision=link["fish_revision"],
+            ended_at=_rfc3339_to_lab_iso(link["ended_at"]), end_status=link["end_status"],
+        ))
+    created_norm = _sqlite_utc_to_norm(fish["created_at"])
+    for link in dish_links:
+        if _dish_at(revisions, created_norm, link["started_norm"]) != link["dish_id"]:
+            continue
+        entries.append(_entry(
+            _rfc3339_to_lab_iso(link["started_at"]), "possibly_recorded",
+            f"Possibly used in recording {link['recording_id'] or link['recording_ref']} on rig "
+            f"{link['rig_id']} arena {link['arena_id']}: dish {link['dish_id']} was recorded"
+            + (f" ({link['subject_count']} fish)" if link["subject_count"] else "")
+            + " but no fish was named",
+            "usage_links",
+            recording_ref=link["recording_ref"], dish_id=link["dish_id"],
+            subject_count=link["subject_count"],
+        ))
+
     entries.sort(key=lambda e: e["at"] or "")
     return {
         "fish_id": fish_id,
@@ -142,5 +206,5 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
         "origin_dish_id": fish["origin_dish_id"],
         "revision": fish["revision"],
         "entries": entries,
-        "not_yet_recorded": ["recordings (usage links)", "deaths"],
+        "not_yet_recorded": ["deaths"],
     }

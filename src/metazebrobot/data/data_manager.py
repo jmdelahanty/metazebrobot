@@ -17,6 +17,7 @@ from pydantic import NonNegativeInt, TypeAdapter
 
 from ..utils.config import config
 from ..utils.indicator_match import match_step
+from . import usage_links
 from ..utils.file_operations import ensure_directory, load_json_file
 
 logger = logging.getLogger(__name__)
@@ -930,6 +931,9 @@ class DataManager:
                     cursor.execute("ALTER TABLE fish_subjects ADD COLUMN created_via TEXT")
                 if 'created_by' not in fish_cols:
                     cursor.execute("ALTER TABLE fish_subjects ADD COLUMN created_by TEXT")
+
+                # Usage links: which recording used which dish/fish (references only)
+                usage_links.ensure_schema(cursor)
 
                 # Housing units — physical positions within a dish
                 cursor.execute("""
