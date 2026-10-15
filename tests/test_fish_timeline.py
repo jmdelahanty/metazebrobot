@@ -63,3 +63,23 @@ def test_fish_page_renders(client):
 def test_unknown_fish(client):
     assert client.get(f"/fish/{uuid.uuid4()}/timeline").json()["detail"]["error"] == "fish_not_found"
     assert client.get(f"/fish/{uuid.uuid4()}/view").status_code == 404
+
+
+def test_registration_provenance(client, seed_dish):
+    api_fish = client.post(f"/dishes/{seed_dish}/fish", json={},
+                           headers={"X-Client-Name": "citrus"}).json()["fish_id"]
+    client.cookies.set("metazebrobot_user", "Jeremy")
+    client.post(f"/dishes/{seed_dish}/fish/register", data={"subject_label": "W1"})
+    client.cookies.clear()
+    web_fish = next(f["fish_id"] for f in client.get(f"/dishes/{seed_dish}/fish").json()["items"]
+                    if f["subject_label"] == "W1")
+
+    def registered(fid):
+        return next(e for e in client.get(f"/fish/{fid}/timeline").json()["entries"]
+                    if e["kind"] == "registered")
+
+    assert registered(api_fish)["details"] == {**registered(api_fish)["details"],
+                                               "created_via": "api", "created_by": "citrus"}
+    assert "via the API by citrus" in registered(api_fish)["summary"]
+    assert registered(web_fish)["details"]["created_via"] == "web_form"
+    assert "by Jeremy" in registered(web_fish)["summary"]

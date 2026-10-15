@@ -12,6 +12,12 @@ from typing import Any, Dict, List, Optional
 
 from .screening_calls import fish_calls, utc_to_lab_compact
 
+_VIA_LABELS = {
+    "web_form": "the web form",
+    "web_batch": "web batch registration",
+    "api": "the API",
+    "tour": "the guided tour",
+}
 _DIFF_FIELDS = ("dish_id", "subject_label", "sex", "genotype", "species", "notes",
                 "current_unit_id", "origin_dish_id")
 
@@ -36,7 +42,8 @@ def _entry(at, kind, summary, source, **details):
 def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
     fish = conn.execute(
         """SELECT f.fish_id, f.dish_id, f.subject_label, f.current_unit_id, f.created_at,
-                  f.revision, COALESCE(f.origin_dish_id, f.dish_id) AS origin_dish_id
+                  f.revision, COALESCE(f.origin_dish_id, f.dish_id) AS origin_dish_id,
+                  f.created_via, f.created_by
            FROM fish_subjects f WHERE f.fish_id = ?""",
         (fish_id,),
     ).fetchone()
@@ -89,9 +96,12 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
     entries.append(_entry(
         _utc_iso(fish["created_at"]), "registered",
         f"Registered as {fish['subject_label'] or fish_id[:8]} in dish {registered_in}"
-        + ("" if first.get("kind") == "created" else " (dish as first recorded)"),
+        + ("" if first.get("kind") == "created" else " (dish as first recorded)")
+        + f" via {_VIA_LABELS.get(fish['created_via'], fish['created_via'] or 'unknown means')}"
+        + (f" by {fish['created_by']}" if fish["created_by"] else ""),
         "fish_subjects, fish_subject_revisions",
         dish_id=registered_in, origin_dish_id=fish["origin_dish_id"],
+        created_via=fish["created_via"], created_by=fish["created_by"],
     ))
 
     for row in conn.execute(

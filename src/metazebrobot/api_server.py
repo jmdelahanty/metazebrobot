@@ -643,6 +643,11 @@ def _load_user_list() -> List[str]:
     return []
 
 
+def _selected_user(request: Request) -> Optional[str]:
+    """The user explicitly selected in the web UI, or None (no fallback)."""
+    return request.cookies.get("metazebrobot_user") or None
+
+
 def _current_user(request: Request) -> str:
     """Read the current username from the metazebrobot_user cookie."""
     cookie_val = request.cookies.get("metazebrobot_user")
@@ -5488,6 +5493,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     )
     def create_fish_for_dish(
         dish_id: str,
+        request: Request,
         response: Response,
         body: Dict[str, Any] = {},
     ) -> Dict[str, Any]:
@@ -5546,6 +5552,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             genotype=body["genotype"] if "genotype" in body else dish["genotype"],
             species=body["species"] if "species" in body else (dish["species"] or "Danio rerio"),
             notes=body.get("notes"),
+            created_via="api",
+            created_by=(request.headers.get("X-Client-Name") or "")[:64] or None,
         )
         if created_id is None:
             # A concurrent request may have created the same fish_id first.
@@ -5674,6 +5682,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             genotype=genotype or None,
             species=species or None,
             notes=notes or None,
+            created_via="web_form",
+            created_by=_selected_user(request),
         )
         if fish_id is None:
             return templates.TemplateResponse(request, "screening/_flash_message.html", {
@@ -5715,6 +5725,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 subject_label=label,
                 genotype=dish.get("genotype"),
                 species=dish.get("species") or "Danio rerio",
+                created_via="web_batch",
+                created_by=_selected_user(request),
             )
             if fish_id is not None:
                 created += 1
@@ -6288,6 +6300,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 fid = data_manager.create_fish_subject(
                     dish_id=pos_dish,
                     subject_label=f"wt-{i:02d}",
+                    created_via="tour",
                     genotype="Tg(gfap:TRPV1-T2A-GFP);Tg(elavl3:jRGECO1b)",
                     species="Danio rerio",
                 )

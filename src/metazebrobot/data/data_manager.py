@@ -925,6 +925,11 @@ class DataManager:
                     cursor.execute("ALTER TABLE fish_subjects ADD COLUMN origin_dish_id TEXT")
                 if 'origin_dish_uuid' not in fish_cols:
                     cursor.execute("ALTER TABLE fish_subjects ADD COLUMN origin_dish_uuid TEXT")
+                # How and by whom the fish was created (docs/fish_timeline_design.md).
+                if 'created_via' not in fish_cols:
+                    cursor.execute("ALTER TABLE fish_subjects ADD COLUMN created_via TEXT")
+                if 'created_by' not in fish_cols:
+                    cursor.execute("ALTER TABLE fish_subjects ADD COLUMN created_by TEXT")
 
                 # Housing units — physical positions within a dish
                 cursor.execute("""
@@ -3334,8 +3339,13 @@ class DataManager:
         genotype: Optional[str] = None,
         species: Optional[str] = None,
         notes: Optional[str] = None,
+        created_via: Optional[str] = None,
+        created_by: Optional[str] = None,
     ) -> Optional[str]:
         """Create a new fish subject.
+
+        ``created_via`` (web_form, web_batch, api, tour, ...) and ``created_by``
+        (the selected web user or the API client's name) record provenance.
 
         If fish_id is provided (e.g. minted by Citrus at acquisition time),
         it is used as-is.  Otherwise a new UUID v4 is generated server-side.
@@ -3352,12 +3362,12 @@ class DataManager:
                     """
                     INSERT INTO fish_subjects
                         (fish_id, dish_id, subject_label, sex, genotype, species, notes,
-                         origin_dish_id, origin_dish_uuid)
+                         origin_dish_id, origin_dish_uuid, created_via, created_by)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?,
-                            (SELECT dish_uuid FROM dishes WHERE dish_id = ?))
+                            (SELECT dish_uuid FROM dishes WHERE dish_id = ?), ?, ?)
                     """,
                     (fish_id, dish_id, subject_label, sex, genotype, species, notes,
-                     dish_id, dish_id),
+                     dish_id, dish_id, created_via, created_by),
                 )
                 conn.commit()
                 return fish_id
