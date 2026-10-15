@@ -193,7 +193,9 @@ def end_link(conn, recording_ref: str, body: Dict[str, Any]) -> Dict[str, Any]:
     if not row:
         raise UsageLinkError(404, {"error": "usage_link_not_found", "recording_ref": recording_ref})
     if row["ended_at"] is not None:
-        if (row["ended_at"], row["end_status"]) != (body["ended_at"], body["end_status"]):
+        # Compare instants, not strings: two writers (Citrus at Stop, Palette at
+        # intake) may format the same end with or without fractional seconds.
+        if (row["ended_norm"], row["end_status"]) != (ended_norm, body["end_status"]):
             raise UsageLinkError(409, {"error": "usage_link_end_conflict",
                                        "recording_ref": recording_ref})
         return _row(row)

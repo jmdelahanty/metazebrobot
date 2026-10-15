@@ -87,6 +87,16 @@ class TestEnd:
         assert other.status_code == 409
         assert other.json()["detail"]["error"] == "usage_link_end_conflict"
 
+    def test_same_end_in_another_format_is_not_a_conflict(self, client, seed_dish):
+        body = _link(seed_dish)
+        client.post("/usage-links", json=body)
+        client.patch(f"/usage-links/{body['recording_ref']}",
+                     json={"ended_at": "2026-10-09T20:35:02Z", "end_status": "completed"})
+        again = client.patch(f"/usage-links/{body['recording_ref']}",
+                             json={"ended_at": "2026-10-09T20:35:02.000Z", "end_status": "completed"})
+        assert again.status_code == 200
+        assert again.json()["ended_at"] == "2026-10-09T20:35:02Z"  # first value kept as sent
+
     def test_patch_before_post_is_404(self, client):
         resp = client.patch(f"/usage-links/{_ref()}",
                             json={"ended_at": "2026-10-09T20:35:02Z", "end_status": "completed"})
