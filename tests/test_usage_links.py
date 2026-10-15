@@ -155,3 +155,11 @@ class TestTimeline:
         assert recorded["at"] == "2030-01-01T12:00:00"  # lab time (EST)
         possibly = next(e for e in entries if e["kind"] == "possibly_recorded")
         assert "no fish was named" in possibly["summary"]
+
+
+def test_link_for_fish_that_has_since_died_is_accepted(client, fish):
+    """A late replay (e.g. Palette's backup delivery) of a real recording must land."""
+    dish_id, fish_id = fish
+    assert client.post(f"/fish/{fish_id}/end", json={"reason": "found_dead"}).status_code == 200
+    body = _link(dish_id, fish_id=fish_id, started_at="2026-10-09T20:00:18Z")
+    assert client.post("/usage-links", json=body).status_code == 201
