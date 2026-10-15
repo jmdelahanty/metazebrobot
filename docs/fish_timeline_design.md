@@ -217,5 +217,11 @@ if an end with different values is already recorded. `404 usage_link_not_found`.
   - `interrupted`: crash, power loss or GUI closed mid-session. This one is
     sent at the next Citrus start, possibly hours later, with `ended_at` =
     the last flushed frame time, not the arrival time.
+- **Only Citrus records the end** (agent-contracts #112, 934811d): the file
+  seals no normal-stop vs abort signal, so Palette never PATCHes the end. A
+  link whose end never arrives stays open: the timeline says "end not
+  recorded yet", and `GET /usage-links?active_at=` includes it for every later
+  instant. Read `ended_at: null` in that query as "end unknown", not "still
+  running".
 - **Stable request bytes:** Citrus seals the exact start POST (method, path,
   body) in snapshot v4.x, so the request carries no server-filled fields.
