@@ -211,9 +211,14 @@ class FishDishController:
         notes: Optional[str] = None,
         source_screening_datetime: Optional[str] = None,
         source_screening_bucket: Optional[str] = None,
+        allow_empty: bool = False,
     ) -> Tuple[bool, str, Optional[FishDish]]:
         """
         Creates a new dish derived from a parent dish.
+
+        With ``allow_empty`` (a well plate filled while screening) ``fish_count``
+        may be 0: the dish starts empty and grows as fish are placed
+        (``grow_plate_for_placed_fish``), adding its step allocation then.
 
         Args:
             parent_dish_id: The ID of the dish this new one is split from.
@@ -233,7 +238,7 @@ class FishDishController:
             if not parent_dish:
                 return False, f"Parent dish {parent_dish_id} not found.", None
 
-            if fish_count <= 0:
+            if fish_count < 0 or (fish_count == 0 and not allow_empty):
                 return False, "Fish count must be greater than zero.", None
 
             matched_step = None
@@ -309,7 +314,7 @@ class FishDishController:
 
             # 5. Save the new dish
             if data_manager.save_fish_dish(new_dish.model_dump(mode='json', exclude_none=True)):
-                if matched_step:
+                if matched_step and fish_count > 0:
                     try:
                         parent_dish.add_screening_step_allocation(
                             matched_step.screening_datetime,
@@ -617,6 +622,79 @@ class FishDishController:
                 exc_info=True,
             )
             return False, f"An unexpected error occurred: {str(e)}", None
+
+    def plate_growth_check(self, plate_dish_id: str, living_fish: int) -> Tuple[bool, str]:
+        """Can one more fish be placed? Refuses when it would exceed the screen.
+
+        Growth is needed only when the plate would hold more tracked fish than
+        its current count (a plate started empty grows with every fish).
+        """
+        plate = self.get_dish(plate_dish_id)
+        if plate is None:
+            return False, f"Dish {plate_dish_id} not found."
+        current = plate.current_fish_count if plate.current_fish_count is not None else plate.fish_count
+        if living_fish + 1 <= (current or 0):
+            return True, "within count"
+        step_time = plate.source_screening_datetime
+        if not (plate.parent_dish_id and step_time):
+            return True, "grows its own count"
+        parent = self.get_dish(plate.parent_dish_id)
+        step = parent.get_screening_step(step_time) if parent else None
+        if step is None:
+            return False, f"Source screening step {step_time} not found on {plate.parent_dish_id}."
+        if step.total_allocated_count + 1 > step.count_screened_this_step:
+            return False, (f"Step {step_time} on {plate.parent_dish_id} screened "
+                           f"{step.count_screened_this_step} fish and all are already allocated. "
+                           "Raise its screened count first.")
+        return True, "grows from its screening step"
+
+    def grow_plate_for_placed_fish(self, plate_dish_id: str, living_fish: int) -> Tuple[bool, str]:
+        """After placing a fish: raise counts by one if the plate now holds more than its count.
+
+        For a plate split from a screening step this raises the step's
+        allocation to the plate (creating it at 1), so the parent dish loses
+        the fish; otherwise it raises the plate's own count.
+        """
+        plate = self.get_dish(plate_dish_id)
+        if plate is None:
+            return False, f"Dish {plate_dish_id} not found."
+        current = plate.current_fish_count if plate.current_fish_count is not None else plate.fish_count
+        if living_fish <= (current or 0):
+            return True, "count unchanged"
+        step_time = plate.source_screening_datetime
+        if plate.parent_dish_id and step_time:
+            parent = self.get_dish(plate.parent_dish_id)
+            step = parent.get_screening_step(step_time) if parent else None
+            if step is None:
+                return False, f"Source screening step {step_time} not found."
+            allocation = next((a for a in step.allocations
+                               if (a.derived_dish_id or a.destination_dish_id) == plate_dish_id), None)
+            try:
+                if allocation is None:
+                    parent.add_screening_step_allocation(step_time, ScreeningStepAllocation(
+                        bucket=plate.source_screening_bucket or plate.dish_population_type,
+                        disposition="derived_dish", count=1,
+                        destination_dish_id=plate_dish_id, derived_dish_id=plate_dish_id,
+                        notes="Placed one by one while screening",
+                    ))
+                else:
+                    if step.total_allocated_count + 1 > step.count_screened_this_step:
+                        return False, "All screened fish are already allocated."
+                    allocation.count += 1
+                    parent.refresh_screening_state()
+            except ValueError as exc:
+                return False, str(exc)
+            parent_payload = parent.model_dump(mode='json', exclude_none=True)
+            if not data_manager.save_fish_dish(parent_payload):
+                return False, f"Failed to save {parent.dish_id}."
+            data_manager.data_cache.setdefault('fish_dishes', {})[parent.dish_id] = parent_payload
+        plate.fish_count = (plate.fish_count or 0) + 1
+        plate.refresh_screening_state()
+        plate_payload = plate.model_dump(mode='json', exclude_none=True)
+        if not data_manager.save_fish_dish(plate_payload):
+            return False, f"Failed to save {plate_dish_id}."
+        data_manager.data_cache.setdefault('fish_dishes', {})[plate_dish_id] = plate_payload
+        return True, "count raised by one"
 
     def transfer_fish_between_dishes(
         self,

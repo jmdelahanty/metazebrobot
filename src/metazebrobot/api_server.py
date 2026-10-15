@@ -382,6 +382,12 @@ def _well_sort_key(label: str) -> Tuple[str, int]:
     return (match.group(1), int(match.group(2))) if match else (label or "", 0)
 
 
+def _short_construct(construct: Optional[str]) -> str:
+    """'Tg(gfap:PMCA2-mCherry-zf)' -> 'PMCA2-mCherry-zf' for compact display."""
+    match = re.search(r":([^)]+)\)", construct or "")
+    return match.group(1) if match else (construct or "?")
+
+
 def _next_fish_label(dish_id: str, prefix: str) -> str:
     """Next '<prefix><n>' among this dish's fish (ended ones included)."""
     pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
@@ -5150,20 +5156,36 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         request: Request,
         dish_id: str,
         screening_datetime: str,
-        fish_count: int = Form(...),
+        fish_count: Optional[str] = Form(default=None),
         population_type: str = Form(...),
         container_type: Optional[str] = Form(default=None),
         notes: Optional[str] = Form(default=None),
+        plate_wells: Optional[str] = Form(default=None),
     ):
-        """Create a derived dish linked to a specific screening step."""
+        """Create a derived dish linked to a specific screening step.
+
+        A well plate may be created empty (no count): it gets its wells now and
+        its count grows as fish are placed on its fish page.
+        """
+        count = int(fish_count) if (fish_count or "").strip() else 0
+        wells = int(plate_wells) if (plate_wells or "").strip() else None
+        if wells is not None and wells not in PLATE_FORMATS:
+            wells = None
+        filling_plate = container_type == "well_plate" and count == 0
+        if count == 0 and not filling_plate:
+            return templates.TemplateResponse(request, "screening/_flash_message.html", {
+                "message": "Enter a count, or choose Well Plate to fill it while screening.",
+                "level": "error",
+            })
         success, message, new_dish = fish_dish_ctrl.create_derived_dish(
             parent_dish_id=dish_id,
             population_type=population_type,
-            fish_count=fish_count,
+            fish_count=count,
             container_type=container_type or None,
             notes=notes or None,
             source_screening_datetime=screening_datetime,
             source_screening_bucket=population_type,
+            allow_empty=filling_plate,
         )
 
         if not success:
@@ -5171,6 +5193,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "message": message,
                 "level": "error",
             })
+        if new_dish is not None and container_type == "well_plate" and wells:
+            for label in _plate_labels(wells):
+                data_manager.create_housing_unit(
+                    dish_id=new_dish.dish_id, unit_kind="well", position_label=label, capacity=1)
+        if filling_plate and new_dish is not None:
+            return RedirectResponse(url=f"/dishes/{new_dish.dish_id}/fish/", status_code=303)
 
         return RedirectResponse(
             url=f"/screening/{dish_id}",
@@ -5197,10 +5225,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             request,
             recovered_dish_id,
             screening_datetime,
-            fish_count,
+            str(fish_count),
             population_type,
             container_type,
             notes,
+            None,
         )
 
     # ------------------------------------------------------------------
@@ -5747,6 +5776,15 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         units = data_manager.get_housing_units_with_fish(dish_id)
         fish = data_manager.get_fish_subjects(dish_id)
         unassigned = [f for f in fish if f.get("current_unit_id") is None]
+        # Each placed fish's inherited screening result, shown in its well.
+        results: Dict[str, str] = {}
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            for f in fish:
+                calls = (fish_screening_calls(conn, f["fish_id"]) or {}).get("calls", [])
+                results[f["fish_id"]] = " ".join(
+                    ("pig" if c["kind"] == "pigment" else _short_construct(c["dish_construct"]))
+                    + {"positive": "+", "negative": "−", "pigmented": ""}.get(c["result"], "?")
+                    for c in calls)
         return templates.TemplateResponse(request, "fish/_plate_map.html", {
             "dish_id": dish_id,
             "units": units,
@@ -5756,6 +5794,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "flash_message": flash_message,
             "flash_level": flash_level,
             "fish": fish if refresh_fish_table else None,
+            "results": results,
         })
 
     @app.post("/dishes/{dish_id}/plate/setup", response_class=HTMLResponse)
@@ -5795,6 +5834,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             target = empty[0]
         else:
             return plate_map(request, dish_id, "No empty wells left on this plate.", "error")
+        living = len(data_manager.get_fish_subjects(dish_id))
+        room_ok, room_message = fish_dish_ctrl.plate_growth_check(dish_id, living)
+        if not room_ok:
+            return plate_map(request, dish_id, room_message, "error")
         label = (subject_label or "").strip() or _next_fish_label(dish_id, label_prefix.strip() or "Z")
         if _subject_label_error(label):
             return plate_map(request, dish_id, f"Labels are at most {SUBJECT_LABEL_MAX_LENGTH} "
@@ -5809,6 +5852,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         )
         if fish_id is None or not data_manager.relocate_fish(fish_id, target["unit_id"], "initial"):
             return plate_map(request, dish_id, "Couldn't place the fish.", "error")
+        grown, grow_message = fish_dish_ctrl.grow_plate_for_placed_fish(dish_id, living + 1)
+        if not grown:
+            return plate_map(request, dish_id, f"Placed {label} in {target['position_label']}, but "
+                             f"the dish counts weren't updated: {grow_message}", "error",
+                             refresh_fish_table=True)
         return plate_map(request, dish_id, f"Placed {label} in {target['position_label']}.",
                          refresh_fish_table=True)
 

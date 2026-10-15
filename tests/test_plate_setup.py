@@ -63,13 +63,90 @@ def test_full_plate_and_bad_size(client):
     _, plate = _screened_dish(client)
     assert "Unsupported plate size" in client.post(f"/dishes/{plate}/plate/setup",
                                                    data={"wells": 7}).text
-    client.post(f"/dishes/{plate}/plate/setup", data={"wells": 6})
-    for _ in range(6):
-        client.post(f"/dishes/{plate}/plate/add-fish", data={})
-    assert "No empty wells left" in client.post(f"/dishes/{plate}/plate/add-fish", data={}).text
+    _, big = _empty_plate(client, screened=20)  # 12 wells, room for 20 fish
+    for _ in range(12):
+        client.post(f"/dishes/{big}/plate/add-fish", data={})
+    assert "No empty wells left" in client.post(f"/dishes/{big}/plate/add-fish", data={}).text
 
 
 def test_plate_map_page_offers_setup(client):
     _, plate = _screened_dish(client)
     page = client.get(f"/dishes/{plate}/plate-map")
     assert "Set up wells" in page.text and "12-well plate" in page.text
+
+
+def _empty_plate(client, screened=8):
+    dish = FishDish.create_new(
+        cross_id=f"CROSS_{uuid.uuid4().hex[:6]}", dish_number=1,
+        genotype="Tg(gfap:PMCA2-mCherry-zf)", responsible="test-user", fish_count=20,
+        dof="20261008", container_type="petri_dish",
+    ).model_dump(mode="json", exclude_none=True)
+    dish["screening_results"] = {"screenings": [{
+        "screening_datetime": "20261014T10:00:00", "dpf_screened": 6,
+        "indicators_screened": ["mCherry"], "count_screened_this_step": screened, "allocations": [],
+    }]}
+    assert data_manager.save_fish_dish(dish)
+    resp = client.post(f"/screening/{dish['dish_id']}/steps/20261014T10:00:00/split",
+                       data={"population_type": "positive_screened", "container_type": "well_plate",
+                             "plate_wells": "12", "fish_count": ""}, follow_redirects=False)
+    assert resp.status_code == 303
+    plate = f"{dish['dish_id']}_pos1"
+    assert resp.headers["location"] == f"/dishes/{plate}/fish/"
+    return dish["dish_id"], plate
+
+
+def _counts(client, *dish_ids):
+    return tuple(client.get(f"/dishes/{d}").json()["current_fish_count"] for d in dish_ids)
+
+
+def test_empty_plate_grows_with_each_fish_while_screening(client):
+    parent, plate = _empty_plate(client)
+    assert len(_wells(plate)) == 12
+    assert _counts(client, parent, plate) == (20, 0)
+
+    for _ in range(3):
+        client.post(f"/dishes/{plate}/plate/add-fish", data={})
+
+    assert _counts(client, parent, plate) == (17, 3)
+    step = client.get(f"/dishes/{parent}").json()["data"]["screening_results"]["screenings"][0]
+    assert [(a["bucket"], a["disposition"], a["count"]) for a in step["allocations"]] == [
+        ("positive_screened", "derived_dish", 3)]
+    page = client.get(f"/dishes/{plate}/plate-map").text
+    assert "PMCA2-mCherry-zf+" in page
+
+
+def test_cannot_place_more_fish_than_were_screened(client):
+    parent, plate = _empty_plate(client, screened=2)
+    client.post(f"/dishes/{plate}/plate/add-fish", data={})
+    client.post(f"/dishes/{plate}/plate/add-fish", data={})
+    third = client.post(f"/dishes/{plate}/plate/add-fish", data={})
+    assert "already allocated" in third.text
+    assert len(client.get(f"/dishes/{plate}/fish").json()["items"]) == 2
+    assert _counts(client, parent, plate) == (18, 2)
+
+
+def test_plate_created_with_a_count_only_grows_past_it(client):
+    # Split with an explicit count of 5 from a step whose 20 fish are all allocated
+    # (15 negatives stay): five fish fit the count, a sixth would exceed the screen.
+    parent, plate = _screened_dish(client)
+    client.post(f"/dishes/{plate}/plate/setup", data={"wells": 12})
+    for _ in range(5):
+        client.post(f"/dishes/{plate}/plate/add-fish", data={})
+    assert _counts(client, parent, plate) == (15, 5)
+    assert "already allocated" in client.post(f"/dishes/{plate}/plate/add-fish", data={}).text
+    assert len(client.get(f"/dishes/{plate}/fish").json()["items"]) == 5
+
+
+def test_count_still_required_for_other_containers(client):
+    dish = FishDish.create_new(
+        cross_id=f"CROSS_{uuid.uuid4().hex[:6]}", dish_number=1, genotype="Tg(x:y)",
+        responsible="t", fish_count=5, dof="20261008", container_type="petri_dish",
+    ).model_dump(mode="json", exclude_none=True)
+    dish["screening_results"] = {"screenings": [{
+        "screening_datetime": "20261014T10:00:00", "dpf_screened": 6,
+        "indicators_screened": ["x"], "count_screened_this_step": 5, "allocations": []}]}
+    data_manager.save_fish_dish(dish)
+    resp = client.post(f"/screening/{dish['dish_id']}/steps/20261014T10:00:00/split",
+                       data={"population_type": "positive_screened", "container_type": "petri_dish",
+                             "fish_count": ""})
+    assert "Enter a count" in resp.text

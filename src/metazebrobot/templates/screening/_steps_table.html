@@ -76,8 +76,8 @@
             </select>
         </label>
         <label>
-            Count
-            <input type="number" name="fish_count" min="1" required>
+            Count <small>(leave empty for a well plate you fill while screening)</small>
+            <input type="number" name="fish_count" min="1">
         </label>
         <label>
             Container Type
@@ -87,6 +87,17 @@
                 <option value="beaker">Beaker</option>
                 <option value="well_plate">Well Plate</option>
                 <option value="tank">Tank</option>
+            </select>
+        </label>
+        <label>
+            Plate size <small>(well plate)</small>
+            <select name="plate_wells">
+                <option value="">No wells yet</option>
+                <option value="6">6 (A1–B3)</option>
+                <option value="12" selected>12 (A1–C4)</option>
+                <option value="24">24 (A1–D6)</option>
+                <option value="48">48 (A1–F8)</option>
+                <option value="96">96 (A1–H12)</option>
             </select>
         </label>
     </div>

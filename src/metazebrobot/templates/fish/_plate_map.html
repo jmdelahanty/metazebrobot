@@ -77,6 +77,7 @@
                     <div class="plate-well__label">{{ label }}</div>
                     {% for f in unit.fish %}
                     <div class="plate-well__fish"><a href="/fish/{{ f.fish_id }}/view">{{ f.subject_label or f.fish_id[:8] }}</a></div>
+                    {% if results and results.get(f.fish_id) %}<small class="plate-well__result">{{ results[f.fish_id] }}</small>{% endif %}
                     {% endfor %}
                 </div>
                 {% else %}
