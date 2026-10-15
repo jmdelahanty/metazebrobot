@@ -108,3 +108,17 @@ def test_cross_folder_needs_a_dish_and_paths_cannot_escape(client, plate_with_im
     assert "dish only" in page.text
     escaped = client.get("/image-links/import", params={"folder": "../../etc"})
     assert "outside the screening staging root" in escaped.text
+
+
+def test_viewer_is_served_and_gallery_links_to_it(client, plate_with_images):
+    plate, fish = plate_with_images
+    viewer = client.get("/viewer/")
+    assert viewer.status_code == 200 and "/viewer/assets/" in viewer.text
+    form = {"dish_id": plate, "kind": "plate", "include_1": "on",
+            "rel_1": f"{plate}/{plate}_A1-OME TIFF-Export-01.ome.tiff", "fish_1": fish["Z1"]}
+    client.post("/image-links/import", data=form)
+    link_id = client.get(f"/dishes/{plate}/image-links").json()["items"][0]["id"]
+    gallery = client.get(f"/dishes/{plate}/image-links/gallery").text
+    assert f"/viewer/?image_url=http://testserver/image-links/{link_id}/image.ome.tiff" in gallery
+    tiff = client.get(f"/image-links/{link_id}/image.ome.tiff", headers={"Range": "bytes=0-3"})
+    assert tiff.status_code == 206 and tiff.headers["content-type"] == "image/tiff"

@@ -53,3 +53,20 @@ individual ids) and, where possible, for each individual fish.
 - Fish timeline page: that fish's images; the timeline gets an "imaged" entry.
 - JSON: import page `/image-links/import`; `GET /dishes/{dish_id}/image-links`, `GET /fish/{fish_id}/image-links`
   (not in the pinned consumer slice yet).
+
+## Viewer
+
+Each gallery image has "open in viewer": **Avivator**, the OME-TIFF viewer
+from Viv (MIT, Gehlenborg lab), built from source and served by MetaZebrobot
+at `/viewer/`. It streams the original from `/image-links/{id}/image.ome.tiff`
+with byte ranges, giving full resolution, per-channel colour and contrast, and
+16-bit values. Nothing leaves our server, and the hosted Avivator site isn't
+needed.
+
+- Build: `scripts/build_viewer.sh`, pinned to Viv commit `f7baf858f495`
+  (`@hms-dbmi/viv` 0.23.0; Git tags stop at 0.17.3). It needs Node and network
+  once.
+- The built files (`src/metazebrobot/static/viewer/`, about 3.4 MB, with
+  Viv's LICENSE and `BUILD_INFO.txt`) are committed, so the service never
+  needs Node. Rebuild to update.
+

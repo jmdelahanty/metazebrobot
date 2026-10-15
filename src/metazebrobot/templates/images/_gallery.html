@@ -12,7 +12,8 @@
             {% if img.fish_id %} · <a href="/fish/{{ img.fish_id }}/view">{{ labels.get(img.fish_id) or img.fish_id[:8] }}</a>{% endif %}
             · {{ img.kind }} · {{ img.taken_at_lab }}
             {% for c in img.channels %}<br>{{ c.fluor or c.name }}{% endfor %}
-            <br><a href="/image-links/{{ img.id }}/file">original OME-TIFF</a>
+            <br><a href="/viewer/?image_url={{ request.base_url }}image-links/{{ img.id }}/image.ome.tiff"
+                   target="_blank">open in viewer</a> · <a href="/image-links/{{ img.id }}/file">download</a>
         </small></figcaption>
     </figure>
 {% endfor %}

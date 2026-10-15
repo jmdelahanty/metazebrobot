@@ -2544,6 +2544,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     # Canonical feed types display as labels; older free-text values pass through.
     templates.env.filters["feed_type_label"] = lambda value: FEED_TYPE_LABELS.get(value, value)
     app.mount("/static", StaticFiles(directory=str(_PACKAGE_DIR / "static")), name="static")
+    # Avivator (Viv's OME-TIFF viewer), built by scripts/build_viewer.sh.
+    if (_PACKAGE_DIR / "static" / "viewer" / "index.html").exists():
+        app.mount("/viewer", StaticFiles(directory=str(_PACKAGE_DIR / "static" / "viewer"),
+                                         html=True), name="viewer")
     # Serve indicator reference images from config/images/
     _config_images_dir = _PACKAGE_DIR / "config" / "images"
     if _config_images_dir.is_dir():
@@ -6690,6 +6694,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "error": "image_unavailable", "image_link_id": link_id, "message": str(exc)})
         return FileResponse(path, media_type="image/png")
 
+    @app.get("/image-links/{link_id}/image.ome.tiff")
     @app.get("/image-links/{link_id}/file")
     def image_link_file(link_id: int):
         """The original OME-TIFF (byte-range requests supported, for viewers)."""
