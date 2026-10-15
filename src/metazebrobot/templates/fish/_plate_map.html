@@ -2,6 +2,37 @@
 {# Renders a visual well plate grid for well plates, or a simple #}
 {# occupant list for open containers (petri dish, beaker, tank). #}
 
+{% if flash_message %}
+<p class="flash flash--{{ flash_level }}" role="status"><mark>{{ flash_message }}</mark></p>
+{% endif %}
+
+{% if fish is not none %}
+{# Placing a fish also refreshes the registered-fish table below. #}
+<div id="fish-table" hx-swap-oob="innerHTML">{% include "fish/_fish_table.html" %}</div>
+{% endif %}
+
+{% set wells_exist = units and units | selectattr("unit_kind", "equalto", "well") | list %}
+{% if not wells_exist %}
+<form hx-post="/dishes/{{ dish_id }}/plate/setup" hx-target="#plate-map" hx-swap="innerHTML">
+    <fieldset role="group">
+        <select name="wells" aria-label="Plate size">
+            {% for n in plate_formats %}
+            <option value="{{ n }}"{% if n == 12 %} selected{% endif %}>{{ n }}-well plate</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Set up wells</button>
+    </fieldset>
+</form>
+{% else %}
+<form hx-post="/dishes/{{ dish_id }}/plate/add-fish" hx-target="#plate-map" hx-swap="innerHTML">
+    <fieldset role="group">
+        <input type="text" name="label_prefix" value="Z" aria-label="Label prefix" style="max-width:6rem">
+        <button type="submit">Add fish to next empty well (next: {{ next_label }})</button>
+    </fieldset>
+    <small>Or click an empty well to put the next fish there.</small>
+</form>
+{% endif %}
+
 {% if units %}
 {% set first_kind = units[0].unit_kind %}
 
@@ -49,9 +80,14 @@
                     {% endfor %}
                 </div>
                 {% else %}
-                <div class="plate-well plate-well--empty">
+                <button type="button" class="plate-well plate-well--empty outline"
+                        title="Put the next fish ({{ next_label }}) in {{ label }}"
+                        hx-post="/dishes/{{ dish_id }}/plate/add-fish"
+                        hx-vals='{"unit_id": "{{ unit.unit_id }}"}'
+                        hx-target="#plate-map" hx-swap="innerHTML">
                     <div class="plate-well__label">{{ label }}</div>
-                </div>
+                    <small>+ {{ next_label }}</small>
+                </button>
                 {% endif %}
             {% else %}
             <div class="plate-well plate-well--empty">

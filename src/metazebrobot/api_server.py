@@ -367,6 +367,29 @@ _CREATE_FISH_RESPONSES = {
     **_DATABASE_ERROR_RESPONSE,
 }
 
+# Standard well-plate layouts: wells -> (rows, columns).
+PLATE_FORMATS = {6: (2, 3), 12: (3, 4), 24: (4, 6), 48: (6, 8), 96: (8, 12)}
+
+
+def _plate_labels(wells: int) -> List[str]:
+    rows, cols = PLATE_FORMATS[wells]
+    return [f"{'ABCDEFGH'[r]}{c}" for r in range(rows) for c in range(1, cols + 1)]
+
+
+def _well_sort_key(label: str) -> Tuple[str, int]:
+    """Row-major order: A1, A2, ..., A12, B1 (not text order A1, A10, A2)."""
+    match = re.match(r"^([A-Za-z]+)(\d+)$", label or "")
+    return (match.group(1), int(match.group(2))) if match else (label or "", 0)
+
+
+def _next_fish_label(dish_id: str, prefix: str) -> str:
+    """Next '<prefix><n>' among this dish's fish (ended ones included)."""
+    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
+    numbers = [int(m.group(1)) for f in data_manager.get_fish_subjects(dish_id, include_ended=True)
+               if (m := pattern.match(f.get("subject_label") or ""))]
+    return f"{prefix}{max(numbers, default=0) + 1}"
+
+
 # Lowercase canonical UUID v4 (subject identity v4 contract).
 _CANONICAL_UUID4 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 SUBJECT_LABEL_MAX_LENGTH = 64
@@ -5717,19 +5740,77 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         })
 
     @app.get("/dishes/{dish_id}/plate-map", response_class=HTMLResponse)
-    def plate_map(request: Request, dish_id: str):
-        """HTMX partial: visual housing map for a dish."""
+    def plate_map(request: Request, dish_id: str, flash_message: Optional[str] = None,
+                  flash_level: str = "success", refresh_fish_table: bool = False):
+        """HTMX partial: visual housing map for a dish, with plate-setup controls."""
         _require_db_path()
         units = data_manager.get_housing_units_with_fish(dish_id)
-        unassigned = [
-            f for f in data_manager.get_fish_subjects(dish_id)
-            if f.get("current_unit_id") is None
-        ]
+        fish = data_manager.get_fish_subjects(dish_id)
+        unassigned = [f for f in fish if f.get("current_unit_id") is None]
         return templates.TemplateResponse(request, "fish/_plate_map.html", {
             "dish_id": dish_id,
             "units": units,
             "unassigned_fish": unassigned,
+            "plate_formats": sorted(PLATE_FORMATS),
+            "next_label": _next_fish_label(dish_id, "Z"),
+            "flash_message": flash_message,
+            "flash_level": flash_level,
+            "fish": fish if refresh_fish_table else None,
         })
+
+    @app.post("/dishes/{dish_id}/plate/setup", response_class=HTMLResponse)
+    def plate_setup(request: Request, dish_id: str, wells: int = Form(...)):
+        """Create a standard well layout (e.g. 12 -> A1..C4) for a plate dish."""
+        _dish_context_for_fish_page(dish_id)  # validates dish exists
+        if wells not in PLATE_FORMATS:
+            return plate_map(request, dish_id, f"Unsupported plate size {wells}.", "error")
+        existing = {u["position_label"] for u in data_manager.get_housing_units_with_fish(dish_id)}
+        created = 0
+        for label in _plate_labels(wells):
+            if label not in existing and data_manager.create_housing_unit(
+                    dish_id=dish_id, unit_kind="well", position_label=label, capacity=1):
+                created += 1
+        return plate_map(request, dish_id, f"Created {created} wells ({wells}-well plate).")
+
+    @app.post("/dishes/{dish_id}/plate/add-fish", response_class=HTMLResponse)
+    def plate_add_fish(
+        request: Request,
+        dish_id: str,
+        unit_id: Optional[str] = Form(default=None),
+        label_prefix: str = Form(default="Z"),
+        subject_label: Optional[str] = Form(default=None),
+    ):
+        """Register one fish and place it in a well: the given one, or the next empty."""
+        dish = _dish_context_for_fish_page(dish_id)
+        wells = [u for u in data_manager.get_housing_units_with_fish(dish_id)
+                 if u["unit_kind"] == "well"]
+        empty = sorted((u for u in wells if not u.get("fish")),
+                       key=lambda u: _well_sort_key(u["position_label"]))
+        if unit_id:
+            target = next((u for u in empty if u["unit_id"] == unit_id), None)
+            if target is None:
+                return plate_map(request, dish_id, "That well isn't an empty well of this plate.",
+                                 "error")
+        elif empty:
+            target = empty[0]
+        else:
+            return plate_map(request, dish_id, "No empty wells left on this plate.", "error")
+        label = (subject_label or "").strip() or _next_fish_label(dish_id, label_prefix.strip() or "Z")
+        if _subject_label_error(label):
+            return plate_map(request, dish_id, f"Labels are at most {SUBJECT_LABEL_MAX_LENGTH} "
+                                               "characters, with no control characters.", "error")
+        fish_id = data_manager.create_fish_subject(
+            dish_id=dish_id,
+            subject_label=label,
+            genotype=dish.get("genotype"),
+            species=dish.get("species") or "Danio rerio",
+            created_via="plate_setup",
+            created_by=_selected_user(request),
+        )
+        if fish_id is None or not data_manager.relocate_fish(fish_id, target["unit_id"], "initial"):
+            return plate_map(request, dish_id, "Couldn't place the fish.", "error")
+        return plate_map(request, dish_id, f"Placed {label} in {target['position_label']}.",
+                         refresh_fish_table=True)
 
     @app.post("/dishes/{dish_id}/fish/register", response_class=HTMLResponse)
     def register_fish_htmx(

@@ -20,6 +20,7 @@ _VIA_LABELS = {
     "web_batch": "web batch registration",
     "api": "the API",
     "tour": "the guided tour",
+    "plate_setup": "plate setup",
 }
 _DIFF_FIELDS = ("dish_id", "subject_label", "sex", "genotype", "species", "notes",
                 "current_unit_id", "origin_dish_id")
