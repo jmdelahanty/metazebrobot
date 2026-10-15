@@ -182,3 +182,38 @@ if an end with different values is already recorded. `404 usage_link_not_found`.
 **Response** (`UsageLinkResponse`): the POST fields, plus `ended_at`,
 `end_status`, `received_at` (server UTC) and `updated_at`. Times stay RFC
 3339 UTC on the wire.
+
+### Refinements from Citrus's review (2026-10-15)
+
+- **`recording_ref` validation:** closed pattern per `ref_kind`, at most 160
+  characters:
+  - `observation_context`: `obsctx_` + 64 lowercase hex;
+  - `citrus_session`: printable ASCII with no `/` and no control characters
+    (an ISO 8601 UTC time, `_`, and the arena config name).
+
+  In `PATCH /usage-links/{recording_ref}`, the client percent-encodes the
+  path segment (`:` and spaces in unbound session ids). Otherwise
+  `422 invalid_usage_link` with `field: recording_ref`.
+- **`arena_id`** is a string: the arena's config name, the same value as the
+  Orange binding's `target.arena_id`.
+- **Nullability rules** (`422 invalid_usage_link`):
+  - `fish_revision` only with `fish_id`;
+  - `unit_id` only with `fish_id`;
+  - `ended_at` ≥ `started_at`.
+
+  `fish_revision` may be null with a `fish_id` (an unverified pick, or a
+  minted fish still queued). `unit_id` is null for a fish minted from a batch
+  dish.
+- **`subject_count`** (optional, integer ≥ 1): 1 for a fish row, ≥ 2 for a
+  dish-group row, so a dish-only row says how many fish were out.
+- **A PATCH before its POST gets `404`** and creates nothing. Citrus only sends
+  a PATCH after its POST succeeded, so a 404 means the link was lost; Citrus
+  treats it as terminal and shows it.
+- **`end_status` from Citrus:**
+  - `completed`: normal stop;
+  - `aborted`: operator abort, or a refused start that had already linked;
+  - `interrupted`: crash, power loss or GUI closed mid-session. This one is
+    sent at the next Citrus start, possibly hours later, with `ended_at` =
+    the last flushed frame time, not the arrival time.
+- **Stable request bytes:** Citrus seals the exact start POST (method, path,
+  body) in snapshot v4.x, so the request carries no server-filled fields.
