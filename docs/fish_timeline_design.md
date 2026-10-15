@@ -122,3 +122,63 @@ Citrus".
    dish), agreed with Citrus and Palette as an additive contract change.
 4. **Deaths ([#13](https://github.com/jmdelahanty/metazebrobot/issues/13)):**
    status events on the timeline.
+
+## Proposed endpoints (for review, 2026-10-15)
+
+Additive; joins the pinned consumer slice when built.
+
+**`POST /usage-links`**: record that an arena recording used a dish (and
+fish), at Start.
+
+```json
+{
+  "recording_ref": "obsctx_<64 hex>",
+  "ref_kind": "observation_context",
+  "recording_id": "<Orange recording folder>",
+  "dish_id": "19234_3",
+  "fish_id": "55f673e1-6e2c-4852-b7f0-fa447ebe292e",
+  "fish_revision": 4,
+  "unit_id": "19234_3:A1",
+  "rig_id": "omnifin0",
+  "arena_id": "2",
+  "started_at": "2026-10-09T20:00:18Z"
+}
+```
+
+| Case | Response |
+|---|---|
+| New `recording_ref` | `201`, the link |
+| Same `recording_ref`, identical body | `200`, the current link (may already carry an end) |
+| Same `recording_ref`, different body | `409 {"error": "usage_link_conflict", "recording_ref": ...}` |
+| New link, unknown dish or fish | `404 dish_not_found` / `fish_not_found` |
+| Malformed field (`ref_kind`, timestamp not RFC 3339 UTC `Z`, bad UUID) | `422 {"error": "invalid_usage_link", "field": ...}` |
+
+- An existing `recording_ref` is answered before any dish or fish check,
+  like the v4 create, so a late replay never fails because something changed
+  since.
+- No check that the fish is still in `dish_id`: the link records what Citrus
+  sealed at Start.
+- `fish_id`, `fish_revision`, `unit_id` and `recording_id` may be null
+  (dish-level rows, unbound runs). Inactive dishes are accepted.
+
+**`PATCH /usage-links/{recording_ref}`**: the end, at Stop.
+
+```json
+{"ended_at": "2026-10-09T20:35:02Z", "end_status": "completed"}
+```
+
+`200` with the link (also for an identical replay). `409 usage_link_end_conflict`
+if an end with different values is already recorded. `404 usage_link_not_found`.
+`422 invalid_usage_link`.
+
+**Reads**:
+- `GET /usage-links/{recording_ref}`;
+- `GET /usage-links?fish_id=...`, `?dish_id=...` (includes dish-level rows),
+  `?active_at=<RFC 3339>` (which links were open at an instant: "which
+  wells were empty at 17:20").
+- The fish timeline adds "used in recording", "out of well" and "possibly
+  used (fish not recorded)" entries from these.
+
+**Response** (`UsageLinkResponse`): the POST fields, plus `ended_at`,
+`end_status`, `received_at` (server UTC) and `updated_at`. Times stay RFC
+3339 UTC on the wire.
