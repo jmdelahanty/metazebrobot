@@ -9,8 +9,7 @@ verified_against: 6577bdb
 
 # Propagation Events and Reference Galleries
 
-Status (2026-10-15): proposal (Jeremy agreed the direction); nothing below is
-built.
+Status (2026-10-15): decisions below; being built.
 
 ## Problem
 
@@ -67,10 +66,23 @@ hand, separate from the linked originals.
 - Today's `genotype_reference_images` stay working. New references come from
   linked images, so no more copies.
 
-## Open questions (Jeremy)
+## Decisions (Jeremy, 2026-10-15)
 
-- Can a propagation combine fish from several dishes or crosses, or always
-  one dish?
-- Generation: derive from PyRAT parents (+1), or always enter it?
-- Should the nightly sync propose the PyRAT tank a propagation became (same
-  strain, birth date near the propagation), for confirmation?
+- **One event, many dishes, possibly several days.** Dishes can't be
+  overcrowded, so a propagation's positives often span several dishes, and
+  screening can continue the next day. An event groups any number of
+  dishes; each keeps its own hand-over date (its termination date) and count.
+- **Grouping is explicit.** A Propagation page lists propagation-terminated
+  dishes not yet in an event. Selected dishes create a new event, or join an
+  existing one. Nothing is grouped automatically. This also covers the five
+  existing propagation dishes.
+- **Generation is suggested, labelled and editable.** The suggestion is the
+  highest parent-tank generation in PyRAT + 1 (e.g. F2 × F1 → F3), recomputed
+  as dishes are added. It's stored as `generation` with
+  `generation_source = suggested` and its basis text (e.g. "parents: tank
+  7472 F2, tank 8131 F1"). An edited value is `generation_source = entered`
+  and isn't recomputed. Parents without a generation in PyRAT give no
+  suggestion.
+- **No automatic PyRAT tank link.** There's no way to tie a set of dishes to
+  the tank they became, so `resulting_tank_id` is optional, entered by hand,
+  and labelled as such.
