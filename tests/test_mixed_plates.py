@@ -116,3 +116,23 @@ def test_result_on_a_split_plate_records_observation_from_its_step(client):
 def test_screening_page_offers_new_plate(client):
     dish = _dish(f"CROSS_{uuid.uuid4().hex[:6]}", 1)
     assert "New well plate from this dish" in client.get(f"/screening/{dish}").text
+
+
+def test_source_option_names_the_screening_group_and_mixed_plates_need_a_source(client):
+    cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+    screened = _dish(cross, 1, screened=10)
+    resp = client.post(f"/screening/{screened}/steps/20261015T15:13:00/split",
+                       data={"population_type": "positive_screened", "container_type": "well_plate",
+                             "plate_wells": "6", "fish_count": ""}, follow_redirects=False)
+    split_plate = resp.headers["location"].split("/")[2]
+    assert f"{screened} (screen 10-15 15:13, positives)" in client.get(
+        f"/dishes/{split_plate}/plate-map").text
+
+    client.post(f"/dishes/{screened}/plate/new", data={"wells": 6})
+    mixed = f"{screened}_plate1"
+    page = client.get(f"/dishes/{mixed}/plate-map").text
+    assert "(screen " not in page
+    assert f'<option value="{screened}" selected>' in page
+    refused = client.post(f"/dishes/{mixed}/plate/add-fish", data={"source_dish_id": ""})
+    assert "choose which dish the fish comes from" in refused.text
+    assert client.get(f"/dishes/{mixed}/fish").json()["items"] == []

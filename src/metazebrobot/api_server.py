@@ -5764,7 +5764,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         db_path = _require_db_path()
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             row = conn.execute(
-                "SELECT dish_id, genotype, species, cross_id FROM dishes WHERE dish_id = ?",
+                "SELECT dish_id, genotype, species, cross_id, parent_dish_id, "
+                "source_screening_datetime FROM dishes WHERE dish_id = ?",
                 (dish_id,),
             ).fetchone()
             if not row:
@@ -5804,13 +5805,24 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     + {"positive": "+", "negative": "−", "pigmented": ""}.get(c["result"], "?")
                     for c in calls)
         with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
-            row = conn.execute("SELECT cross_id FROM dishes WHERE dish_id = ?", (dish_id,)).fetchone()
+            row = conn.execute(
+                "SELECT cross_id, parent_dish_id, source_screening_datetime, source_screening_bucket "
+                "FROM dishes WHERE dish_id = ?", (dish_id,)).fetchone()
             sources = [r["dish_id"] for r in conn.execute(
                 "SELECT dish_id FROM dishes WHERE cross_id = ? AND status = 'active' AND dish_id <> ? "
                 "ORDER BY dish_id", (row["cross_id"] if row else None, dish_id))]
+        own_group = None  # "fish from this plate's screening group", when it has one
+        if row and row["parent_dish_id"] and row["source_screening_datetime"]:
+            t = row["source_screening_datetime"]
+            group = {"positive_screened": "positives", "negative_screened": "negatives",
+                     "pigmented_screened": "pigmented"}.get(row["source_screening_bucket"], "group")
+            own_group = (f"{row['parent_dish_id']} (screen {t[4:6]}-{t[6:8]} {t[9:14]}, {group})")
+        default_source = None if own_group else (row["parent_dish_id"] if row else None)
         return templates.TemplateResponse(request, "fish/_plate_map.html", {
             "dish_id": dish_id,
             "sources": sources,
+            "own_group": own_group,
+            "default_source": default_source,
             "units": units,
             "unassigned_fish": unassigned,
             "plate_formats": sorted(PLATE_FORMATS),
@@ -5897,7 +5909,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         db_path = _require_db_path()
         step_time, constructs = None, []
         if source == dish_id:
-            # From this plate's own population (e.g. a plate split from a step's group).
+            # From this plate's own screening group (a plate split from a step's group).
+            if not dish.get("source_screening_datetime"):
+                return plate_map(request, dish_id, "This plate isn't one screening group: choose "
+                                 "which dish the fish comes from.", "error")
             living = len(data_manager.get_fish_subjects(dish_id))
             room_ok, room_message = fish_dish_ctrl.plate_growth_check(dish_id, living)
             if not room_ok:

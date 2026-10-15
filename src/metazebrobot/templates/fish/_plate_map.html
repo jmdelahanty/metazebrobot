@@ -28,8 +28,8 @@
     <div class="grid">
         <label>Fish comes from
             <select name="source_dish_id">
-                <option value="">this plate ({{ dish_id }})</option>
-                {% for d in sources %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+                {% if own_group %}<option value="">{{ own_group }}</option>{% endif %}
+                {% for d in sources %}<option value="{{ d }}"{% if d == default_source %} selected{% endif %}>{{ d }}</option>{% endfor %}
             </select>
         </label>
         <label>This fish's result
