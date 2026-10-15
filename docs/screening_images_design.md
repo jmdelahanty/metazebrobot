@@ -66,6 +66,11 @@ needed.
 - Build: `scripts/build_viewer.sh`, pinned to Viv commit `f7baf858f495`
   (`@hms-dbmi/viv` 0.23.0; Git tags stop at 0.17.3). It needs Node and network
   once.
+- One local patch (`scripts/viewer_patches/ome-tiff-channel-color.patch`,
+  applied by the build): stock Avivator takes channel colours only from
+  OME-Zarr `omero` metadata and shows a lone OME-TIFF channel in white. The
+  patch falls back to the OME-XML `Channel Color`, so an mCherry channel
+  opens red. `BUILD_INFO.txt` lists the applied patches.
 - The built files (`src/metazebrobot/static/viewer/`, about 3.4 MB, with
   Viv's LICENSE and `BUILD_INFO.txt`) are committed, so the service never
   needs Node. Rebuild to update.

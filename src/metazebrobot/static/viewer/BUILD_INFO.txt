@@ -1,2 +1,3 @@
 Avivator built from https://github.com/hms-dbmi/viv at commit f7baf858f495f3c001a79e4c85fb6c92e0fe7ddf
-Built 2026-10-15T20:56:41Z by scripts/build_viewer.sh (base path /viewer/).
+Patches from scripts/viewer_patches: ome-tiff-channel-color.patch
+Built 2026-10-15T21:47:05Z by scripts/build_viewer.sh (base path /viewer/).

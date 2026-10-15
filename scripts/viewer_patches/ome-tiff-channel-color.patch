@@ -1,0 +1,15 @@
+diff --git a/sites/avivator/src/utils.js b/sites/avivator/src/utils.js
+index 0f3de93..f695047 100644
+--- a/sites/avivator/src/utils.js
++++ b/sites/avivator/src/utils.js
+@@ -496,7 +496,9 @@ export async function getSingleSelectionStatsWithOmero({
+ 
+   // Fall back to computing from data
+   const stats = await getSingleSelectionStats({ loader, selection, use3d });
+-  return { ...stats, color: null };
++  // MetaZebrobot patch: use the OME-XML Channel Color (OME-TIFF) when present.
++  const omeColor = metadata?.Pixels?.Channels?.[channelIndex]?.Color;
++  return { ...stats, color: omeColor ? omeColor.slice(0, 3) : null };
+ }
+ 
+ export async function getMultiSelectionStatsWithOmero({
