@@ -69,4 +69,3 @@ needed.
 - The built files (`src/metazebrobot/static/viewer/`, about 3.4 MB, with
   Viv's LICENSE and `BUILD_INFO.txt`) are committed, so the service never
   needs Node. Rebuild to update.
-
