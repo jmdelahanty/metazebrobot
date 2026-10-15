@@ -9,9 +9,9 @@ verified_against: c6a88c1
 
 # Fish Timeline and Experiment Usage
 
-Status (2026-10-15): step 1 built (`data/fish_timeline.py`; `GET /fish/{fish_id}/timeline`
+Status (2026-10-15): steps 1 and 2 built (`data/fish_timeline.py`; `GET /fish/{fish_id}/timeline`
 and the page `/fish/{fish_id}/view`, linked from the plate map, fish tables and
-cross view). Steps 2–4 are proposals.
+cross view). Steps 3 and 4 are proposals.
 
 Goal (Jeremy): follow where an individual fish went, inspectably. For example:
 minted during screening or at an experiment, started in parent A, moved to a
@@ -59,46 +59,50 @@ recording.
 
 ## Usage links
 
-One row per fish per recording:
+One row per arena per recording. Field choices follow Citrus's review
+(2026-10-15):
 
 | Field | Meaning |
 |---|---|
-| `fish_id` | The fish |
-| `recording_ref` | The recording's id in the system that owns it (Palette recording id, or Citrus session/run id + camera) |
-| `dish_id` | The dish recorded (always set; the only subject when no fish is named) |
-| `unit_id` | The well the fish was picked from (its `current_unit_id` when Citrus picked it), or null |
-| `rig_id`, `arena_id` | Where |
-| `started_at`, `ended_at` | Lab-local start and end (end filled when the recording stops, or at intake) |
-| `fish_revision` | The fish revision the recording sealed |
-| `status` | `declared` (Citrus said so at start) or `confirmed` (Palette admitted the recording) |
-| `source` | `citrus` or `palette` |
+| `recording_ref` | The arena-recording's id: Orange's `observation_context_id` (`obsctx_` + 64 hex) for bound sessions; Citrus's `session_uuid` for unbound Citrus-only runs. Unique per arena. |
+| `ref_kind` | `observation_context` or `citrus_session`, so the two namespaces never mix |
+| `recording_id` | Orange's recording folder name, the grouping people search by (null for unbound runs) |
+| `dish_id` | The dish recorded (always set) |
+| `fish_id` | The fish, or null for `dish_group` arenas and v3-era runs |
+| `fish_revision` | The revision the snapshot sealed |
+| `unit_id` | The well the fish was picked from (Citrus's sealed `mzb_fish_unit_id`) |
+| `rig_id`, `arena_id` | Where (`rig_id` source to be decided) |
+| `started_at`, `ended_at` | RFC 3339 UTC on the wire (`Z`); MZB displays lab time |
+| `end_status` | `completed` \| `aborted` \| `interrupted`, so an aborted run isn't read as a normal absence |
 
 Rules:
 
 - **MZB never stores recording content.** No paths, no behaviour results,
   no frames: only the reference and the fields above.
-- **Writer (decided 2026-10-15): Citrus only, at record start.** It writes
-  the link at the same moment it registers or verifies the fish (subject
-  identity v4), and fills `ended_at` when the recording stops. Links are
-  `declared`. Palette confirmation (`confirmed`, or adding links Citrus
-  couldn't deliver) can be added later without changing what's built.
-- **Recording identifier:** `recording_ref` is the id Citrus seals in the H5
-  and Palette keys on at intake (likely Citrus run/session id + camera; to be
-  agreed with Citrus and Palette).
-- **Dish-level rows** (decided 2026-10-15): a recording that names no
-  individual fish still gets a row, with `fish_id` null and `dish_id` set.
+- **Writer (decided 2026-10-15): Citrus only.** `POST` at Start (not arm:
+  the context is bound and the fish registration has its answer), and `PATCH`
+  `ended_at` / `end_status` at Stop. Both go through Citrus's outbox and never
+  block start or stop. The outbox orders them: a link waits behind a queued
+  fish registration; if the registration fails terminally, the link is held
+  as failed too (never rewritten as dish-only). Palette confirmation can be
+  added later without changing what's built.
+- **Idempotent, like the v4 create:** keyed on `recording_ref` (with
+  `arena_id` checked). An identical replay → 200, a different body → 409. The
+  `PATCH` follows the same rule. The row stores its creation values for the
+  comparison.
+- **Dish-level rows** (decided 2026-10-15): an arena with a dish but no fish
+  named (`dish_group`, v3-era runs) still gets a row, with `fish_id` null.
   That makes queries like "recordings of this dish" or "recordings of fish
-  never minted" (including v4 `dish_group` subjects) possible. The timeline
-  of every fish in that dish shows "possibly used in recording R (fish not
-  recorded)". That's what the 17:20 recording needs.
+  never minted" possible. The timeline of every fish in that dish shows
+  "possibly used in recording R (fish not recorded)". That's what the 17:20
+  recording needs. An arena with no dish declared sends no link.
 - **Out of the well, without manual moves** (decided 2026-10-15): a fish
-  picked from a well for an arena isn't moved in MetaZebrobot. Its link
-  records `unit_id`, `started_at` and `ended_at`, so the timeline shows "out
-  of C1 for recording R, 16:00–16:35" and "which wells were empty at 17:20"
-  is answered from the links active then. The fish's location stays the
-  well, where it returns. Nobody has to record moves.
-- **Writes are idempotent** on (`fish_id` or `dish_id`, `recording_ref`), like
-  the v4 fish create.
+  picked from a well isn't moved in MetaZebrobot. Its link records `unit_id`,
+  `started_at`, `ended_at` and `end_status`, so the timeline shows "out of C1
+  for recording R, 16:00–16:35" and "which wells were empty at 17:20" is
+  answered from the links active then.
+- **On the Citrus side** (a v4.x addition): the exact start POST is sealed in
+  the snapshot, like `registration_request`; the end PATCH isn't.
 
 ## Registration provenance
 
@@ -121,4 +125,5 @@ Citrus".
 
 ## Open questions (Jeremy)
 
-- **Recording identifier:** which id Citrus and Palette both use (see above).
+- **`rig_id`:** Orange's rig id, the hostname, or a configured rig name? Citrus
+  seals no rig id today.
