@@ -82,3 +82,16 @@ keep the numeric column.
   fish keeps `current_unit_id` as its last well; its occupancy is closed.
 - The fish timeline adds "died: euthanized (dish 19234_3 terminated)" or
   "found dead in well A1".
+
+## Decisions
+
+- **A first-time fish registration on an inactive dish stays refused**
+  (`409 dish_inactive`, Jeremy 2026-10-15). Registering a fish to a dish that
+  no longer exists as a living group doesn't make sense. The known cost is a
+  narrow race. Citrus mints a fish at Start while MetaZebrobot is unreachable,
+  and the dish is terminated before the outbox delivers. That registration
+  then fails, the fish never appears in MetaZebrobot, and its usage link is
+  held as failed in Citrus's GUI. The recording keeps the fish's UUID and the
+  dish. Usage links for fish that already exist are accepted whatever their
+  status.
+
