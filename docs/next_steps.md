@@ -170,3 +170,6 @@ issues own the details; this list only links them.
   (revisit once workflow is clearer)
 - [ ] Palette integration: read-only session count display on fish detail pages
   (optional `--palette-registry` CLI arg on API server)
+- [ ] Warn when terminating a dish that has an open recording (a usage link
+  with no end), once Citrus sends usage links
+  ([#14](https://github.com/jmdelahanty/metazebrobot/issues/14))
