@@ -810,6 +810,28 @@
             ],
             "title": "Dish Id"
           },
+          "end_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Reason"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
           "fish_id": {
             "title": "Fish Id",
             "type": "string"
@@ -886,6 +908,17 @@
             ],
             "title": "Species"
           },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
           "subject_label": {
             "anyOf": [
               {
@@ -945,6 +978,49 @@
               }
             ],
             "title": "Dish Uuid"
+          },
+          "end_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "found_dead",
+                  "euthanized",
+                  "propagated",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Reason"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "ended_precision": {
+            "anyOf": [
+              {
+                "enum": [
+                  "time",
+                  "day"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended Precision"
           },
           "fish_id": {
             "title": "Fish Id",
@@ -1013,6 +1089,15 @@
             ],
             "title": "Species"
           },
+          "status": {
+            "enum": [
+              "alive",
+              "dead",
+              "propagated"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
           "subject_label": {
             "anyOf": [
               {
@@ -1034,7 +1119,8 @@
           "dish_id",
           "revision",
           "updated_at",
-          "origin_dish_id"
+          "origin_dish_id",
+          "status"
         ],
         "title": "FishSubjectResponse",
         "type": "object"
@@ -1595,7 +1681,7 @@
     },
     "/dishes/{dish_id}/fish": {
       "get": {
-        "description": "List all fish subjects registered to a dish.",
+        "description": "Fish in this dish now. Ended fish (dead, propagated) are hidden\nunless ``include_ended=true``.",
         "operationId": "list_fish_for_dish_dishes__dish_id__fish_get",
         "parameters": [
           {
@@ -1605,6 +1691,18 @@
             "schema": {
               "title": "Dish Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Also list fish whose record has ended (dead or propagated)",
+            "in": "query",
+            "name": "include_ended",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also list fish whose record has ended (dead or propagated)",
+              "title": "Include Ended",
+              "type": "boolean"
             }
           }
         ],
@@ -1800,6 +1898,87 @@
           }
         },
         "summary": "Get Fish"
+      }
+    },
+    "/fish/{fish_id}/end": {
+      "post": {
+        "description": "Record that a fish died (docs/fish_deaths_design.md).\n\nBody: ``reason`` (found_dead | euthanized | other), optional ``at``\n(RFC 3339 UTC, default now) and ``notes``. Frees its well and lowers\nits dish's count by one. 409 ``fish_already_ended`` if it already ended\ndifferently; an identical repeat is 200.",
+        "operationId": "end_fish_fish__fish_id__end_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fish_id",
+            "required": true,
+            "schema": {
+              "title": "Fish Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "default": {},
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FishSubjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "fish_not_found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "fish_already_ended (a different ending)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_fish_end (with field)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Lookup failed (database_error)"
+          }
+        },
+        "summary": "End Fish"
       }
     },
     "/fish/{fish_id}/revisions": {

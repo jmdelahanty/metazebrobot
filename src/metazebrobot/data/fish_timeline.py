@@ -69,7 +69,8 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
     fish = conn.execute(
         """SELECT f.fish_id, f.dish_id, f.subject_label, f.current_unit_id, f.created_at,
                   f.revision, COALESCE(f.origin_dish_id, f.dish_id) AS origin_dish_id,
-                  f.created_via, f.created_by
+                  f.created_via, f.created_by, f.status, f.ended_at, f.ended_precision,
+                  f.end_reason, f.end_source, f.end_notes
            FROM fish_subjects f WHERE f.fish_id = ?""",
         (fish_id,),
     ).fetchone()
@@ -197,6 +198,22 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
             subject_count=link["subject_count"],
         ))
 
+    if fish["status"] and fish["status"] != "alive":
+        at = (fish["ended_at"] if fish["ended_precision"] == "day"
+              else _utc_iso(fish["ended_at"]))
+        how = {"found_dead": "found dead", "euthanized": "euthanized",
+               "propagated": "handed off alive (propagation)", "other": "died"}.get(
+                   fish["end_reason"], fish["end_reason"])
+        entries.append(_entry(
+            at, "ended",
+            f"{'Ended' if fish['status'] == 'propagated' else 'Died'}: {how}"
+            + (" (with its dish's termination)" if fish["end_source"] == "dish_termination" else "")
+            + (f"; {fish['end_notes']}" if fish["end_notes"] and fish["end_source"] == "fish" else ""),
+            "fish_subjects",
+            status=fish["status"], end_reason=fish["end_reason"],
+            end_source=fish["end_source"], precision=fish["ended_precision"],
+        ))
+
     entries.sort(key=lambda e: e["at"] or "")
     return {
         "fish_id": fish_id,
@@ -206,5 +223,6 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
         "origin_dish_id": fish["origin_dish_id"],
         "revision": fish["revision"],
         "entries": entries,
-        "not_yet_recorded": ["deaths"],
+        "status": fish["status"],
+        "not_yet_recorded": [],
     }

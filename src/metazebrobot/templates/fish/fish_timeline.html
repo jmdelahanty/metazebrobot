@@ -4,7 +4,7 @@
 {% block content %}
 <hgroup>
     <h2>Fish {{ t.subject_label or t.fish_id[:8] }}</h2>
-    <p><code>{{ t.fish_id }}</code> · revision {{ t.revision }}</p>
+    <p><code>{{ t.fish_id }}</code> · revision {{ t.revision }}{% if t.status and t.status != "alive" %} · <strong>{{ t.status }}</strong>{% endif %}</p>
 </hgroup>
 
 <table>
@@ -27,6 +27,5 @@
     {% endfor %}
     </tbody>
 </table>
-<p><small>Not recorded yet: {{ t.not_yet_recorded | join(", ") }}.
-JSON: <a href="/fish/{{ t.fish_id }}/timeline">/fish/{{ t.fish_id }}/timeline</a></small></p>
+<p><small>{% if t.not_yet_recorded %}Not recorded yet: {{ t.not_yet_recorded | join(", ") }}. {% endif %}JSON: <a href="/fish/{{ t.fish_id }}/timeline">/fish/{{ t.fish_id }}/timeline</a></small></p>
 {% endblock %}

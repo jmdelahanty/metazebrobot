@@ -9,7 +9,9 @@ verified_against: ddc44df
 
 # Fish Deaths and Endings
 
-Status (2026-10-15): proposal; nothing below is built. Step 4 of the
+Status (2026-10-15): built (`data/fish_endings.py`). Decisions: propagation ends
+the record as `propagated`; fish lists hide ended fish by default; inherited
+endings stay day-precision. Step 4 of the
 [fish timeline](fish_timeline_design.md); resolves
 [#13](https://github.com/jmdelahanty/metazebrobot/issues/13).
 
@@ -73,21 +75,10 @@ keep the numeric column.
 
 - Fish responses gain `status`, `ended_at`, `ended_precision`, `end_reason`.
   These are additive.
-- `GET /dishes/{dish_id}/fish` question (Jeremy): list only living fish by
-  default (`?include_ended=true` for history), or all fish with `status`? See
-  open questions.
+- `GET /dishes/{dish_id}/fish` lists only living fish by default;
+  `?include_ended=true` adds ended ones (Jeremy, 2026-10-15). This is
+  documented for consumers in [zebrobot_snapshot.md](zebrobot_snapshot.md).
+- The care page's well list and plate map show only living fish. An ended
+  fish keeps `current_unit_id` as its last well; its occupancy is closed.
 - The fish timeline adds "died: euthanized (dish 19234_3 terminated)" or
   "found dead in well A1".
-
-## Open questions (Jeremy)
-
-- **`propagation`:** record the fish as `propagated` (alive, left tracking),
-  or as an ending at all?
-- **Fish lists:** should `GET /dishes/{dish_id}/fish` hide ended fish by
-  default? Hiding them keeps a dead fish out of Citrus's pick list and fits
-  "fish in this dish now". It's a meaning change for that endpoint again
-  (Orange seals the list), so it would be stated in the re-pin like the last
-  one. Showing all with `status` keeps history visible, but Citrus would have
-  to filter.
-- **Termination time:** dish termination stores only a date, so inherited
-  endings are day-precision. Add a time to dish termination going forward?

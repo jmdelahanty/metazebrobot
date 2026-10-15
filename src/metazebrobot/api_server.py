@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
-from .data import usage_links
+from .data import fish_endings, usage_links
 from .data.fish_timeline import fish_timeline as build_fish_timeline
 from .data.screening_calls import dish_calls as dish_screening_calls
 from .data.screening_calls import fish_calls as fish_screening_calls
@@ -265,6 +265,10 @@ class FishSubjectResponse(BaseModel):
     updated_at: str
     origin_dish_id: str
     origin_dish_uuid: Optional[str] = None
+    status: Literal["alive", "dead", "propagated"]
+    ended_at: Optional[str] = None
+    ended_precision: Optional[Literal["time", "day"]] = None
+    end_reason: Optional[Literal["found_dead", "euthanized", "propagated", "other"]] = None
 
 
 class FishListResponse(BaseModel):
@@ -286,6 +290,9 @@ class FishRevisionResponse(BaseModel):
     notes: Optional[str] = None
     current_unit_id: Optional[str] = None
     origin_dish_id: Optional[str] = None
+    status: Optional[str] = None
+    end_reason: Optional[str] = None
+    ended_at: Optional[str] = None
 
 
 class FishRevisionListResponse(BaseModel):
@@ -3882,6 +3889,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                         status_code=409,
                         detail=f"Dish {dish_id} was not active at update time.",
                     )
+                fish_endings.end_fish_for_terminated_dish(
+                    conn, dish_id, normalized_reason, stored_termination_date)
                 updated_payloads[dish_id] = payload
 
             conn.commit()
@@ -5362,6 +5371,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "flash_level": "error",
             })
         saved = 0
+        ended_fish = False
         for u in units:
             uid = u["unit_id"]
             fed = form.get(f"fed_{uid}") == "on"
@@ -5372,6 +5382,24 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             dead_str = form.get(f"num_dead_{uid}")
             num_dead = int(dead_str) if dead_str else 0
             unit_notes = form.get(f"notes_{uid}") or None
+
+            occupants = [f for f in (u.get("fish") or []) if f.get("fish_id")]
+            if num_dead > 0 and len(occupants) == 1:
+                # One tracked fish in the well: the death is that fish's, recorded on
+                # the fish (which also counts it), not as a separate number.
+                at = datetime.strptime(check_time, "%Y%m%dT%H:%M:%S").replace(
+                    tzinfo=LAB_TIMEZONE).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                try:
+                    with data_manager.get_connection() as conn:
+                        fish_endings.end_fish(conn, occupants[0]["fish_id"], {
+                            "reason": "found_dead", "at": at,
+                            "notes": unit_notes or "Recorded on the care page"})
+                        conn.commit()
+                    ended_fish = True
+                except fish_endings.FishEndingError as exc:
+                    logger.warning("Care-page death not recorded on fish %s: %s",
+                                   occupants[0]["fish_id"], exc.detail)
+                num_dead = 0
 
             if fed or water or num_dead > 0 or unit_notes:
                 ok = data_manager.log_housing_unit_check(
@@ -5386,6 +5414,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 )
                 if ok:
                     saved += 1
+
+        if ended_fish:
+            _refresh_dish_counts(dish_id)
 
         # Return updated checks
         checks = []
@@ -5480,8 +5511,15 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         response_model=FishListResponse,
         responses=_LOOKUP_ERROR_RESPONSES,
     )
-    def list_fish_for_dish(dish_id: str) -> Dict[str, Any]:
-        """List all fish subjects registered to a dish."""
+    def list_fish_for_dish(
+        dish_id: str,
+        include_ended: bool = Query(
+            default=False,
+            description="Also list fish whose record has ended (dead or propagated)",
+        ),
+    ) -> Dict[str, Any]:
+        """Fish in this dish now. Ended fish (dead, propagated) are hidden
+        unless ``include_ended=true``."""
         db_path = _require_db_path()
         try:
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
@@ -5490,7 +5528,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 ).fetchone()
             if not exists:
                 raise _not_found("dish", dish_id=dish_id)
-            subjects = data_manager.get_fish_subjects(dish_id, raise_errors=True)
+            subjects = data_manager.get_fish_subjects(
+                dish_id, raise_errors=True, include_ended=include_ended)
         except sqlite3.Error as exc:
             raise _database_error(exc) from exc
         return {"items": subjects}
@@ -6068,6 +6107,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         unit = data_manager.get_housing_unit(new_unit_id)
         if unit is None:
             raise _not_found("unit", unit_id=new_unit_id)
+        if fish.get("status") and fish["status"] != "alive":
+            raise HTTPException(status_code=409, detail={
+                "error": "fish_ended", "fish_id": fish_id, "status": fish["status"]})
         reason = body.get("reason") or ("transfer" if fish.get("current_unit_id") else "initial")
 
         if unit["dish_id"] != fish["dish_id"]:
@@ -6148,6 +6190,41 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     ) -> Dict[str, Any]:
         """Links by fish, by dish (including dish-level rows), or open at an instant."""
         return {"items": _usage_call(usage_links.list_links, fish_id, dish_id, active_at)}
+
+    def _refresh_dish_counts(dish_id: str) -> None:
+        """Reload and re-save a dish so its stored count and cache include new deaths."""
+        dish = fish_dish_ctrl.get_dish(dish_id)
+        if dish is not None:
+            payload = dish.model_dump(mode="json", exclude_none=True)
+            if data_manager.save_fish_dish(payload):
+                data_manager.data_cache.setdefault("fish_dishes", {})[dish_id] = payload
+
+    @app.post("/fish/{fish_id}/end", response_model=FishSubjectResponse, responses={
+        404: {"model": ApiErrorResponse, "description": "fish_not_found"},
+        409: {"model": ApiErrorResponse, "description": "fish_already_ended (a different ending)"},
+        422: {"model": ApiErrorResponse, "description": "invalid_fish_end (with field)"},
+        **_DATABASE_ERROR_RESPONSE,
+    })
+    def end_fish(fish_id: str, body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Record that a fish died (docs/fish_deaths_design.md).
+
+        Body: ``reason`` (found_dead | euthanized | other), optional ``at``
+        (RFC 3339 UTC, default now) and ``notes``. Frees its well and lowers
+        its dish's count by one. 409 ``fish_already_ended`` if it already ended
+        differently; an identical repeat is 200.
+        """
+        _require_db_path()
+        try:
+            with data_manager.get_connection() as conn:
+                result = fish_endings.end_fish(conn, fish_id, body)
+                conn.commit()
+        except fish_endings.FishEndingError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
+        if result["changed"]:
+            _refresh_dish_counts(result["dish_id"])
+        return data_manager.get_fish_subject(fish_id)
 
     @app.get("/fish/{fish_id}/timeline")
     def get_fish_timeline(fish_id: str) -> Dict[str, Any]:

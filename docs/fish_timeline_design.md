@@ -11,8 +11,7 @@ verified_against: c6a88c1
 
 Status (2026-10-15): steps 1–3 built (`data/fish_timeline.py`; `GET /fish/{fish_id}/timeline`
 and the page `/fish/{fish_id}/view`, linked from the plate map, fish tables and
-cross view). Step 3 is `data/usage_links.py` with the endpoints below. Step 4 (deaths) is a
-proposal.
+cross view). Step 3 is `data/usage_links.py` with the endpoints below. Step 4 (deaths) is built: [fish deaths and endings](fish_deaths_design.md).
 
 Goal (Jeremy): follow where an individual fish went, inspectably. For example:
 minted during screening or at an experiment, started in parent A, moved to a

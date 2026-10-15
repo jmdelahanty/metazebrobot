@@ -17,7 +17,7 @@ from pydantic import NonNegativeInt, TypeAdapter
 
 from ..utils.config import config
 from ..utils.indicator_match import match_step
-from . import usage_links
+from . import fish_endings, usage_links
 from ..utils.file_operations import ensure_directory, load_json_file
 
 logger = logging.getLogger(__name__)
@@ -211,7 +211,7 @@ class DataManager:
     # idempotent client-minted creates compare against.
     FISH_HISTORY_COLUMNS = (
         "dish_id", "subject_label", "sex", "genotype", "species", "notes", "current_unit_id",
-        "origin_dish_id",
+        "origin_dish_id", "status", "end_reason", "ended_at",
     )
 
     def _ensure_fish_revision_history(self, conn) -> None:
@@ -931,6 +931,8 @@ class DataManager:
                     cursor.execute("ALTER TABLE fish_subjects ADD COLUMN created_via TEXT")
                 if 'created_by' not in fish_cols:
                     cursor.execute("ALTER TABLE fish_subjects ADD COLUMN created_by TEXT")
+                # Endings: status, when, why (docs/fish_deaths_design.md).
+                fish_endings.ensure_columns(cursor)
 
                 # Usage links: which recording used which dish/fish (references only)
                 usage_links.ensure_schema(cursor)
@@ -3380,7 +3382,7 @@ class DataManager:
             return None
 
     def get_fish_subjects(
-        self, dish_id: str, *, raise_errors: bool = False
+        self, dish_id: str, *, raise_errors: bool = False, include_ended: bool = False
     ) -> List[Dict[str, Any]]:
         """List all fish subjects for a dish, ordered by created_at.
 
@@ -3397,14 +3399,15 @@ class DataManager:
                            f.sex, f.genotype, f.species, f.created_at, f.notes,
                            f.current_unit_id, f.revision, f.updated_at,
                            COALESCE(f.origin_dish_id, f.dish_id) AS origin_dish_id,
-                           COALESCE(f.origin_dish_uuid, od.dish_uuid) AS origin_dish_uuid
+                           COALESCE(f.origin_dish_uuid, od.dish_uuid) AS origin_dish_uuid,
+                           f.status, f.ended_at, f.ended_precision, f.end_reason
                     FROM fish_subjects f
                     LEFT JOIN dishes d ON d.dish_id = f.dish_id
                     LEFT JOIN dishes od ON od.dish_id = COALESCE(f.origin_dish_id, f.dish_id)
-                    WHERE f.dish_id = ?
+                    WHERE f.dish_id = ? AND (? OR f.status = 'alive')
                     ORDER BY f.created_at
                     """,
-                    (dish_id,),
+                    (dish_id, include_ended),
                 ).fetchall()
                 return [{k: row[k] for k in row.keys()} for row in rows]
         except Exception as e:
@@ -3504,7 +3507,8 @@ class DataManager:
                            f.sex, f.genotype, f.species, f.created_at, f.notes,
                            f.current_unit_id, f.revision, f.updated_at,
                            COALESCE(f.origin_dish_id, f.dish_id) AS origin_dish_id,
-                           COALESCE(f.origin_dish_uuid, od.dish_uuid) AS origin_dish_uuid
+                           COALESCE(f.origin_dish_uuid, od.dish_uuid) AS origin_dish_uuid,
+                           f.status, f.ended_at, f.ended_precision, f.end_reason
                     FROM fish_subjects f
                     LEFT JOIN dishes d ON d.dish_id = f.dish_id
                     LEFT JOIN dishes od ON od.dish_id = COALESCE(f.origin_dish_id, f.dish_id)
@@ -3719,6 +3723,7 @@ class DataManager:
                            f.fish_id, f.subject_label
                     FROM housing_units h
                     LEFT JOIN fish_subjects f ON f.current_unit_id = h.unit_id
+                                              AND f.status = 'alive'
                     WHERE h.dish_id = ?
                     ORDER BY h.position_label, f.created_at
                     """,

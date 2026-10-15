@@ -129,6 +129,23 @@ Fish responses (`GET /fish/{fish_id}`, `GET /dishes/{dish_id}/fish`) carry
   the fish's **origin**, so a replay after a move still returns 200 (with the
   current `dish_id`).
 
+**Fish endings** (re-pin after `2584a72b`; [fish deaths](fish_deaths_design.md)):
+
+- Fish responses carry `status` (`alive` | `dead` | `propagated`), and for an
+  ended fish `ended_at`, `ended_precision` (`time` | `day`) and `end_reason`
+  (`found_dead` | `euthanized` | `propagated` | `other`). `ended_at` is UTC
+  `YYYY-MM-DD HH:MM:SS`, or a lab date `YYYY-MM-DD` at `day` precision (from
+  a dish termination).
+- **`GET /dishes/{dish_id}/fish` hides ended fish by default.** It lists
+  living fish in the dish now; `?include_ended=true` adds dead and propagated
+  ones. A list sealed before this re-pin may include fish that later ended,
+  and the sealed `consumer_schema_sha256` tells the two apart.
+- `GET /fish/{fish_id}` still returns an ended fish, with its status.
+- `POST /fish/{fish_id}/end` records a death (`reason`, optional `at` RFC 3339
+  UTC, `notes`): it frees the well and lowers the dish count by one. A dish
+  terminated for euthanasia or propagation ends its living fish on the
+  termination date. Moving an ended fish is refused (409 `fish_ended`).
+
 - `dish_id` (`{cross_id}_{n}`) stays the human-facing id and the lookup key,
   but it is only unique within this database and could be reused after a
   delete. `dish_uuid` is the durable reference.
@@ -203,7 +220,7 @@ Field-level shapes are generated from the code, not written by hand:
   `/dishes/{dish_id}/citrus-snapshot`, `/acquisition/dishes`,
   `/dishes/{dish_id}`, `/dishes/by-uuid/{dish_uuid}`,
   `/dishes/{dish_id}/fish` (GET and POST), `/fish/{fish_id}`,
-  `/fish/{fish_id}/revisions`, `/usage-links` (POST, GET),
+  `/fish/{fish_id}/revisions`, `/fish/{fish_id}/end`, `/usage-links` (POST, GET),
   `/usage-links/{recording_ref}` (PATCH, GET) and `/version`, including
   their error models.
 - `tests/test_consumer_contract.py` fails if the code and that file

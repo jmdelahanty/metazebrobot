@@ -22,6 +22,7 @@ from ..models.fish_dish import (
     normalize_termination_reason,
     termination_reason_options_text,
 )
+from ..data import fish_endings
 from ..data.data_manager import data_manager
 from pydantic import ValidationError
 
@@ -1082,6 +1083,14 @@ class FishDishController:
             if data_manager.save_fish_dish(dish.model_dump(mode='json', exclude_none=True)):
                 # Update cache
                 data_manager.data_cache['fish_dishes'][dish_id] = dish.model_dump(mode='json', exclude_none=True)
+                # Its individually tracked fish end with it, or come back with it.
+                with data_manager.get_connection() as conn:
+                    if status == "inactive":
+                        fish_endings.end_fish_for_terminated_dish(
+                            conn, dish_id, dish.termination_reason, dish.termination_date)
+                    else:
+                        fish_endings.revert_dish_termination_endings(conn, dish_id)
+                    conn.commit()
                 logger.info(f"Successfully updated status for dish {dish_id} to {status}")
                 return True, "Dish status updated successfully"
             else:
