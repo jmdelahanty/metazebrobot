@@ -5893,6 +5893,12 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "results": results,
         })
 
+    def _plate_bucket(dish_id: str) -> Optional[str]:
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            row = conn.execute("SELECT source_screening_bucket, dish_population_type FROM dishes "
+                               "WHERE dish_id = ?", (dish_id,)).fetchone()
+        return (row["source_screening_bucket"] or row["dish_population_type"]) if row else None
+
     def _step_for_placement(source: str, source_dish: Dict[str, Any], choice: str):
         """(step datetime, problem) for booking a placed fish into ``source``'s screen.
 
@@ -6026,6 +6032,16 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             if not dish.get("source_screening_datetime"):
                 return plate_map(request, dish_id, "This plate isn't one screening group: choose "
                                  "which dish the fish comes from.", "error", chosen=chosen)
+            # The group is counted by its bucket, so a contradicting result would
+            # leave the fish counted as one thing and called another.
+            group_result = {"positive_screened": "positive", "negative_screened": "negative"}.get(
+                _plate_bucket(dish_id))
+            if result and group_result and result != group_result:
+                return plate_map(request, dish_id, f"This plate holds {group_result}s from "
+                                 f"{dish.get('parent_dish_id')}'s screen, so a {result} fish can't "
+                                 "join it. Put it on a mixed plate (New well plate from this dish "
+                                 "on the screening page), or re-check it after placing.",
+                                 "error", chosen=chosen)
             living = len(data_manager.get_fish_subjects(dish_id))
             room_ok, room_message = fish_dish_ctrl.plate_growth_check(dish_id, living)
             if not room_ok:

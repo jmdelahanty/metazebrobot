@@ -106,7 +106,7 @@ def test_result_on_a_split_plate_records_observation_from_its_step(client):
     cross = f"CROSS_{uuid.uuid4().hex[:6]}"
     screened = _dish(cross, 1, screened=10)
     resp = client.post(f"/screening/{screened}/steps/20261015T15:13:00/split",
-                       data={"population_type": "positive_screened", "container_type": "well_plate",
+                       data={"population_type": "negative_screened", "container_type": "well_plate",
                              "plate_wells": "6", "fish_count": ""}, follow_redirects=False)
     plate = resp.headers["location"].split("/")[2]
     client.post(f"/dishes/{plate}/plate/add-fish", data={"result": "negative"})
@@ -229,3 +229,18 @@ def test_form_keeps_source_result_and_step_after_placing(client):
     assert origins == {"Q1": other, "Z1": other, "Z2": other}
     steps = client.get(f"/dishes/{other}").json()["data"]["screening_results"]["screenings"]
     assert len(steps) == 1 and steps[0]["count_screened_this_step"] == 2
+
+
+def test_split_plate_refuses_a_contradicting_result(client):
+    cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+    screened = _dish(cross, 1, screened=10)
+    resp = client.post(f"/screening/{screened}/steps/20261015T15:13:00/split",
+                       data={"population_type": "positive_screened", "container_type": "well_plate",
+                             "plate_wells": "6", "fish_count": ""}, follow_redirects=False)
+    plate = resp.headers["location"].split("/")[2]
+    refused = client.post(f"/dishes/{plate}/plate/add-fish", data={"result": "negative"})
+    assert "a negative fish can" in refused.text
+    assert client.get(f"/dishes/{plate}/fish").json()["items"] == []
+    assert _selected(refused.text, "result") == "negative"  # the choice is kept to change
+    placed = client.post(f"/dishes/{plate}/plate/add-fish", data={"result": "positive"})
+    assert "Placed Z1 (positive)" in placed.text
