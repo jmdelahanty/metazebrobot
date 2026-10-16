@@ -1,14 +1,15 @@
 {# Which screening step of the source dish a placement with a result books into. #}
 {% if source_dish_id %}
 {% set todays = source_steps | selectattr("today") | list %}
+{% set kept = chosen_step if chosen_step and (chosen_step == "new" or chosen_step in (source_steps | map(attribute="value") | list)) else "" %}
 <label>Screening step on {{ source_dish_id }}
     <select name="step">
         {% for st in todays %}
-        <option value="{{ st.value }}"{% if loop.first %} selected{% endif %}>Today {{ st.label }}</option>
+        <option value="{{ st.value }}"{% if (kept and st.value == kept) or (not kept and loop.first) %} selected{% endif %}>Today {{ st.label }}</option>
         {% endfor %}
-        <option value="new"{% if not todays %} selected{% endif %}>Start a new screening step now</option>
+        <option value="new"{% if kept == "new" or (not kept and not todays) %} selected{% endif %}>Start a new screening step now</option>
         {% for st in source_steps if not st.today %}
-        <option value="{{ st.value }}">Earlier: {{ st.label }}</option>
+        <option value="{{ st.value }}"{% if kept and st.value == kept %} selected{% endif %}>Earlier: {{ st.label }}</option>
         {% endfor %}
     </select>
 </label>

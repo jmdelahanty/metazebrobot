@@ -192,3 +192,40 @@ def test_older_step_is_never_used_silently(client):
                        data={"source_dish_id": source, "result": "positive", "step": "20261001T10:00:00"})
     assert "all are allocated" in full.text
     assert len(client.get(f"/dishes/{plate}/fish").json()["items"]) == 3
+
+
+def _selected(page, name):
+    """The selected option's value of the form's <select name=...> (first option if none)."""
+    import re
+    block = re.search(rf'<select name="{name}"(.*?)</select>', page, re.S).group(1)
+    chosen = re.search(r'<option value="([^"]*)"[^>]*\bselected\b', block)
+    return chosen.group(1) if chosen else re.search(r'<option value="([^"]*)"', block).group(1)
+
+
+def test_form_keeps_source_result_and_step_after_placing(client):
+    """A split plate's form must not fall back to its own group after each fish."""
+    cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+    source = _dish(cross, 1, screened=6)
+    other = _dish(cross, 2)
+    resp = client.post(f"/screening/{source}/steps/20261015T15:13:00/split",
+                       data={"population_type": "positive_screened", "container_type": "well_plate",
+                             "plate_wells": "6", "fish_count": ""}, follow_redirects=False)
+    plate = resp.headers["location"].split("/")[2]
+    assert 'name="source_dish_id"' in client.get(f"/dishes/{plate}/plate-map").text
+
+    page = client.post(f"/dishes/{plate}/plate/add-fish",
+                       data={"source_dish_id": other, "label_prefix": "Q"}).text
+    assert _selected(page, "source_dish_id") == other and 'value="Q"' in page
+    page = client.post(f"/dishes/{plate}/plate/add-fish",
+                       data={"source_dish_id": other, "result": "positive", "step": "new"}).text
+    assert "Placed Z1 (positive)" in page, page[:600]
+    assert _selected(page, "source_dish_id") == other
+    assert _selected(page, "result") == "positive"
+    step = _selected(page, "step")
+    assert step not in ("", "new")  # the step just started, so the next fish joins it
+    client.post(f"/dishes/{plate}/plate/add-fish",
+                data={"source_dish_id": other, "result": "positive", "step": step})
+    origins = {f["subject_label"]: f["origin_dish_id"] for f in _by_label(client, plate).values()}
+    assert origins == {"Q1": other, "Z1": other, "Z2": other}
+    steps = client.get(f"/dishes/{other}").json()["data"]["screening_results"]["screenings"]
+    assert len(steps) == 1 and steps[0]["count_screened_this_step"] == 2
