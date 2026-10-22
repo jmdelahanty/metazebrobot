@@ -38,7 +38,7 @@
         <tbody>
             {% for parent in parent_provenance.parents %}
             <tr>
-                <td>{{ parent.role or "unknown" }}</td>
+                <td>{{ parent.role or "unknown" }}{% if parent.manual %} <mark>entered by hand</mark>{% endif %}</td>
                 <td>{{ parent.location_display or parent.tank_label or parent.tank_id or "" }}</td>
                 <td>{{ parent.raw_strain_name or "" }}</td>
                 <td>{{ parent.generation or "" }}</td>
@@ -55,3 +55,6 @@
     </table>
 </details>
 {% endif %}
+{% set parents_cross = cross_id or (form.cross_id if form is defined and form else "") %}
+{% if parents_cross %}<p><small>Parent missing (e.g. an IVF donor PyRAT doesn't list)?
+<a href="/crosses/{{ parents_cross }}/parents" target="_blank">Add it by hand</a></small></p>{% endif %}

@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List, Literal, Optional, Tuple
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
-from .data import fish_endings, fish_observations, image_links, propagation, usage_links
+from .data import fish_endings, fish_observations, image_links, manual_parents, propagation, usage_links
 from .data.fish_timeline import fish_timeline as build_fish_timeline
 from .data.screening_calls import dish_calls as dish_screening_calls
 from .data.screening_calls import fish_calls as fish_screening_calls
@@ -60,6 +60,7 @@ from .utils.pyrat_frontend_client import (
 from .utils.cross_provenance import (
     normalize_cross_children,
     normalize_cross_parents,
+    parse_parent_background,
     summarize_cross_background,
 )
 from .utils.heritage_graph import build_heritage_graph, layout_heritage_graph
@@ -1596,7 +1597,9 @@ def _upsert_cross_parent_provenance(
     if not parent_rows:
         return
 
-    conn.execute("DELETE FROM cross_parents WHERE cross_id = ?", (cross_id,))
+    # Hand-entered parents (source 'manual', docs/manual_cross_parents_design.md) stay.
+    conn.execute("DELETE FROM cross_parents WHERE cross_id = ? AND COALESCE(source, 'pyrat') = 'pyrat'",
+                 (cross_id,))
     for row in parent_rows:
         conn.execute(
             """
@@ -1627,6 +1630,16 @@ def _upsert_cross_parent_provenance(
             ),
         )
 
+    for manual in conn.execute(
+            "SELECT raw_strain_name FROM cross_parents WHERE cross_id = ? AND source = 'manual'",
+            (cross_id,)).fetchall():
+        parsed = parse_parent_background(manual["raw_strain_name"] or "")
+        parent_rows = parent_rows + [{
+            "parsed_background_strains": parsed["background_strains"],
+            "parsed_line_labels": parsed["line_labels"],
+            "parsed_transgenes": parsed["transgenes"],
+            "parsed_mutant_alleles": parsed["mutant_backgrounds"],
+        }]
     summary = summarize_cross_background(parent_rows)
     conn.execute(
         """
@@ -1879,7 +1892,7 @@ def _load_cross_parent_provenance(conn: sqlite3.Connection, cross_id: str) -> Di
             SELECT parent_index, role, tank_id, tank_label, location_display,
                    raw_strain_name, generation, parsed_background_strains,
                    parsed_line_labels, parsed_transgenes, parsed_mutant_alleles,
-                   confidence
+                   confidence, source
             FROM cross_parents
             WHERE cross_id = ?
             ORDER BY parent_index
@@ -1912,6 +1925,7 @@ def _load_cross_parent_provenance(conn: sqlite3.Connection, cross_id: str) -> Di
             "line_labels": _json_list(row["parsed_line_labels"]),
             "mutant_backgrounds": _json_list(row["parsed_mutant_alleles"]),
             "confidence": row["confidence"],
+            "manual": row["source"] == "manual",
             "heritage": derive_tank_heritage(conn, row["tank_id"]) if row["tank_id"] else None,
         })
         strain_id = (parents[-1]["heritage"] or {}).get("tank", {}).get("strain_id")
@@ -3586,6 +3600,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             pass
 
         return templates.TemplateResponse(request, "dishes/_cross_info.html", {
+            "cross_id": cross_id,
             "dish_number": next_dish_number,
             "genotype": prefill["genotype"],
             "responsible": prefill["responsible"],
@@ -6794,6 +6809,52 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if not return_to.startswith("/") or return_to.startswith("//"):
             return_to = "/references/"
         return RedirectResponse(url=return_to, status_code=303)
+
+    # ------------------------------------------------------------------
+    # Hand-entered cross parents (docs/manual_cross_parents_design.md)
+    # ------------------------------------------------------------------
+
+    @app.get("/crosses/{cross_id}/parents", response_class=HTMLResponse)
+    def cross_parents_page(request: Request, cross_id: str, message: Optional[str] = None):
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            if not conn.execute("SELECT 1 FROM crosses WHERE cross_id = ?", (cross_id,)).fetchone():
+                raise HTTPException(status_code=404, detail="Cross not found")
+            parents = manual_parents.parents(conn, cross_id)
+            dishes = [r["dish_id"] for r in conn.execute(
+                "SELECT dish_id FROM dishes WHERE cross_id = ? ORDER BY dish_id", (cross_id,))]
+        return templates.TemplateResponse(request, "crosses/parents.html", {
+            "cross_id": cross_id, "parents": parents, "dishes": dishes, "message": message,
+            "roles": manual_parents.ROLES})
+
+    def _manual_parent_change(cross_id: str, change) -> str:
+        with data_manager.get_connection() as conn:
+            try:
+                change(conn)
+            except manual_parents.ManualParentError as exc:
+                conn.rollback()
+                raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+            refreshed = manual_parents.refresh_dishes(conn, data_manager, cross_id)
+            conn.commit()
+        return ", ".join(refreshed) or "none"
+
+    @app.post("/crosses/{cross_id}/parents")
+    async def add_cross_parent(request: Request, cross_id: str):
+        form = await request.form()
+        dishes = _manual_parent_change(cross_id, lambda conn: manual_parents.add(
+            conn, cross_id, form.get("strain") or "", form.get("reason") or "",
+            _selected_user(request), form.get("tank_id"), form.get("role") or "unknown",
+            form.get("generation")))
+        return RedirectResponse(
+            url=f"/crosses/{cross_id}/parents?message=" + quote(f"Parent added; dishes updated: {dishes}."),
+            status_code=303)
+
+    @app.post("/crosses/{cross_id}/parents/{parent_index}/remove")
+    def remove_cross_parent(cross_id: str, parent_index: int):
+        dishes = _manual_parent_change(
+            cross_id, lambda conn: manual_parents.remove(conn, cross_id, parent_index))
+        return RedirectResponse(
+            url=f"/crosses/{cross_id}/parents?message=" + quote(f"Parent removed; dishes updated: {dishes}."),
+            status_code=303)
 
     # ------------------------------------------------------------------
     # Propagation events (docs/propagation_events_design.md)

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Cross {{ cross_id }} parents{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h2>Cross {{ cross_id }}: parents</h2>
+    <p>Parents from PyRAT, plus any entered by hand because PyRAT doesn't list them (e.g. an IVF sperm donor).
+       Dishes: {% for d in dishes %}<a href="/screening/{{ d }}">{{ d }}</a>{% if not loop.last %}, {% endif %}{% else %}none yet{% endfor %}</p>
+</hgroup>
+
+{% if message %}<p class="flash flash--success" role="status"><mark>{{ message }}</mark></p>{% endif %}
+
+<table>
+    <thead><tr><th>Source</th><th>Role</th><th>Tank</th><th>Strain</th><th>Gen.</th><th>Constructs</th><th></th></tr></thead>
+    <tbody>
+    {% for p in parents %}
+    <tr>
+        <td>{% if p.manual %}<mark>entered by hand</mark><br><small>{{ p.entry.entered_by or "?" }}, {{ p.entry.entered_at or "" }}<br>{{ p.entry.reason }}</small>{% else %}PyRAT{% endif %}</td>
+        <td>{{ p.role or "—" }}</td>
+        <td>{{ p.tank_id or "—" }}</td>
+        <td>{{ p.raw_strain_name or "—" }}</td>
+        <td>{{ p.generation or "—" }}</td>
+        <td><small>{{ p.transgenes | join(", ") or "none parsed" }}</small></td>
+        <td>{% if p.manual %}
+            <form method="post" action="/crosses/{{ cross_id }}/parents/{{ p.parent_index }}/remove" style="margin:0">
+                <button type="submit" class="outline secondary" style="padding:0.1rem 0.5rem; font-size:0.8rem">remove</button>
+            </form>{% endif %}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7"><em>No parents recorded.</em></td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<h3>Add a parent PyRAT doesn't list</h3>
+<form method="post" action="/crosses/{{ cross_id }}/parents">
+    <div class="grid">
+        <label>Strain / genotype
+            <input type="text" name="strain" required placeholder="e.g. Tg(UAS:ReaChR-TagRFPt)">
+            <small>Write transgenes as Tg(promoter:reporter); a bare UAS:ReaChR-TagRFPt is read that way.</small>
+        </label>
+        <label>Tank id (optional)
+            <input type="text" name="tank_id" placeholder="e.g. 5342">
+        </label>
+    </div>
+    <div class="grid">
+        <label>Role
+            <select name="role">{% for r in roles %}<option value="{{ r }}"{% if r == "unknown" %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>
+        </label>
+        <label>Generation (optional)
+            <input type="text" name="generation" placeholder="e.g. F2">
+        </label>
+    </div>
+    <label>Why PyRAT doesn't list it
+        <input type="text" name="reason" required placeholder="e.g. IVF sperm donor; only in the PyRAT crossing description">
+    </label>
+    <button type="submit">Add parent</button>
+</form>
+{% endblock %}
