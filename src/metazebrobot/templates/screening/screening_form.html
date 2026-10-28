@@ -11,6 +11,7 @@
             <small>(opened at {{ dish.fish_count }})</small>
         {% endif %}
         &mdash; DPF {{ dpf if dpf is not none else "?" }}
+        {% if dish.source_group_id %}&mdash; group {{ dish.source_group_id }} <small>(from the sticker)</small>{% endif %}
     </p>
 </hgroup>
 {% include "_transgenes.html" %}

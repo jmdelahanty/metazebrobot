@@ -95,6 +95,11 @@
             Initial Fish Count
             <input type="number" name="fish_count" min="0" max="1000" value="{{ form.fish_count or 0 }}">
         </label>
+        <label>
+            Crossing tank group
+            <input type="text" name="source_group_id" value="{{ form.source_group_id or '' }}" placeholder="e.g. 19445-G2">
+            <small>As written on the aquatics sticker. Optional.</small>
+        </label>
     </div>
 
     <div class="grid">

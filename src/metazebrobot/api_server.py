@@ -3697,6 +3697,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         dawn_dusk: str = Form(default="8:00"),
         vol_water_total: Optional[int] = Form(default=None),
         notes: Optional[str] = Form(default=None),
+        source_group_id: Optional[str] = Form(default=None),
     ):
         """Create a new dish from the web form."""
         _require_db_path()
@@ -3726,6 +3727,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             container_type=container_type,
             vol_water_total=vol_water_total,
             notes=notes or None,
+            source_group_id=(source_group_id or "").strip() or None,
         )
 
         if success:
@@ -3762,6 +3764,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "dawn_dusk": dawn_dusk,
                 "vol_water_total": vol_water_total,
                 "notes": notes,
+                "source_group_id": source_group_id,
             },
             "genotype": genotype,
             "responsible": responsible,
