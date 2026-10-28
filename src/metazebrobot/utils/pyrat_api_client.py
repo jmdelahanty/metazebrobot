@@ -122,5 +122,31 @@ class PyratApiClient:
             if not page or offset >= total:
                 return tank_ids
 
+    def tanks(self, keys: Sequence[str], **filters: Any) -> List[Dict[str, Any]]:
+        """Tanks matching api/v3 ``tanks`` filters (e.g. responsible_id), paged."""
+        tanks: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            response = self._get("tanks", {
+                "k": list(keys), "s": ["tank_id:asc"], "l": PAGE_SIZE, "o": offset, **filters,
+            })
+            page = response.json()
+            tanks.extend(page)
+            total = int(response.headers.get("X-Total-Count") or 0)
+            offset += len(page)
+            if not page or offset >= total:
+                return tanks
+
+    def user(self, username: str) -> Optional[Dict[str, Any]]:
+        """The PyRAT user with this exact username (active or not), or None."""
+        for status in ("active", "inactive"):
+            users = self._get("users", {
+                "user_name": username, "status": status,
+                "k": ["userid", "username", "fullname"],
+            }).json()
+            if users:
+                return users[0]
+        return None
+
     def tank_history(self, tank_id: Any) -> List[Dict[str, Any]]:
         return self._get(f"tanks/{tank_id}/history").json()
