@@ -4,7 +4,7 @@ summary: "A Raspberry Pi in the aquatics room photographs dishes and sends them 
 owner: metazebrobot
 status: current
 kind: design
-verified_against: b37bbdf
+verified_against: 25ad83c
 ---
 
 # Dish Photo Capture and Label Reading
@@ -96,13 +96,39 @@ added:
     with no crop tuning. The cost per photo is small.
   - The photo is sent to an outside service. The API key lives on the
     workstation only, never on the Pi.
-  - Needs Jeremy's OK before it is switched on.
+  - Uses Jeremy's HHMI API account (agreed 2026-10-28). Off by default; turned on
+    in config.
 
-Parsing the fields from the text depends on the sticker layout, which is
-still to see (photo coming 2026-10-28). The cross id is matched against known
-crosses, and the group is matched to the `source_group_id` format (see
-`dish_source_group_design.md`). The suggestions fill the inbox picker;
-nothing else changes until a person assigns the photo.
+### The aquatics sticker (seen 2026-10-28)
+
+A printed table, about 38 × 76 mm (likely 1.5" × 3" stock), on the lid of a
+90 mm dish. The cells are labelled and always in the same place:
+
+| Cell | Example | Use |
+|---|---|---|
+| Crossing | `19445` | cross id |
+| # | `1` | crossing tank group, saved as `source_group_id` `19445-G1` |
+| Line/Strain | `Tg(gfap:PMCA2-mCherry-zf)` | check against the cross strain |
+| Parent #1 / #2 | `#8132 M13 > A4` + strain | parent tank, rack, position |
+| Responsible | `Delahanty Jeremy` | not used |
+| DOF | `10/23/26` | suggested DOF (MM/DD/YY) |
+
+The suggestions fill the inbox picker; nothing else changes until a person
+assigns the photo. If no dish exists yet for that cross and group, the picker
+offers "new dish" with the cross id, group and DOF prefilled.
+
+**Parent cross-check.** The parent cells carry the same form MZB already stores
+per dish (`#8132_M13>A4`). The reader compares them with the cross's PyRAT
+parents and flags a mismatch, such as a tank that isn't on the cross or a
+strain that differs. This answers "does the sticker match what was set up?"
+without anyone typing it.
+
+**Hard parts.**
+- People draw over the cells by hand: boxes around the group digit and a parent
+  tank, and words like "SCRN". This can break classic OCR on exactly the group
+  digit. Haiku should cope; compare the two on the same photos.
+- Condensation drops and lid glare. Light the dish from below through a diffuser
+  and angle the camera slightly, or use a polarizer.
 
 Measure before trusting: log each suggestion next to what was confirmed,
 and report how often they agree for each reader.
@@ -112,8 +138,20 @@ and report how often they agree for each reader.
 MetaZebrobot already prints dish labels (`/dishes/{dish_id}/label`). A small
 2D code (Data Matrix stays readable at a few mm) carrying the dish id would
 make capture exact: decode, then no OCR. Citrus or a handheld scanner could "scan in"
-a dish the same way. This needs a small label printer, chosen later. Until
-then, OCR on the aquatics sticker covers the gap.
+a dish the same way. Until then, OCR on the aquatics sticker covers the gap.
+
+Space on the lid (measured 2026-10-28): beside the sticker there is a band of
+about 21–30 mm on each side at the widest, narrowing toward the rim. A label
+about 12–14 mm deep fits there. A 10 mm Data Matrix holding a dish id reads
+reliably from a fixed camera.
+
+Printer: see the purchase list. A Brother QL-820NWB (network; `brother_ql` drives
+it with no driver) with 29 mm water-resistant film tape (DK-2211), cut about
+14 mm long and placed with its 29 mm side along the sticker. The 12 mm QL roll
+(DK-22214) is paper, and its water resistance is listed both ways, so it
+isn't relied on. The fallback is a Brother P-touch with laminated 12 mm TZe
+tape (tougher, but driven from Linux only by community tools).
+`label_generator.py` gets a small layout for the chosen tape.
 
 ## Stage 3 (later): larva counts
 
@@ -124,6 +162,9 @@ a suggested count, and corrections logged.
 
 ## Open questions
 
-- Sticker photo and layout (2026-10-28).
-- Camera module, lens and stand height; lightbox model.
+- Camera: Pi Camera Module 3, or one of the lab's Teledyne FLIR USB3 cameras.
+  FLIR's Spinnaker SDK supports ARM64 Linux (Ubuntu 20.04/22.04) and FLIR tested
+  a Blackfly S on a Pi 4. A Pi 5 isn't named. Fallback: Aravis (open source,
+  USB3 Vision).
+- Lens and stand height for a field of about 110 × 110 mm; lightbox model.
 - Local OCR or Haiku first (or both, compared on the same photos).
