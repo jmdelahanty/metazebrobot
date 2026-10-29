@@ -22,6 +22,12 @@ def _dish(cross, number, screened=None):
     return dish["dish_id"]
 
 
+def _new_plate(client, dish_id, wells):
+    resp = client.post(f"/dishes/{dish_id}/plate/new", data={"wells": wells}, follow_redirects=False)
+    assert resp.status_code == 303
+    return resp.headers["location"].split("/")[2]
+
+
 def _count(client, dish_id):
     return client.get(f"/dishes/{dish_id}").json()["current_fish_count"]
 
@@ -40,9 +46,8 @@ def test_mixed_plate_with_positives_negatives_and_unscreened(client):
     screened = _dish(cross, 1, screened=10)
     other = _dish(cross, 2)
 
-    resp = client.post(f"/dishes/{screened}/plate/new", data={"wells": 12}, follow_redirects=False)
-    plate = f"{screened}_plate1"
-    assert resp.headers["location"] == f"/dishes/{plate}/fish/"
+    plate = _new_plate(client, screened, 12)
+    assert plate == f"{cross}_3"  # the cross's next dish number, not a suffix
 
     for result in ("positive", "positive", "negative"):
         page = client.post(f"/dishes/{plate}/plate/add-fish",
@@ -75,11 +80,11 @@ def test_mixed_plate_with_positives_negatives_and_unscreened(client):
 def test_result_needs_a_screening_step_on_the_source(client):
     cross = f"CROSS_{uuid.uuid4().hex[:6]}"
     source = _dish(cross, 1)
-    client.post(f"/dishes/{source}/plate/new", data={"wells": 6})
-    resp = client.post(f"/dishes/{source}_plate1/plate/add-fish",
+    plate = _new_plate(client, source, 6)
+    resp = client.post(f"/dishes/{plate}/plate/add-fish",
                        data={"source_dish_id": source, "result": "positive"})
     assert "no screening step today" in resp.text
-    assert client.get(f"/dishes/{source}_plate1/fish").json()["items"] == []
+    assert client.get(f"/dishes/{plate}/fish").json()["items"] == []
 
 
 def test_recheck_overrides_inherited_result(client):
@@ -129,8 +134,7 @@ def test_source_option_names_the_screening_group_and_mixed_plates_need_a_source(
     assert f"{screened} (screen 10-15 15:13, positives)" in client.get(
         f"/dishes/{split_plate}/plate-map").text
 
-    client.post(f"/dishes/{screened}/plate/new", data={"wells": 6})
-    mixed = f"{screened}_plate1"
+    mixed = _new_plate(client, screened, 6)
     page = client.get(f"/dishes/{mixed}/plate-map").text
     assert "(screen " not in page
     assert f'<option value="{screened}" selected>' in page
@@ -142,8 +146,7 @@ def test_source_option_names_the_screening_group_and_mixed_plates_need_a_source(
 def test_start_a_new_step_while_filling_the_plate(client):
     cross = f"CROSS_{uuid.uuid4().hex[:6]}"
     source = _dish(cross, 1)  # no screening step yet
-    client.post(f"/dishes/{source}/plate/new", data={"wells": 12})
-    plate = f"{source}_plate1"
+    plate = _new_plate(client, source, 12)
 
     first = client.post(f"/dishes/{plate}/plate/add-fish",
                         data={"source_dish_id": source, "result": "positive", "step": "new"})
@@ -175,8 +178,7 @@ def test_older_step_is_never_used_silently(client):
         "indicators_screened": ["mCherry"], "count_screened_this_step": 3, "allocations": []}]}
     data_manager.save_fish_dish(source)
     source = source["dish_id"]
-    client.post(f"/dishes/{source}/plate/new", data={"wells": 6})
-    plate = f"{source}_plate1"
+    plate = _new_plate(client, source, 6)
 
     refused = client.post(f"/dishes/{plate}/plate/add-fish",
                           data={"source_dish_id": source, "result": "positive"})

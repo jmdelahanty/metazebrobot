@@ -22,7 +22,7 @@ def _screened_dish(client):
                        data={"fish_count": 5, "population_type": "positive_screened",
                              "container_type": "well_plate"}, follow_redirects=False)
     assert resp.status_code == 303
-    return dish["dish_id"], f"{dish['dish_id']}_pos1"
+    return dish["dish_id"], f"{dish['cross_id']}_2"  # the cross's next dish number
 
 
 def _wells(plate):
@@ -90,7 +90,7 @@ def _empty_plate(client, screened=8):
                        data={"population_type": "positive_screened", "container_type": "well_plate",
                              "plate_wells": "12", "fish_count": ""}, follow_redirects=False)
     assert resp.status_code == 303
-    plate = f"{dish['dish_id']}_pos1"
+    plate = f"{dish['cross_id']}_2"  # the cross's next dish number
     assert resp.headers["location"] == f"/dishes/{plate}/fish/"
     return dish["dish_id"], plate
 
@@ -153,7 +153,7 @@ def test_count_still_required_for_other_containers(client):
 
 
 def test_screening_page_forms_carry_the_dish_id(client):
-    parent, _ = _empty_plate(client)  # creates _pos1 and a step at 20261014T10:00:00
+    parent, _ = _empty_plate(client)  # creates the plate and a step at 20261014T10:00:00
     page = client.get(f"/screening/{parent}").text
     assert "/screening//" not in page
     assert f'action="/screening/{parent}/steps/20261014T10:00:00/split"' in page

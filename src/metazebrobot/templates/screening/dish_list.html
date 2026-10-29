@@ -15,6 +15,7 @@
     <thead>
         <tr>
             <th>Dish ID</th>
+            <th>Container</th>
             <th>Genotype</th>
             <th>DPF</th>
             <th>Fish</th>
@@ -27,7 +28,8 @@
     <tbody>
         {% for d in dishes %}
         <tr>
-            <td>{{ d.dish_id }}</td>
+            <td>{{ d.dish_id }}{% if d.parent_dish_id %}<br><small>from {{ d.parent_dish_id }}</small>{% endif %}</td>
+            <td>{{ d.container }}</td>
             <td>{{ d.genotype }}</td>
             <td>{{ d.dpf if d.dpf is not none else "?" }}</td>
             <td>

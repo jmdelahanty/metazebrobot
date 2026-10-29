@@ -18,6 +18,12 @@ import pytest
 
 from metazebrobot.data.data_manager import data_manager
 
+
+def _numbered(dish_id: str, number: int) -> str:
+    """Dish ``number`` of ``dish_id``'s cross: derived dishes take the next number."""
+    return f"{dish_id.rsplit('_', 1)[0]}_{number}"
+
+
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -702,7 +708,7 @@ class TestDishTransgenes:
             data={"fish_count": 5, "population_type": "positive_screened"},
             follow_redirects=False,
         )
-        new_id = f"{seed_full_dish}_pos1"
+        new_id = _numbered(seed_full_dish, 2)
         tgs = data_manager.get_dish_transgenes(new_id)
         # seed_full_dish has genotype Tg(elavl3:GCaMP6s) — but let's check
         # what the parent has and verify child inherited it

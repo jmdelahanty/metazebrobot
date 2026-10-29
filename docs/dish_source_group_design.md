@@ -29,7 +29,8 @@ Aquatics writes the group on the dish sticker.
   it is saved as `<cross>-G<n>`. `1`, `G1` and `19445-G1` all save as
   `19445-G1`. Anything else is kept as typed. Optional.
 - The screening page header shows it, marked "from the sticker".
-- Dishes split from a dish (`_pos<n>`) already inherit it.
+- A dish split from one dish's screening step inherits it. A mixed well plate
+  doesn't, because it can hold fish from several groups.
 
 ## Caveat
 

@@ -4922,7 +4922,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
             rows = conn.execute("""
                 SELECT d.dish_id, d.genotype, d.dof, d.fish_count, d.current_fish_count, d.responsible,
-                       d.screening_final_positive_count,
+                       d.screening_final_positive_count, d.container_type, d.parent_dish_id,
                        COUNT(s.id) AS step_count
                 FROM dishes d
                 LEFT JOIN screening_steps s ON s.dish_id = d.dish_id
@@ -4944,6 +4944,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 "responsible": d.get("responsible"),
                 "step_count": d.get("step_count", 0),
                 "finalized": d.get("screening_final_positive_count") is not None,
+                "container": (d.get("container_type") or "").replace("_", " "),
+                "parent_dish_id": d.get("parent_dish_id"),
             })
         return templates.TemplateResponse(request, "screening/dish_list.html", {
             "dishes": dishes,

@@ -254,29 +254,30 @@ class FishDishController:
                         f"{parent_dish_id}."
                     ), None
 
-            # Generate ID suffix from population type
-            suffix_map = {
-                "positive_screened": "_pos",
-                "negative_screened": "_neg",
-                "pigmented_screened": "_pig",
-                "other": "_other",
-                "primary": "_split",
-            }
-            id_suffix_base = suffix_map.get(population_type, "_derived")
-            if container_type == "well_plate" and population_type not in (
-                    "positive_screened", "negative_screened", "pigmented_screened"):
-                id_suffix_base = "_plate"  # a plate that can hold fish of any result
-
-            # Generate unique dish ID
-            i = 1
-            new_dish_id = f"{parent_dish_id}{id_suffix_base}{i}"
-            while data_manager.load_single_dish(new_dish_id):
-                i += 1
-                new_dish_id = f"{parent_dish_id}{id_suffix_base}{i}"
-                if i > 99:
-                    msg = f"Could not generate unique derived dish ID for parent {parent_dish_id}."
-                    logger.error(msg)
-                    return False, msg, None
+            # A derived dish is the cross's next numbered dish (19445_7), like
+            # any other: its container, parent and result are recorded on the
+            # dish, so the name doesn't carry them (docs/derived_dish_numbering_design.md).
+            new_dish_number = None
+            if parent_dish.cross_id:
+                with data_manager.get_connection() as conn:
+                    cross_dish_ids = [r[0] for r in conn.execute(
+                        "SELECT dish_id FROM dishes WHERE cross_id = ?", (parent_dish.cross_id,))]
+                new_dish_number = next_numbered_dish_number(parent_dish.cross_id, cross_dish_ids)
+                new_dish_id = f"{parent_dish.cross_id}_{new_dish_number}"
+                while data_manager.load_single_dish(new_dish_id):
+                    new_dish_number += 1
+                    new_dish_id = f"{parent_dish.cross_id}_{new_dish_number}"
+            else:
+                # No cross to number under: fall back to a suffix on the parent.
+                i = 1
+                new_dish_id = f"{parent_dish_id}_derived{i}"
+                while data_manager.load_single_dish(new_dish_id):
+                    i += 1
+                    new_dish_id = f"{parent_dish_id}_derived{i}"
+                    if i > 99:
+                        msg = f"Could not generate unique derived dish ID for parent {parent_dish_id}."
+                        logger.error(msg)
+                        return False, msg, None
             logger.debug(f"Generated new derived dish ID: {new_dish_id}")
 
             default_notes = notes
@@ -312,7 +313,10 @@ class FishDishController:
                 container_type=container_type or parent_dish.enclosure.container_type,
                 vol_water_total=parent_dish.enclosure.vol_water_total,
                 notes=default_notes,
-                dish_number=None,
+                dish_number=new_dish_number,
+                # One group in, one group out; a mixed plate can take several.
+                source_group_id=(parent_dish.source_group_id
+                                 if population_type != "manual_transfer" else None),
             )
 
             # 5. Save the new dish

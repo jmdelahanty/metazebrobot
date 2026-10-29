@@ -271,7 +271,8 @@ the pinned consumer slice yet. As built:
   high and basis `observed_on_fish`. The latest observation per construct
   wins, and all of them appear on the timeline.
 - **Mixed plates:** "New well plate from this dish" on the screening page
-  creates an empty plate (`<dish>_plate<n>`, population `manual_transfer`).
+  creates an empty plate (the cross's next dish number since 2026-10-28, see
+  `derived_dish_numbering_design.md`; population `manual_transfer`).
   Each placed fish names its source dish and an optional result. With a
   result, the fish is booked into the source's latest screening step (as an
   allocation to the plate) and the result is recorded on the fish. Without a

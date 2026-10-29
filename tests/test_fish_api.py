@@ -20,6 +20,12 @@ from PIL import Image, TiffImagePlugin
 from metazebrobot.api_server import create_app
 from metazebrobot.data.data_manager import data_manager
 
+
+def _numbered(dish_id: str, number: int) -> str:
+    """Dish ``number`` of ``dish_id``'s cross: derived dishes take the next number."""
+    return f"{dish_id.rsplit('_', 1)[0]}_{number}"
+
+
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -347,7 +353,7 @@ class TestDishSplit:
         )
         assert resp.status_code == 303
         # Derived dish should exist
-        new_id = f"{seed_full_dish}_pos1"
+        new_id = _numbered(seed_full_dish, 2)
         resp2 = client.get(f"/dishes/{new_id}")
         assert resp2.status_code == 200
         body = resp2.json()
@@ -377,7 +383,7 @@ class TestDishSplit:
         )
         assert resp.status_code == 303
 
-        new_id = f"{seed_full_dish}_pig1"
+        new_id = _numbered(seed_full_dish, 2)
         resp2 = client.get(f"/dishes/{new_id}")
         assert resp2.status_code == 200
         body = resp2.json()
@@ -400,7 +406,7 @@ class TestDishSplit:
             data={"fish_count": 2, "population_type": "positive_screened"},
             follow_redirects=False,
         )
-        destination_id = f"{seed_full_dish}_pos1"
+        destination_id = _numbered(seed_full_dish, 2)
 
         client.post(
             f"/screening/{seed_full_dish}/steps",
@@ -455,7 +461,7 @@ class TestDishSplit:
             follow_redirects=False,
         )
         assert resp.status_code == 303
-        new_id = f"{seed_full_dish}_neg1"
+        new_id = _numbered(seed_full_dish, 2)
         resp2 = client.get(f"/dishes/{new_id}")
         assert resp2.status_code == 200
         body = resp2.json()
@@ -486,13 +492,13 @@ class TestDishSplit:
             data={"fish_count": 3, "population_type": "positive_screened"},
             follow_redirects=False,
         )
-        new_id = f"{seed_full_dish}_pos1"
+        new_id = _numbered(seed_full_dish, 2)
         child = client.get(f"/dishes/{new_id}").json()
         assert child["genotype"] == parent["genotype"]
         assert child["species"] == parent["species"]
 
     def test_split_increments_suffix(self, client, seed_full_dish):
-        """Second split of the same type gets _pos2."""
+        """Each split takes the cross's next dish number."""
         client.post(
             f"/screening/{seed_full_dish}/split",
             data={"fish_count": 5, "population_type": "positive_screened"},
@@ -503,8 +509,8 @@ class TestDishSplit:
             data={"fish_count": 3, "population_type": "positive_screened"},
             follow_redirects=False,
         )
-        assert client.get(f"/dishes/{seed_full_dish}_pos1").status_code == 200
-        assert client.get(f"/dishes/{seed_full_dish}_pos2").status_code == 200
+        assert client.get(f"/dishes/{_numbered(seed_full_dish, 2)}").status_code == 200
+        assert client.get(f"/dishes/{_numbered(seed_full_dish, 3)}").status_code == 200
 
 
 # -------------------------------------------------------------------
@@ -1433,7 +1439,7 @@ class TestDishInventory:
             data={"fish_count": 2, "population_type": "positive_screened"},
             follow_redirects=False,
         )
-        destination_id = f"{seed_full_dish}_pos1"
+        destination_id = _numbered(seed_full_dish, 2)
 
         resp = client.get("/dishes/")
 
@@ -1605,7 +1611,7 @@ class TestDishInventory:
             data={"fish_count": 2, "population_type": "positive_screened"},
             follow_redirects=False,
         )
-        destination_id = f"{seed_full_dish}_pos1"
+        destination_id = _numbered(seed_full_dish, 2)
 
         resp = client.post(
             f"/dishes/{seed_full_dish}/transfer",
@@ -1650,7 +1656,7 @@ class TestDishInventory:
             data={"fish_count": 2, "population_type": "positive_screened"},
             follow_redirects=False,
         )
-        destination_id = f"{seed_full_dish}_pos1"
+        destination_id = _numbered(seed_full_dish, 2)
 
         resp = client.post(
             f"/dishes/{seed_full_dish}/transfer",
@@ -1739,7 +1745,7 @@ class TestDishInventory:
             data={"fish_count": 2, "population_type": "positive_screened"},
             follow_redirects=False,
         )
-        destination_id = f"{seed_full_dish}_pos1"
+        destination_id = _numbered(seed_full_dish, 2)
         client.post(
             f"/dishes/{seed_full_dish}/transfer",
             data={
@@ -2601,14 +2607,14 @@ class TestCrossLevelFish:
             data={"fish_count": 5, "population_type": "positive_screened"},
             follow_redirects=False,
         )
-        child_id = f"{seed_full_dish}_pos1"
+        child_id = _numbered(seed_full_dish, 2)
 
         client.post(
             f"/screening/{child_id}/split",
             data={"fish_count": 2, "population_type": "negative_screened"},
             follow_redirects=False,
         )
-        grandchild_id = f"{child_id}_neg1"
+        grandchild_id = _numbered(seed_full_dish, 3)
 
         resp = client.get(f"/crosses/{cross_id}/fish/")
         assert resp.status_code == 200
@@ -2633,7 +2639,7 @@ class TestCrossLevelFish:
             data={"fish_count": 5, "population_type": "positive_screened"},
             follow_redirects=False,
         )
-        child_id = f"{seed_full_dish}_pos1"
+        child_id = _numbered(seed_full_dish, 2)
 
         client.post(
             f"/dishes/{seed_full_dish}/transfer",
