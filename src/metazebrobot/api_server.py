@@ -48,6 +48,7 @@ from .models.fish_dish import (
 )
 from .utils.lab_time import LAB_TIMEZONE, lab_calendar_date, lab_now, lab_today  # noqa: F401 (re-exported)
 from .utils.label_generator import generate_dish_label
+from .utils import czi_images
 from .utils.ome_reference_export import (
     export_reference_pngs_from_ome_tiff,
     read_ome_tiff_metadata,
@@ -6742,13 +6743,16 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 fish_id = (form.get(f"fish_{index}") or "").strip() or None
                 try:
                     image_links.link(conn, root, rel_path, dish_id, kind, fish_id,
-                                     _selected_user(request), read_ome_tiff_metadata)
+                                     _selected_user(request), _read_image_metadata)
                     linked += 1
                 except (ValueError, OSError) as exc:
                     logger.warning("Image link skipped for %s: %s", rel_path, exc)
             conn.commit()
         return RedirectResponse(url=f"/dishes/{dish_id}/fish/?images_linked={linked}",
                                 status_code=303)
+
+    def _read_image_metadata(path: Path) -> Dict[str, Any]:
+        return czi_images.read_metadata(path) if czi_images.is_czi(path) else read_ome_tiff_metadata(path)
 
     def _image_link_or_404(link_id: int) -> Dict[str, Any]:
         with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
@@ -6770,9 +6774,22 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return FileResponse(path, media_type="image/png")
 
     @app.get("/image-links/{link_id}/image.ome.tiff")
+    def image_link_ome_tiff(link_id: int):
+        """The image as OME-TIFF for viewers (byte ranges supported); a CZI is converted once."""
+        link = _image_link_or_404(link_id)
+        try:
+            path = image_links.ome_tiff_path(_image_root(), app.state.image_cache_dir, link)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=404, detail={"error": "image_unavailable",
+                                                         "message": str(exc)})
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail={"error": "image_unavailable",
+                                                         "message": "file moved or deleted"})
+        return FileResponse(path, media_type="image/tiff", filename=path.name)
+
     @app.get("/image-links/{link_id}/file")
     def image_link_file(link_id: int):
-        """The original OME-TIFF (byte-range requests supported, for viewers)."""
+        """The original file as linked (OME-TIFF or CZI)."""
         link = _image_link_or_404(link_id)
         try:
             path = image_links.resolve_under(_image_root(), link["rel_path"])
@@ -6782,7 +6799,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if not path.is_file():
             raise HTTPException(status_code=404, detail={"error": "image_unavailable",
                                                          "message": "file moved or deleted"})
-        return FileResponse(path, media_type="image/tiff", filename=path.name)
+        media_type = "application/octet-stream" if czi_images.is_czi(path) else "image/tiff"
+        return FileResponse(path, media_type=media_type, filename=path.name)
 
     @app.get("/dishes/{dish_id}/image-links")
     def dish_image_links(dish_id: str) -> Dict[str, Any]:

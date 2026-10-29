@@ -13,9 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..utils import czi_images
 from ..utils.lab_time import LAB_TIMEZONE
 
-IMAGE_SUFFIXES = (".ome.tif", ".ome.tiff")
+IMAGE_SUFFIXES = (".ome.tif", ".ome.tiff", ".czi")  # CZI: docs/czi_screening_images_design.md
 KINDS = ("screening", "propagation", "plate")
 _WELL = re.compile(r"^[A-Ha-h](1[0-2]|[1-9])$")
 
@@ -45,6 +46,8 @@ REFERENCE_COLUMNS = (
     ("reference_caption", "TEXT"),
     ("reference_by", "TEXT"),
     ("reference_at", "TEXT"),
+    # Microscope settings read from a CZI (cube, exposure, lamp, binning, zoom), JSON.
+    ("acquisition", "TEXT"),
 )
 
 
@@ -75,7 +78,7 @@ def is_image(path: Path) -> bool:
 
 def well_from_filename(name: str) -> Optional[str]:
     """'19327_6_pos1_A1-OME TIFF-Export-01.ome.tiff' -> 'A1'; 'A3-OME…' -> 'A3'."""
-    lead = re.split(r"-OME|-Image| ", name, maxsplit=1)[0]
+    lead = re.split(r"-OME|-Image| ", re.sub(r"\.czi$", "", name, flags=re.I), maxsplit=1)[0]
     token = lead.split("_")[-1]
     return token.upper() if _WELL.match(token) else None
 
@@ -139,7 +142,7 @@ def link(conn, root: Path, rel_path: str, dish_id: str, kind: str,
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
     path = resolve_under(root, rel_path)
     if not is_image(path):
-        raise ValueError(f"{rel_path} is not an OME-TIFF file")
+        raise ValueError(f"{rel_path} is not an OME-TIFF or CZI file")
     existing = conn.execute("SELECT id FROM image_links WHERE rel_path = ? AND dish_id = ?",
                             (rel_path, dish_id)).fetchone()
     if existing:
@@ -158,13 +161,15 @@ def link(conn, root: Path, rel_path: str, dish_id: str, kind: str,
             meta = {}
     channels = [{"name": c.get("name"), "fluor": c.get("fluor"), "color_hex": c.get("color_hex")}
                 for c in meta.get("channels") or []]
+    acquisition = meta.get("acquisition")
     cursor = conn.execute(
         """INSERT INTO image_links (rel_path, dish_id, fish_id, well_label, kind, size_bytes,
-               sha256, file_mtime, channels, size_x, size_y, linked_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               sha256, file_mtime, channels, size_x, size_y, linked_by, acquisition)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (rel_path, dish_id, fish_id, well_from_filename(path.name), kind, path.stat().st_size,
          digest.hexdigest(), _utc_mtime(path), json.dumps(channels) if channels else None,
-         meta.get("size_x"), meta.get("size_y"), linked_by),
+         meta.get("size_x"), meta.get("size_y"), linked_by,
+         json.dumps(acquisition) if acquisition else None),
     )
     return cursor.lastrowid
 
@@ -172,6 +177,8 @@ def link(conn, root: Path, rel_path: str, dish_id: str, kind: str,
 def _row(row) -> Dict[str, Any]:
     item = {k: row[k] for k in row.keys()}
     item["channels"] = json.loads(item["channels"]) if item.get("channels") else []
+    item["acquisition"] = json.loads(item["acquisition"]) if item.get("acquisition") else None
+    item["settings"] = czi_images.summary(item["acquisition"])
     item["name"] = Path(item["rel_path"]).name
     instant = datetime.strptime(item["file_mtime"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
     item["taken_at_lab"] = instant.astimezone(LAB_TIMEZONE).strftime("%Y-%m-%d %H:%M")
@@ -193,11 +200,24 @@ def get(conn, link_id: int) -> Optional[Dict[str, Any]]:
     return _row(row) if row else None
 
 
+def ome_tiff_path(root: Path, cache_dir: Path, link: Dict[str, Any]) -> Path:
+    """The OME-TIFF to view: the file itself, or a CZI's cached conversion."""
+    source = resolve_under(root, link["rel_path"])
+    if not czi_images.is_czi(source):
+        return source
+    target = Path(cache_dir) / f"link{link['id']}_{link['sha256'][:12]}.ome.tiff"
+    if not target.exists():
+        if not source.is_file():
+            raise OSError("file moved or deleted")
+        czi_images.to_ome_tiff(source, target)
+    return target
+
+
 def preview_path(root: Path, cache_dir: Path, link: Dict[str, Any], render) -> Path:
     """The cached composite PNG for a link, rendered on first use."""
     target = Path(cache_dir) / f"link{link['id']}_{link['sha256'][:12]}_composite.png"
     if not target.exists():
-        source = resolve_under(root, link["rel_path"])
+        source = ome_tiff_path(root, cache_dir, link)
         outputs = render(source, Path(cache_dir), f"link{link['id']}_{link['sha256'][:12]}")
         composite = next(o for o in outputs if o["display_role"] == "composite")
         produced = Path(cache_dir) / composite["image_filename"]
