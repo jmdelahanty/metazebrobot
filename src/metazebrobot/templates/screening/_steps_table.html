@@ -76,8 +76,9 @@
             </select>
         </label>
         <label>
-            Count <small>(leave empty for a well plate you fill while screening)</small>
+            Count
             <input type="number" name="fish_count" min="1">
+            <small>Leave empty for a well plate you fill while screening.</small>
         </label>
         <label>
             Container Type
@@ -105,6 +106,8 @@
         Notes
         <input type="text" name="notes" placeholder="Optional derived dish note">
     </label>
+    <small style="display:block; margin-bottom:0.5rem">This makes a dish of one result only. For a plate
+        that mixes positives and negatives, use "New well plate from this dish" on this page.</small>
     <button type="submit" class="secondary">Create Derived Dish</button>
 </form>
 {% endmacro %}
