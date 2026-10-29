@@ -131,13 +131,15 @@
         hx-post="/screening/{{ dish.dish_id }}/steps"
         hx-target="#steps-table"
         hx-swap="innerHTML"
+        hx-on::config-request="stampStepTime(event)"
     >
         <div class="grid">
             <label>
                 Date/Time
                 <input type="hidden" name="screening_datetime" id="screening_datetime">
                 <input type="datetime-local" id="datetime_picker"
-                       onchange="document.getElementById('screening_datetime').value = formatDT(this.value)">
+                       onchange="this.dataset.touched = '1'; document.getElementById('screening_datetime').value = formatDT(this.value)">
+                <small>Now, unless you change it.</small>
             </label>
             <label>
                 DPF Screened
@@ -253,6 +255,29 @@
 </p>
 
 <script>
+function nowLocalDT() {
+    // This computer's current time as "2026-10-28T22:15", for datetime-local.
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+}
+
+function stampStepTime(event) {
+    // Until the time is changed by hand, a step is stamped with the time it's added.
+    const picker = document.getElementById("datetime_picker");
+    if (!picker || picker.dataset.touched) return;
+    picker.value = nowLocalDT();
+    const stamped = formatDT(picker.value);
+    document.getElementById("screening_datetime").value = stamped;
+    const params = event && event.detail && event.detail.parameters;
+    if (params) {
+        if (typeof params.set === "function") params.set("screening_datetime", stamped);
+        else params.screening_datetime = stamped;
+    }
+}
+
+document.addEventListener("DOMContentLoaded", function() { stampStepTime(); });
+
 function formatDT(val) {
     // Convert "2026-03-30T14:30" to "20260330T14:30:00"
     if (!val) return "";
