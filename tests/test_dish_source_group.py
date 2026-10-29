@@ -32,3 +32,12 @@ def test_new_dish_records_and_shows_crossing_tank_group(client):
         "cross_id": cross, "dish_number": 2, "genotype": "wt", "responsible": "t",
         "dof": "2026-10-23", "source_group_id": ""})
     assert data_manager.load_single_dish(f"{cross}_2").get("source_group_id") is None
+
+
+def test_count_screened_defaults_to_the_dish_total(client):
+    cross = f"9{uuid.uuid4().int % 10**8}"
+    client.post("/dishes/new", data={
+        "cross_id": cross, "dish_number": 1, "genotype": "wt", "responsible": "t",
+        "dof": "2026-10-23", "fish_count": 37})
+    page = client.get(f"/screening/{cross}_1").text
+    assert 'name="count_screened_this_step" min="0" value="37"' in page

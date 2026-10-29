@@ -197,7 +197,9 @@
         <div class="grid">
             <label>
                 Count Screened
-                <input type="number" name="count_screened_this_step" min="0" required>
+                {% set dish_total = dish.current_fish_count if dish.current_fish_count is not none else dish.fish_count %}
+                <input type="number" name="count_screened_this_step" min="0" value="{{ dish_total if dish_total is not none else '' }}" required>
+                <small>Defaults to the fish in the dish.</small>
             </label>
             <label>
                 <span>Outcome Allocation</span>
