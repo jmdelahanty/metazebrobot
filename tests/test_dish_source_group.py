@@ -27,7 +27,7 @@ def test_new_dish_records_and_shows_crossing_tank_group(client):
         "dof": "2026-10-23", "source_group_id": " 2 "}, follow_redirects=False)
     assert resp.status_code == 303
     assert data_manager.load_single_dish(f"{cross}_1")["source_group_id"] == f"{cross}-G2"
-    assert f"group {cross}-G2" in client.get(f"/screening/{cross}_1").text
+    assert f"Group {cross}-G2" in client.get(f"/screening/{cross}_1").text
 
     client.post("/dishes/new", data={
         "cross_id": cross, "dish_number": 2, "genotype": "wt", "responsible": "t",
