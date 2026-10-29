@@ -96,9 +96,9 @@
             <input type="number" name="fish_count" min="0" max="1000" value="{{ form.fish_count or 0 }}">
         </label>
         <label>
-            Crossing tank group
-            <input type="text" name="source_group_id" value="{{ form.source_group_id or '' }}" placeholder="e.g. 19445-G2">
-            <small>As written on the aquatics sticker. Optional.</small>
+            Group #
+            <input type="text" name="source_group_id" value="{{ form.source_group_id or '' }}" inputmode="numeric" placeholder="e.g. 1">
+            <small>The number in the # box next to the crossing ID on the sticker. Saved as cross-G#, e.g. 19445-G1. Optional.</small>
         </label>
     </div>
 

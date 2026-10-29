@@ -24,8 +24,10 @@ Aquatics writes the group on the dish sticker.
 ## What is built
 
 - The dish model already had `source_group_id` (set from the old desktop app
-  on 32 dishes). The web new-dish form now has a "Crossing tank group" field,
-  free text as written on the sticker (e.g. `19445-G2`), optional, trimmed.
+  on 32 dishes, as `15178-G1`). The web new-dish form now has a "Group #"
+  field. Type the number from the sticker's # box, next to the crossing ID;
+  it is saved as `<cross>-G<n>`. `1`, `G1` and `19445-G1` all save as
+  `19445-G1`. Anything else is kept as typed. Optional.
 - The screening page header shows it, marked "from the sticker".
 - Dishes split from a dish (`_pos<n>`) already inherit it.
 

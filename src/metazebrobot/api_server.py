@@ -500,6 +500,17 @@ def _source_steps(dish_id: str) -> List[Dict[str, Any]]:
     return steps
 
 
+def _normalize_source_group(cross_id: str, value: Optional[str]) -> Optional[str]:
+    """Sticker group number -> '<cross>-G<n>': '1', 'G1' and '19445-G1' all give '19445-G1'."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    match = re.fullmatch(r"(?:(\d+)\s*-\s*)?G?\s*(\d+)", text, re.I)
+    if match and (match.group(1) in (None, cross_id.strip())):
+        return f"{cross_id.strip()}-G{int(match.group(2))}"
+    return text
+
+
 def _next_fish_label(dish_id: str, prefix: str) -> str:
     """Next '<prefix><n>' among this dish's fish (ended ones included)."""
     pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
@@ -3727,7 +3738,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             container_type=container_type,
             vol_water_total=vol_water_total,
             notes=notes or None,
-            source_group_id=(source_group_id or "").strip() or None,
+            source_group_id=_normalize_source_group(cross_id, source_group_id),
         )
 
         if success:
