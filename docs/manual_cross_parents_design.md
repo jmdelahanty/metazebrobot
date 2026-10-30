@@ -44,3 +44,12 @@ represent) MetaZebrobot needs the parent.
 an "Add a parent PyRAT doesn't list" form, and remove for hand-entered rows.
 Linked from the new-dish form's Parent Provenance. HTML only; nothing in the
 pinned consumer slice.
+
+## Parents on the screening page (2026-10-30)
+
+The screening page (`/screening/{dish_id}`) lists the dish's cross parents
+under the parsed constructs: role, tank and rack position, strain,
+generation and date of birth, with hand-entered parents marked, and the
+PyRAT crossing request text. It reads `cross_parents` and the cached
+crossing; nothing is fetched from PyRAT. Prompted by 19445, where checking
+which tanks went into a cross meant leaving the screening page.

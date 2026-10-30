@@ -1896,6 +1896,42 @@ def _cross_snapshot_from_payload(cross_id: str, payload: Dict[str, Any], source:
     }
 
 
+def _cross_parents_for_screening(conn: sqlite3.Connection, cross_id: str) -> Dict[str, Any]:
+    """The cross's parent tanks and request text, as the screening page shows them."""
+    try:
+        rows = conn.execute(
+            """
+            SELECT role, tank_id, tank_label, location_display, raw_strain_name,
+                   generation, source, raw_payload
+            FROM cross_parents WHERE cross_id = ? ORDER BY parent_index
+            """,
+            (cross_id,),
+        ).fetchall()
+        cross = conn.execute("SELECT data FROM crosses WHERE cross_id = ?", (cross_id,)).fetchone()
+    except sqlite3.OperationalError:
+        return {"parents": [], "description": None}
+    parents = []
+    for row in rows:
+        try:
+            raw = json.loads(row["raw_payload"] or "{}")
+        except (TypeError, ValueError):
+            raw = {}
+        parents.append({
+            "role": row["role"],
+            "tank_id": row["tank_id"],
+            "where": row["location_display"] or row["tank_label"],
+            "strain": row["raw_strain_name"],
+            "generation": row["generation"],
+            "born": str(raw.get("date_of_birth") or "")[:10] or None,
+            "manual": row["source"] == "manual",
+        })
+    try:
+        description = (json.loads(cross["data"] or "{}").get("description") or "").strip() if cross else ""
+    except (TypeError, ValueError):
+        description = ""
+    return {"parents": parents, "description": description or None}
+
+
 def _load_cross_parent_provenance(conn: sqlite3.Connection, cross_id: str) -> Dict[str, Any]:
     """Load display-ready parent provenance for the new-dish form."""
     try:
@@ -4989,10 +5025,15 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             app.state.busy_timeout_ms,
             dish,
         )
+        cross_parents = {"parents": [], "description": None}
+        if dish.cross_id:
+            with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+                cross_parents = _cross_parents_for_screening(conn, str(dish.cross_id))
 
         return templates.TemplateResponse(request, "screening/screening_form.html", {
             "dish_id": dish_id,
             "dish": dish,
+            "cross_parents": cross_parents,
             "dpf": dpf,
             "protocol": protocol,
             "current_step": current_step,

@@ -15,6 +15,35 @@
     </p>
 </hgroup>
 {% include "_transgenes.html" %}
+{% if dish.cross_id %}
+<section class="transgene-block">
+    <small><strong>Parents</strong> &mdash; cross {{ dish.cross_id }}
+        (<a href="/crosses/{{ dish.cross_id }}/parents">add one PyRAT doesn't list</a>)</small>
+    {% if cross_parents.parents %}
+    <figure>
+        <table role="grid" class="screening-steps-table transgene-table">
+            <thead>
+                <tr><th>Role</th><th>Tank</th><th>Strain</th><th>Generation</th><th>Born</th></tr>
+            </thead>
+            <tbody>
+                {% for p in cross_parents.parents %}
+                <tr>
+                    <td>{{ p.role or "unknown" }}{% if p.manual %} <mark>entered by hand</mark>{% endif %}</td>
+                    <td>{{ p.where or p.tank_id or "" }}</td>
+                    <td>{{ p.strain or "" }}</td>
+                    <td>{{ p.generation or "" }}</td>
+                    <td>{{ p.born or "" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </figure>
+    {% else %}
+    <p><small>No parent tanks on record for this cross.</small></p>
+    {% endif %}
+    {% if cross_parents.description %}<p><small>Request: {{ cross_parents.description }}</small></p>{% endif %}
+</section>
+{% endif %}
 
 <details
     class="protocol-box"

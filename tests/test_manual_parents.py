@@ -1,5 +1,6 @@
 """Hand-entered cross parents (docs/manual_cross_parents_design.md)."""
 
+import json
 import uuid
 
 from metazebrobot.api_server import _upsert_cross_parent_provenance
@@ -79,3 +80,18 @@ def test_reason_and_strain_are_required_and_pyrat_rows_cannot_be_removed(client)
     assert client.post(f"/crosses/{cross}/parents/1/remove").status_code == 404
     assert client.post("/crosses/NOPE/parents", data={"strain": "a:b", "reason": "x"}).status_code == 404
     assert client.get(f"/crosses/{cross}/parents").status_code == 200
+
+
+def test_screening_page_shows_the_cross_parents(client):
+    cross, dish_id = _cross_with_dish()
+    payload = {"description": "Screening cross for 9243, 2 groups",
+               "tanks": {"parents": [{"tank_id": 9243, "strain_name": GAL4, "generation": "F3",
+                                      "date_of_birth": "2025-08-20T00:00:00"}]}}
+    with data_manager.get_connection() as conn:
+        conn.execute("UPDATE crosses SET data = ? WHERE cross_id = ?", (json.dumps(payload), cross))
+        _upsert_cross_parent_provenance(conn, cross, payload)
+        conn.commit()
+    page = client.get(f"/screening/{dish_id}").text
+    parents = page.split("<strong>Parents</strong>")[1].split("</section>")[0]
+    assert "9243" in parents and GAL4 in parents and "F3" in parents and "2025-08-20" in parents
+    assert "Screening cross for 9243, 2 groups" in parents
