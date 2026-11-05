@@ -472,6 +472,22 @@ def _well_sort_key(label: str) -> Tuple[str, int]:
     return (match.group(1), int(match.group(2))) if match else (label or "", 0)
 
 
+def _result_label(calls: List[Dict[str, Any]]) -> str:
+    """A fish's screening calls in short form, e.g. 'PMCA2-mCherry-zf+ pig'."""
+    return " ".join(
+        ("pig" if c["kind"] == "pigment" else _short_construct(c["dish_construct"]))
+        + {"positive": "+", "negative": "−", "pigmented": ""}.get(c["result"], "?")
+        for c in calls)
+
+
+def _plate_layout(well_labels: List[str]) -> Optional[Dict[str, Any]]:
+    """Rows and columns of a well plate from its well labels (A1..C4 -> A-C, 1-4)."""
+    keys = [_well_sort_key(w) for w in well_labels]
+    if not keys or any(col == 0 for _, col in keys):
+        return None
+    return {"rows": sorted({row for row, _ in keys}), "cols": list(range(1, max(c for _, c in keys) + 1))}
+
+
 def _short_construct(construct: Optional[str]) -> str:
     """'Tg(gfap:PMCA2-mCherry-zf)' -> 'PMCA2-mCherry-zf' for compact display."""
     match = re.search(r":([^)]+)\)", construct or "")
@@ -5929,10 +5945,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                             and c["source"] == "observed"}
                 if observed in ({"positive"}, {"negative"}):
                     correctable[f["fish_id"]] = "negative" if observed == {"positive"} else "positive"
-                results[f["fish_id"]] = " ".join(
-                    ("pig" if c["kind"] == "pigment" else _short_construct(c["dish_construct"]))
-                    + {"positive": "+", "negative": "−", "pigmented": ""}.get(c["result"], "?")
-                    for c in calls)
+                results[f["fish_id"]] = _result_label(calls)
         with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
             row = conn.execute(
                 "SELECT cross_id, parent_dish_id, source_screening_datetime, source_screening_bucket "
@@ -6930,8 +6943,21 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             labels = {r["fish_id"]: r["subject_label"] for r in conn.execute(
                 "SELECT fish_id, subject_label FROM fish_subjects WHERE fish_id IN "
                 f"({','.join('?' for _ in items) or 'NULL'})", [i["fish_id"] for i in items])}
+            results = {fid: _result_label((fish_screening_calls(conn, fid) or {}).get("calls", []))
+                       for fid in labels}
+        # On a well plate, images sit in the well they were taken in.
+        wells = [u["position_label"] for u in data_manager.get_housing_units_with_fish(dish_id)
+                 if u["unit_kind"] == "well"]
+        plate = _plate_layout(wells)
+        by_well: Dict[str, List[Dict[str, Any]]] = {}
+        if plate:
+            for img in items:
+                if img.get("well_label") in wells:
+                    by_well.setdefault(img["well_label"], []).append(img)
         return templates.TemplateResponse(request, "images/_gallery.html", {
-            "items": items, "labels": labels, "dish_id": dish_id,
+            "items": items, "labels": labels, "results": results, "dish_id": dish_id,
+            "plate": plate, "by_well": by_well,
+            "unplaced": [i for i in items if not any(i in v for v in by_well.values())],
             "return_to": f"/dishes/{dish_id}/fish/"})
 
     @app.post("/image-links/{link_id}/reference")

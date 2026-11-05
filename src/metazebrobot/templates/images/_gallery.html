@@ -1,21 +1,23 @@
 {# Linked screening images (docs/screening_images_design.md). #}
-{% if items %}
-<div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));">
-{% for img in items %}
+{% macro image_figure(img, in_well=False) %}
     <figure style="margin:0">
         <a href="/image-links/{{ img.id }}/preview.png" target="_blank">
             <img src="/image-links/{{ img.id }}/preview.png" alt="{{ img.name }}" loading="lazy"
                  style="width:100%; border-radius:4px">
         </a>
         <figcaption><small>
-            {% if img.well_label %}<strong>{{ img.well_label }}</strong>{% endif %}
-            {% if img.fish_id %} · <a href="/fish/{{ img.fish_id }}/view">{{ labels.get(img.fish_id) or img.fish_id[:8] }}</a>{% endif %}
-            · {{ img.kind }} · {{ img.taken_at_lab }}
-            {% for c in img.channels %}<br>{{ c.fluor or c.name }}{% endfor %}
-            {% for line in img.settings %}<br>{{ line }}{% endfor %}
+            {% if img.well_label and not in_well %}<strong>{{ img.well_label }}</strong>{% endif %}
+            {% if img.fish_id %}{% if not in_well %} · {% endif %}<a href="/fish/{{ img.fish_id }}/view">{{ labels.get(img.fish_id) or img.fish_id[:8] }}</a>
+                {% if in_well and results and results.get(img.fish_id) %} {{ results[img.fish_id] }}{% endif %}{% endif %}
+            {% if not in_well %} · {{ img.kind }} · {{ img.taken_at_lab }}{% endif %}
             <br><a href="/viewer/?image_url={{ request.base_url }}image-links/{{ img.id }}/image.ome.tiff"
                    target="_blank">open in viewer</a> · <a href="/image-links/{{ img.id }}/file">download</a>
         </small></figcaption>
+        {% if in_well %}<details style="margin:0"><summary><small>details</small></summary><small>{{ img.kind }} · {{ img.taken_at_lab }}</small>{% endif %}
+        <small>
+            {% for c in img.channels %}{% if in_well or not loop.first %}<br>{% endif %}{{ c.fluor or c.name }}{% endfor %}
+            {% for line in img.settings %}<br>{{ line }}{% endfor %}
+        </small>
         <form method="post" action="/image-links/{{ img.id }}/reference" style="margin:0.25rem 0 0">
             <input type="hidden" name="return_to" value="{{ return_to or request.url.path }}">
             {% if img.is_reference %}
@@ -31,10 +33,38 @@
             </fieldset>
             {% endif %}
         </form>
+        {% if in_well %}</details>{% endif %}
     </figure>
-{% endfor %}
+{% endmacro %}
+
+{% if plate and by_well %}
+<div class="image-plate" style="overflow-x:auto">
+<div class="image-plate__grid" style="display:grid; gap:4px; min-width:{{ plate.cols | length * 9 + 2 }}rem;
+     grid-template-columns: 2rem repeat({{ plate.cols | length }}, minmax(9rem, 1fr));">
+    <div></div>
+    {% for c in plate.cols %}<div class="plate-col-header">{{ c }}</div>{% endfor %}
+    {% for r in plate.rows %}
+    <div class="plate-row-label">{{ r }}</div>
+        {% for c in plate.cols %}
+        {% set well = r ~ c %}
+        <div class="plate-well{% if by_well.get(well) %} plate-well--occupied{% else %} plate-well--empty{% endif %}"
+             style="justify-content:flex-start; text-align:left">
+            <div class="plate-well__label">{{ well }}</div>
+            {% for img in by_well.get(well, []) %}{{ image_figure(img, in_well=True) }}{% endfor %}
+        </div>
+        {% endfor %}
+    {% endfor %}
 </div>
-{% else %}
+</div>
+{% endif %}
+
+{% set rest = unplaced if (plate and by_well) else items %}
+{% if rest %}
+{% if plate and by_well %}<p><small>Not in a well of this plate:</small></p>{% endif %}
+<div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));">
+{% for img in rest %}{{ image_figure(img) }}{% endfor %}
+</div>
+{% elif not items %}
 <p><em>No screening images linked.</em></p>
 {% endif %}
 <p><small><a href="/image-links/import{% if dish_id %}?folder={{ dish_id }}{% endif %}">Link screening images…</a></small></p>

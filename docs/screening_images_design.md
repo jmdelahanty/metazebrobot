@@ -50,6 +50,12 @@ individual ids) and, where possible, for each individual fish.
 
 - Dish fish page: a gallery of the dish's linked images (thumbnails →
   larger preview, file path, channels).
+  On a well plate (2026-11-04) the gallery is laid out like the plate:
+  each image sits in the well its filename names, with the fish's label and
+  current screening call; settings and the reference control fold under
+  "details". Images with no well, or a well not on the plate, are listed
+  below it. Previews are contrast-stretched per image (0.5–99.8th
+  percentile), so brightness isn't comparable between wells.
 - Fish timeline page: that fish's images; the timeline gets an "imaged" entry.
 - JSON: import page `/image-links/import`; `GET /dishes/{dish_id}/image-links`, `GET /fish/{fish_id}/image-links`
   (not in the pinned consumer slice yet).

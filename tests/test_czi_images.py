@@ -128,3 +128,29 @@ def test_czi_links_with_settings_previews_and_opens_in_the_viewer(client, tmp_pa
     assert preview.status_code == 200 and preview.headers["content-type"] == "image/png"
     original = client.get(f"/image-links/{item['id']}/file")
     assert original.content == b"ZISRAWFILE fake czi bytes"
+
+
+def test_plate_gallery_puts_each_image_in_its_well(client, tmp_path, fake_czifile):
+    dish = FishDish.create_new(
+        cross_id=f"CROSS_{uuid.uuid4().hex[:6]}", dish_number=1, genotype="Tg(gfap:PMCA2-mCherry-zf)",
+        responsible="t", fish_count=0, dof="20261023", container_type="well_plate",
+    ).model_dump(mode="json", exclude_none=True)
+    data_manager.save_fish_dish(dish)
+    dish_id = dish["dish_id"]
+    client.post(f"/dishes/{dish_id}/plate/setup", data={"wells": 12})
+    root = tmp_path / "staging"
+    (root / dish_id).mkdir(parents=True)
+    for name in (f"{dish_id}_B3.czi", "Snap-1.czi"):
+        (root / dish_id / name).write_bytes(b"ZISRAWFILE fake czi bytes")
+    client.app.state.ome_staging_root = root
+    form = {"dish_id": dish_id, "kind": "plate"}
+    for i, name in enumerate((f"{dish_id}_B3.czi", "Snap-1.czi")):
+        form.update({f"include_{i}": "on", f"rel_{i}": f"{dish_id}/{name}"})
+    client.post("/image-links/import", data=form)
+
+    page = client.get(f"/dishes/{dish_id}/image-links/gallery").text
+    grid, rest = page.split("Not in a well of this plate:")
+    assert grid.count('class="plate-row-label"') == 3 and grid.count('class="plate-col-header"') == 4
+    b3 = grid.split('<div class="plate-well__label">B3</div>')[1].split('class="plate-well')[0]
+    assert "preview.png" in b3 and "63 HE mRFP" in b3
+    assert rest.count("preview.png") == 2  # Snap-1 has no well: listed below the plate (link + img)
