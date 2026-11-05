@@ -75,6 +75,43 @@ crosses without dishes"). Use the cache for bulk or historical derivation
 5. **Cache unchanged.** The `crosses` table stays the backing store for
    heritage and analytics; nothing here replaces the nightly sync.
 
+## Owners, screeners and names (agreed 2026-11-04)
+
+A cross's owner and the person who screens its fish are often different
+people. Agreed design, built in this order:
+
+1. **`users` table, synced from PyRAT `api/v3/users`.** PyRAT user id
+   (key), username, first name, last name, PyRAT full name ("Last First"),
+   active/inactive, and an email address filled in by hand (PyRAT doesn't
+   serve one). Pages show "First Last"; records store the username. It
+   replaces `~/.pyrat_user_mapping.json` for the user picker and
+   `_pyrat_user_id`. Since 2026-11-04 the service's PyRAT account can list
+   every user (153), with `first_name`/`last_name`.
+   - Names don't identify people: the same person can have two PyRAT accounts
+     with near-identical names. Store the id; when two accounts are one
+     person, the lab says which one is current.
+2. **`screened_by` on each screening step:** one username, set from the user
+   picker when the step is created (screening form, or a step started from
+   the plate page), editable in the steps table. A session is almost always
+   one person.
+   - **`recorded_by` on each allocation,** set automatically. If someone
+     else books part of a step, it shows ("started by A; B recorded 6 of
+     18") without a handover action. No handover button for now.
+   - Backfill only from evidence: a step whose fish observations all name
+     one observer gets that observer; others stay blank.
+3. **Dish owner from PyRAT, not free text.** New `responsible_user` on dishes,
+   defaulting to the cross's PyRAT `responsible_id` (every cached cross of
+   the 270 dishes on 2026-11-04 has one). It can be changed to another user,
+   because the dish owner can differ from the cross owner: 16 dishes were on
+   another member's crosses but raised and used by someone else, and their
+   owner is the person who used the fish. The free-text `responsible` stays
+   as the legacy display value.
+   - Backfill: dishes whose `responsible` text names the cross owner get the
+     cross owner; the rest are listed for review, not changed automatically.
+4. **Screening report** ([`screening_report_design.md`](screening_report_design.md))
+   uses all three: "Cross 19498 (PyRAT responsible: <First Last>), screened by
+   <First Last> on 11-04".
+
 ## Open questions
 
 - Users without PyRAT accounts (no `responsible_id`): show whole-lab views, or

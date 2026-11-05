@@ -24,8 +24,10 @@ another's cross.
 - **No email addresses.** PyRAT `api/v3/users` refuses `email`/`mail` fields
   (422). Addresses have to live in MetaZebrobot (see
   [`user_scoped_workflow_design.md`](user_scoped_workflow_design.md)).
-- **Sending is possible later.** The service host can reach a lab mail
-  server. Its settings belong in service configuration, not in this repo.
+- **Sending works.** Another lab service sends mail from the same host
+  through a lab mail server without logging in. Its settings belong in the
+  service environment, not in this repo. Only hhmi.org recipients are
+  needed.
 - **"Done" is rarely recorded.** Finalize (`POST /screening/{dish}/finalize`)
   asks for the final positive count and the date typed by hand; 9 of 270
   dishes have it.
@@ -66,11 +68,12 @@ Contents, in order:
    remaining), and finalized or not. Counts come from the screening steps and
    their allocations, the same source as the screening page.
 3. **Per plate:** the well grid with fish label and current call per well, and
-   one small same-scale thumbnail per well (the gallery's `?scale=dish`
-   rendering, downsized to about 300 px, JPEG). The shared range is printed.
+   one small thumbnail per well: the gallery's enhanced (per-image contrast)
+   rendering by default, downsized to about 300 px, JPEG.
 4. **Notes and flags:**
    - corrections (observations noted "Corrected from ...");
-   - dishes of the cross with no screening step;
+   - dishes of the cross with no screening step, listed as "not screened"
+     so the cross's progress is visible;
    - positives from only one dish when the cross's other dishes screened
      negative, which can point to a mix-up worth checking;
    - dishes not finalized, each with "Finalize: N positives".
@@ -86,26 +89,28 @@ Downloads:
 Size: twelve 300 px JPEG thumbnails are roughly 0.3-0.5 MB per plate, well
 within mail limits.
 
-## Phase 2: send from the app (later)
+## Saving and sending (agreed 2026-11-04: part of phase 1)
 
-- Mail server settings from the service environment
-  (`METAZEBROBOT_SMTP_HOST`, port, sender address); none committed.
-- An email address per user in the users table proposed in
-  `user_scoped_workflow_design.md`.
-- "Send to <owner>" on the preview; each send logged (cross, recipient,
-  sender, time, report checksum) so it's clear what was sent.
-- How the service authenticates to the mail server is to be settled with IT.
+- **Every report is saved** when generated: the HTML and the `.eml`, under the
+  service's data directory, with "Generated at <lab date-time> · MetaZebrobot
+  <git commit>" in the report and the message.
+- **Modes, as in the lab's other service:** `disabled`, `outbox` (save the
+  `.eml` only) and `smtp` (save and send). Settings from the service
+  environment: mode, host, port (default 25), STARTTLS (default off), From (a
+  real hhmi.org mailbox with display name). None are committed.
+- **Recipients:** the cross owner's address from the users table (filled in by
+  hand), editable before sending.
+- **Send log:** cross, recipients, sender, generated-at, commit, report
+  checksum, mode and result, so it's clear what was sent to whom.
+- **First real send** goes to the person running it, as a test.
 
 ## Dependencies
 
-- **Who screened:** screening steps don't record a screener yet. Until the
-  owner-versus-actor work lands, the report names the user-picker user as the
-  person producing it, not as the screener of each step.
+- **Owner, screener and names** come from the users table, `screened_by` and
+  `responsible_user` in
+  [`user_scoped_workflow_design.md`](user_scoped_workflow_design.md#owners-screeners-and-names-agreed-2026-11-04).
 
 ## Open questions
 
-- Recipient: the cross's PyRAT responsible by default, or the requester when
-  they differ?
-- Include dishes of the cross that were never screened, or only screened ones?
-- Per-cross only, or also a per-session report ("everything I screened
-  today") for the screener?
+- Also a per-session report ("everything I screened today") for the
+  screener?
