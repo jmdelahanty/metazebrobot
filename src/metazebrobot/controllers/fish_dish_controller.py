@@ -649,6 +649,20 @@ class FishDishController:
         data_manager.data_cache.setdefault('fish_dishes', {})[dish_id] = payload
         return True, "screened count raised by one"
 
+    def set_step_screener(self, dish_id: str, screening_datetime: str,
+                          username: Optional[str]) -> Tuple[bool, str]:
+        """Set (or clear) who screened a step, e.g. one created before a user was picked."""
+        dish = self.get_dish(dish_id)
+        step = dish.get_screening_step(screening_datetime) if dish else None
+        if step is None:
+            return False, f"Screening step {screening_datetime} not found on {dish_id}."
+        step.screened_by = username or None
+        payload = dish.model_dump(mode='json', exclude_none=True)
+        if not data_manager.save_fish_dish(payload):
+            return False, f"Failed to save {dish_id}."
+        data_manager.data_cache.setdefault('fish_dishes', {})[dish_id] = payload
+        return True, "screener saved"
+
     def rebook_placed_fish(self, source_dish_id: str, screening_datetime: str, plate_dish_id: str,
                            label: str, old_result: str, new_result: str) -> Tuple[bool, str]:
         """Move one placed fish's allocation from the ``old_result`` bucket to ``new_result``.

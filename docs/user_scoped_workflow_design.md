@@ -113,6 +113,9 @@ people. Agreed design, built in this order:
      (dishes load steps from these tables). The steps table shows "Screened
      by" and "recorded by …" on allocations booked by someone else.
      `scripts/backfill_screened_by.py` does the evidence-only backfill.
+   - The screening page's steps table sets or clears a step's screener
+     (`POST /screening/{dish}/steps/{datetime}/screened-by`, picker users
+     only). The screening report only shows what's recorded; it edits nothing.
 3. **Dish owner from PyRAT, not free text.** New `responsible_user` on dishes,
    defaulting to the cross's PyRAT `responsible_id` (every cached cross of
    the 270 dishes on 2026-11-04 has one). It can be changed to another user,

@@ -204,7 +204,21 @@
         {% set has_indicator_screen = s.indicators_screened and (s.indicators_screened | length > 0) %}
         <tr id="step-{{ loop.index }}">
             <td>{{ s.screening_datetime }}</td>
-            <td>{% if s.screened_by %}{{ (user_names or {}).get(s.screened_by) or s.screened_by }}{% else %}-{% endif %}</td>
+            <td>
+                <form hx-post="/screening/{{ dish_id }}/steps/{{ s.screening_datetime }}/screened-by"
+                      hx-trigger="change" hx-target="#steps-table" hx-swap="innerHTML" style="margin:0">
+                    <select name="screened_by" aria-label="Screened by"
+                            style="font-size:0.8rem; padding:0.1rem 1.6rem 0.1rem 0.3rem; margin:0; width:auto">
+                        <option value=""{% if not s.screened_by %} selected{% endif %}>-</option>
+                        {% for u in user_list or [] %}
+                        <option value="{{ u }}"{% if u == s.screened_by %} selected{% endif %}>{{ (user_names or {}).get(u) or u }}</option>
+                        {% endfor %}
+                        {% if s.screened_by and s.screened_by not in (user_list or []) %}
+                        <option value="{{ s.screened_by }}" selected>{{ s.screened_by }}</option>
+                        {% endif %}
+                    </select>
+                </form>
+            </td>
             <td>{{ s.dpf_screened }}</td>
             <td>{{ s.indicators_screened | join(", ") if s.indicators_screened else "-" }}</td>
             <td>{{ "Yes" if s.pigment_screened else "No" }}</td>

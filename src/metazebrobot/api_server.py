@@ -5150,6 +5150,18 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             ),
         })
 
+    @app.post("/screening/{dish_id}/steps/{screening_datetime}/screened-by", response_class=HTMLResponse)
+    def set_step_screener(request: Request, dish_id: str, screening_datetime: str,
+                          screened_by: str = Form(default="")):
+        """Set who screened a step from the steps table (a picker user, or blank to clear)."""
+        username = screened_by.strip() or None
+        if username and username not in _load_user_list(app.state.db_path):
+            raise HTTPException(status_code=422, detail={"error": "unknown_user", "username": username})
+        ok, message = fish_dish_ctrl.set_step_screener(dish_id, screening_datetime, username)
+        if not ok:
+            raise HTTPException(status_code=404, detail={"error": "step_not_found", "message": message})
+        return screening_steps_table(request, dish_id)
+
     @app.post("/screening//steps/{screening_datetime}/allocations", response_class=HTMLResponse)
     def stale_allocations_form(request: Request, screening_datetime: str):
         """A form rendered without its dish id (pages from before the fix): ask for a reload."""

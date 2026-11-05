@@ -89,3 +89,32 @@ def test_backfill_fills_only_steps_with_one_observer(tmp_path):
     with sqlite3.connect(db) as conn:
         assert dict(conn.execute("SELECT dish_id, screened_by FROM screening_steps")) == {
             "A": "lovelacea", "B": None, "C": None, "D": "kept"}
+
+
+def test_screener_can_be_set_from_the_steps_table(client):
+    import sqlite3
+    from metazebrobot.data import users
+    dish_id = _dish(f"CROSS_{uuid.uuid4().hex[:6]}", 1)
+    client.post(f"/screening/{dish_id}/steps", data={
+        "screening_datetime": STEP, "dpf_screened": 7, "indicators_screened": "mCherry",
+        "count_screened_this_step": 20})
+    with data_manager.get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        users.upsert_from_pyrat(conn, [{"userid": 115, "username": "lovelacea", "first_name": "Ada",
+                                        "last_name": "Lovelace", "fullname": "Lovelace Ada"}],
+                                "active", "2026-11-04 00:00:00")
+        users.mark_app_users(conn, [115])
+        conn.commit()
+    try:
+        table = client.post(f"/screening/{dish_id}/steps/{STEP}/screened-by",
+                            data={"screened_by": "lovelacea"}).text
+        assert '<option value="lovelacea" selected>Ada Lovelace</option>' in table
+        assert _step(client, dish_id)["screened_by"] == "lovelacea"
+        assert client.post(f"/screening/{dish_id}/steps/{STEP}/screened-by",
+                           data={"screened_by": "nobody"}).status_code == 422
+        client.post(f"/screening/{dish_id}/steps/{STEP}/screened-by", data={"screened_by": ""})
+        assert _step(client, dish_id).get("screened_by") is None
+    finally:
+        with data_manager.get_connection() as conn:
+            conn.execute("DELETE FROM users")
+            conn.commit()
