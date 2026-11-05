@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
-from .data import fish_endings, fish_observations, image_links, manual_parents, propagation, usage_links
+from .data import fish_endings, fish_observations, image_links, manual_parents, propagation, usage_links, users
 from .data.fish_timeline import fish_timeline as build_fish_timeline
 from .data.screening_calls import dish_calls as dish_screening_calls
 from .data.screening_calls import fish_calls as fish_screening_calls
@@ -844,8 +844,25 @@ def _list_ome_browser_directory(root: Path, current_dir: Path) -> Tuple[List[Dic
     return directories, files
 
 
-def _load_user_list() -> List[str]:
-    """Load available usernames from the PyRAT user mapping file."""
+def _app_users(db_path: Optional[str]) -> List[Dict[str, Any]]:
+    """Users in the picker from the users table (empty if not synced or unreadable)."""
+    if not db_path:
+        return []
+    try:
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'users'").fetchone():
+                return []
+            return users.app_users(conn)
+    except sqlite3.Error:
+        return []
+
+
+def _load_user_list(db_path: Optional[str] = None) -> List[str]:
+    """Usernames for the user picker: the users table, else the PyRAT user mapping file."""
+    table = _app_users(db_path)
+    if table:
+        return [u["username"] for u in table]
     try:
         if os.path.exists(_USER_MAPPING_PATH):
             with open(_USER_MAPPING_PATH) as f:
@@ -865,13 +882,23 @@ def _current_user(request: Request) -> str:
     cookie_val = request.cookies.get("metazebrobot_user")
     if cookie_val:
         return cookie_val
-    # Fall back to first user in mapping, or "unknown"
-    users = _load_user_list()
-    return users[0] if users else "unknown"
+    # Fall back to first user in the picker, or "unknown"
+    names = _load_user_list(getattr(request.app.state, "db_path", None))
+    return names[0] if names else "unknown"
 
 
-def _pyrat_user_id(username: str) -> Optional[int]:
-    """Look up a PyRAT user ID from the mapping file."""
+def _pyrat_user_id(username: str, db_path: Optional[str] = None) -> Optional[int]:
+    """A username's PyRAT user id: the users table, else the mapping file."""
+    if db_path:
+        try:
+            with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+                conn.row_factory = sqlite3.Row
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'users'").fetchone():
+                    user = users.by_username(conn, username)
+                    if user:
+                        return user["pyrat_userid"]
+        except sqlite3.Error:
+            pass
     try:
         if os.path.exists(_USER_MAPPING_PATH):
             with open(_USER_MAPPING_PATH) as f:
@@ -3266,7 +3293,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     async def inject_user_context(request: Request, call_next):
         """Add current_user and user_list to Jinja2 template globals."""
         templates.env.globals["current_user"] = _current_user(request)
-        templates.env.globals["user_list"] = _load_user_list()
+        picker = _app_users(app.state.db_path)
+        templates.env.globals["user_list"] = ([u["username"] for u in picker] if picker
+                                              else _load_user_list())
+        templates.env.globals["user_names"] = {u["username"]: users.display_name(u) for u in picker}
         response = await call_next(request)
         return response
 
@@ -3704,7 +3734,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         # Default sync is scoped to the current user. "All crosses" intentionally
         # drops the responsible_id filter so an exact or broad PyRAT query can
         # discover crosses owned by another person when PyRAT permissions allow it.
-        responsible_id = _pyrat_user_id(_current_user(request))
+        responsible_id = _pyrat_user_id(_current_user(request), app.state.db_path)
         if responsible_id and not all_crosses:
             params["responsible_id"] = responsible_id
 
@@ -7465,7 +7495,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         tanks = []
         error_msg = None
         try:
-            responsible_id = _pyrat_user_id(_current_user(request))
+            responsible_id = _pyrat_user_id(_current_user(request), app.state.db_path)
             params = {
                 "l": 500,
                 "s": ["date_of_birth:asc"],
@@ -7526,7 +7556,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         error_msg = None
         details_refresh_enabled = bool(get_pyrat_frontend_credentials())
         try:
-            responsible_id = _pyrat_user_id(_current_user(request))
+            responsible_id = _pyrat_user_id(_current_user(request), app.state.db_path)
             params = {
                 "l": 200,
                 "s": ["date_of_record:desc"],
@@ -7570,7 +7600,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         crossings: List[Dict[str, Any]] = []
         error_msg = None
         try:
-            responsible_id = _pyrat_user_id(_current_user(request))
+            responsible_id = _pyrat_user_id(_current_user(request), app.state.db_path)
             params = {
                 "l": 200,
                 "s": ["date_of_record:desc"],

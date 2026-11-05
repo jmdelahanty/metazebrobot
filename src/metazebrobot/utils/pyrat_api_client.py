@@ -137,6 +137,19 @@ class PyratApiClient:
             if not page or offset >= total:
                 return tanks
 
+    def users(self, keys: Sequence[str], status: str) -> List[Dict[str, Any]]:
+        """Every user with this status (active / inactive) visible to the account, paged."""
+        users: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            response = self._get("users", {"k": list(keys), "status": status, "l": PAGE_SIZE, "o": offset})
+            page = response.json()
+            users.extend(page)
+            total = int(response.headers.get("X-Total-Count") or 0)
+            offset += len(page)
+            if not page or offset >= total:
+                return users
+
     def user(self, username: str) -> Optional[Dict[str, Any]]:
         """The PyRAT user with this exact username (active or not), or None."""
         for status in ("active", "inactive"):

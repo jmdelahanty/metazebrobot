@@ -2274,7 +2274,7 @@ class TestDishCreation:
             "user_token": "user-token",
         })
         monkeypatch.setattr(api_server, "_current_user", lambda request: "delahantyj")
-        monkeypatch.setattr(api_server, "_pyrat_user_id", lambda username: 115)
+        monkeypatch.setattr(api_server, "_pyrat_user_id", lambda username, db_path=None: 115)
         monkeypatch.setattr(requests, "get", fake_get)
 
         resp = client.post("/dishes/new/refresh-crosses", data={"all_crosses": "true"})
@@ -2349,7 +2349,7 @@ class TestDishCreation:
             "user_token": "user-token",
         })
         monkeypatch.setattr(api_server, "_current_user", lambda request: "delahantyj")
-        monkeypatch.setattr(api_server, "_pyrat_user_id", lambda username: 115)
+        monkeypatch.setattr(api_server, "_pyrat_user_id", lambda username, db_path=None: 115)
         monkeypatch.setattr(requests, "get", fake_get)
 
         resp = client.post("/dishes/new/refresh-crosses", data={})
