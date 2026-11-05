@@ -154,3 +154,55 @@ def test_plate_gallery_puts_each_image_in_its_well(client, tmp_path, fake_czifil
     b3 = grid.split('<div class="plate-well__label">B3</div>')[1].split('class="plate-well')[0]
     assert "preview.png" in b3 and "63 HE mRFP" in b3
     assert rest.count("preview.png") == 2  # Snap-1 has no well: listed below the plate (link + img)
+
+
+def test_same_scale_previews_share_one_range_across_the_dish(client, tmp_path, monkeypatch):
+    import czifile
+
+    brightness = {"bright.czi": 2000, "dim.czi": 200}
+
+    class _Plane(_Scene):
+        def __init__(self, peak):
+            self.peak = peak
+
+        def asarray(self):
+            plane = np.full((6, 8), 50, dtype=np.uint16)
+            plane[2:4, 2:6] = self.peak
+            return plane
+
+    class _Czi(_FakeCzi):
+        def __init__(self, path):
+            super().__init__(path)
+            self.scenes = [_Plane(brightness[str(path).rsplit("/", 1)[-1]])]
+
+    monkeypatch.setattr(czifile, "CziFile", _Czi)
+    dish = FishDish.create_new(
+        cross_id=f"CROSS_{uuid.uuid4().hex[:6]}", dish_number=1, genotype="Tg(gfap:PMCA2-mCherry-zf)",
+        responsible="t", fish_count=10, dof="20261023", container_type="petri_dish",
+    ).model_dump(mode="json", exclude_none=True)
+    data_manager.save_fish_dish(dish)
+    dish_id = dish["dish_id"]
+    root = tmp_path / "staging"
+    (root / dish_id).mkdir(parents=True)
+    form = {"dish_id": dish_id, "kind": "screening"}
+    for i, name in enumerate(brightness):
+        (root / dish_id / name).write_bytes(name.encode())
+        form.update({f"include_{i}": "on", f"rel_{i}": f"{dish_id}/{name}"})
+    client.app.state.ome_staging_root = root
+    client.app.state.image_cache_dir = tmp_path / "cache"
+    client.app.state.image_cache_dir.mkdir()
+    client.post("/image-links/import", data=form)
+    ids = {i["rel_path"].rsplit("/", 1)[-1]: i["id"] for i in
+           client.get(f"/dishes/{dish_id}/image-links").json()["items"]}
+
+    def peak(name, scale=None):
+        from io import BytesIO
+        from PIL import Image
+        png = client.get(f"/image-links/{ids[name]}/preview.png", params={"scale": scale} if scale else {})
+        return int(np.asarray(Image.open(BytesIO(png.content))).max())
+
+    assert peak("dim.czi") == peak("bright.czi") == 255  # each stretched on its own
+    assert peak("bright.czi", "dish") == 255
+    assert peak("dim.czi", "dish") < 40  # 200 on the shared 50-2000 range
+    page = client.get(f"/dishes/{dish_id}/image-links/gallery", params={"scale": "dish"}).text
+    assert "mCherry 50–2000" in page and "preview.png?scale=dish" in page

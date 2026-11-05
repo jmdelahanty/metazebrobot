@@ -50,6 +50,7 @@ from .utils.lab_time import LAB_TIMEZONE, lab_calendar_date, lab_now, lab_today 
 from .utils.label_generator import generate_dish_label
 from .utils import czi_images
 from .utils.ome_reference_export import (
+    channel_levels,
     export_reference_pngs_from_ome_tiff,
     read_ome_tiff_metadata,
 )
@@ -6878,13 +6879,24 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             raise _not_found("image_link", image_link_id=link_id)
         return link
 
+    def _dish_display_ranges(dish_id: str) -> Dict[str, Tuple[float, float]]:
+        """One brightness range per channel across a dish's linked images."""
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            links = image_links.for_dish(conn, dish_id)
+        return image_links.shared_ranges(_image_root(), app.state.image_cache_dir, links, channel_levels)
+
     @app.get("/image-links/{link_id}/preview.png")
-    def image_link_preview(link_id: int):
-        """Composite PNG preview, rendered once and cached."""
+    def image_link_preview(link_id: int, scale: Optional[str] = None):
+        """Composite PNG preview, rendered once and cached.
+
+        ``scale=dish`` draws it on the range shared by its dish's images, so
+        brightness compares between them; default stretches its own contrast.
+        """
         link = _image_link_or_404(link_id)
         try:
+            ranges = _dish_display_ranges(link["dish_id"]) if scale == "dish" else None
             path = image_links.preview_path(_image_root(), app.state.image_cache_dir, link,
-                                            export_reference_pngs_from_ome_tiff)
+                                            export_reference_pngs_from_ome_tiff, ranges)
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=404, detail={
                 "error": "image_unavailable", "image_link_id": link_id, "message": str(exc)})
@@ -6937,7 +6949,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "items": items, "labels": {}, "dish_id": None, "return_to": f"/fish/{fish_id}/view"})
 
     @app.get("/dishes/{dish_id}/image-links/gallery", response_class=HTMLResponse)
-    def dish_image_gallery(request: Request, dish_id: str):
+    def dish_image_gallery(request: Request, dish_id: str, scale: Optional[str] = None):
         with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
             items = image_links.for_dish(conn, dish_id)
             labels = {r["fish_id"]: r["subject_label"] for r in conn.execute(
@@ -6954,8 +6966,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             for img in items:
                 if img.get("well_label") in wells:
                     by_well.setdefault(img["well_label"], []).append(img)
+        scale = "dish" if scale == "dish" and items else None
+        ranges = _dish_display_ranges(dish_id) if scale else {}
         return templates.TemplateResponse(request, "images/_gallery.html", {
             "items": items, "labels": labels, "results": results, "dish_id": dish_id,
+            "scale": scale, "ranges": {k: (round(lo), round(hi)) for k, (lo, hi) in ranges.items()},
             "plate": plate, "by_well": by_well,
             "unplaced": [i for i in items if not any(i in v for v in by_well.values())],
             "return_to": f"/dishes/{dish_id}/fish/"})

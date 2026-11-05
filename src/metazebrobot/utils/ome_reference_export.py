@@ -6,7 +6,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from PIL import Image, ImageSequence
@@ -116,14 +116,25 @@ def read_ome_tiff_metadata(path: Path) -> Dict[str, Any]:
     }
 
 
-def _autoscale_uint8(plane: np.ndarray) -> np.ndarray:
-    """Convert one grayscale plane to uint8 using robust percentile scaling."""
+PREVIEW_PERCENTILES = (0.5, 99.8)
+# A shared scale must not clip the brightest image's signal, which can be a
+# small structure (a larval brain) well under 0.2% of the pixels.
+SHARED_SCALE_PERCENTILES = (0.5, 99.99)
+
+
+def _autoscale_uint8(plane: np.ndarray, display_range: Optional[Tuple[float, float]] = None) -> np.ndarray:
+    """Convert one grayscale plane to uint8: robust percentile scaling, or a fixed range."""
     values = np.asarray(plane, dtype=np.float32)
+    if display_range is not None:
+        low, high = display_range
+        if high <= low:
+            return np.zeros(values.shape, dtype=np.uint8)
+        return np.clip((values - low) / (high - low) * 255.0, 0, 255).astype(np.uint8)
     finite = values[np.isfinite(values)]
     if finite.size == 0:
         return np.zeros(values.shape, dtype=np.uint8)
 
-    low, high = np.percentile(finite, [0.5, 99.8])
+    low, high = np.percentile(finite, PREVIEW_PERCENTILES)
     if high <= low:
         low = float(finite.min())
         high = float(finite.max())
@@ -180,12 +191,36 @@ def _load_channel_planes(path: Path, expected_channels: int) -> List[np.ndarray]
     return frames[:expected_channels]
 
 
+def channel_levels(ome_path: Path) -> List[Dict[str, Any]]:
+    """Per channel: its display key and the levels a shared scale spans (SHARED_SCALE_PERCENTILES)."""
+    metadata = read_ome_tiff_metadata(ome_path)
+    channels = metadata["channels"]
+    levels = []
+    for index, plane in enumerate(_load_channel_planes(ome_path, metadata["size_c"])):
+        channel = channels[index] if index < len(channels) else {}
+        finite = np.asarray(plane, dtype=np.float32)
+        finite = finite[np.isfinite(finite)]
+        low, high = (np.percentile(finite, SHARED_SCALE_PERCENTILES) if finite.size else (0.0, 0.0))
+        levels.append({"key": channel_key(channel, index), "low": float(low), "high": float(high)})
+    return levels
+
+
+def channel_key(channel: Dict[str, Any], index: int) -> str:
+    """Which channels share a display range across images: fluor, else name, else position."""
+    return channel.get("fluor") or channel.get("name") or f"channel {index}"
+
+
 def export_reference_pngs_from_ome_tiff(
     ome_path: Path,
     output_dir: Path,
     filename_prefix: str,
+    display_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> List[Dict[str, Any]]:
-    """Generate one composite PNG plus one PNG per channel from an OME-TIFF."""
+    """Generate one composite PNG plus one PNG per channel from an OME-TIFF.
+
+    ``display_ranges`` (channel key -> low, high) draws those channels on a
+    fixed scale instead of stretching each image's own contrast.
+    """
     metadata = read_ome_tiff_metadata(ome_path)
     channels = metadata["channels"]
     planes = _load_channel_planes(ome_path, metadata["size_c"])
@@ -201,7 +236,8 @@ def export_reference_pngs_from_ome_tiff(
     rendered_channels = []
     results = []
     for channel, plane in zip(channels, planes):
-        plane_uint8 = _autoscale_uint8(plane)
+        plane_uint8 = _autoscale_uint8(
+            plane, (display_ranges or {}).get(channel_key(channel, channel["index"])))
         rendered = _colorize_plane(plane_uint8, channel.get("color_hex"))
         rendered_channels.append(rendered.astype(np.uint16))
 

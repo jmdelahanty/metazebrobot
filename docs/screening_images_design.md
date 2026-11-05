@@ -54,8 +54,17 @@ individual ids) and, where possible, for each individual fish.
   each image sits in the well its filename names, with the fish's label and
   current screening call; settings and the reference control fold under
   "details". Images with no well, or a well not on the plate, are listed
-  below it. Previews are contrast-stretched per image (0.5–99.8th
-  percentile), so brightness isn't comparable between wells.
+  below it.
+- Brightness (2026-11-04): "Enhanced (each image)", the default, stretches
+  each preview's contrast on its own (0.5–99.8th percentile), so brightness
+  doesn't compare between images. "Same scale" (`?scale=dish` on the gallery
+  and on `preview.png`) draws every image of the dish on one range per
+  channel, from the lowest 0.5th to the highest 99.99th percentile among
+  them, and prints the range. 99.99 rather than 99.8 because a positive's
+  signal can be a small structure: on 19498_4 the 99.8th percentile stays
+  under 80 while the brightest images reach 113, and the
+  shared scale would clip them. Per-image levels are cached as JSON next
+  to the previews. Raw values stay in the viewer.
 - Fish timeline page: that fish's images; the timeline gets an "imaged" entry.
 - JSON: import page `/image-links/import`; `GET /dishes/{dish_id}/image-links`, `GET /fish/{fish_id}/image-links`
   (not in the pinned consumer slice yet).

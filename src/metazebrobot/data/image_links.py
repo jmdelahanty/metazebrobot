@@ -11,7 +11,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils import czi_images
 from ..utils.lab_time import LAB_TIMEZONE
@@ -213,12 +213,51 @@ def ome_tiff_path(root: Path, cache_dir: Path, link: Dict[str, Any]) -> Path:
     return target
 
 
-def preview_path(root: Path, cache_dir: Path, link: Dict[str, Any], render) -> Path:
-    """The cached composite PNG for a link, rendered on first use."""
-    target = Path(cache_dir) / f"link{link['id']}_{link['sha256'][:12]}_composite.png"
+def levels(root: Path, cache_dir: Path, link: Dict[str, Any], measure) -> List[Dict[str, Any]]:
+    """A link's per-channel preview levels (``measure`` = channel_levels), cached as JSON."""
+    target = Path(cache_dir) / f"link{link['id']}_{link['sha256'][:12]}_levels.json"
+    if target.exists():
+        return json.loads(target.read_text())
+    found = measure(ome_tiff_path(root, cache_dir, link))
+    target.write_text(json.dumps(found))
+    return found
+
+
+def shared_ranges(root: Path, cache_dir: Path, links: List[Dict[str, Any]],
+                  measure) -> Dict[str, Tuple[float, float]]:
+    """One display range per channel across ``links``: darkest low to brightest high.
+
+    Images that can't be read are left out rather than failing the rest.
+    """
+    ranges: Dict[str, Tuple[float, float]] = {}
+    for link in links:
+        try:
+            found = levels(root, cache_dir, link, measure)
+        except (ValueError, OSError):
+            continue
+        for level in found:
+            low, high = ranges.get(level["key"], (level["low"], level["high"]))
+            ranges[level["key"]] = (min(low, level["low"]), max(high, level["high"]))
+    return ranges
+
+
+def preview_path(root: Path, cache_dir: Path, link: Dict[str, Any], render,
+                 display_ranges: Optional[Dict[str, Tuple[float, float]]] = None) -> Path:
+    """The cached composite PNG for a link, rendered on first use.
+
+    With ``display_ranges`` the channels are drawn on that fixed scale; each
+    distinct scale is its own cached file.
+    """
+    stem = f"link{link['id']}_{link['sha256'][:12]}"
+    if display_ranges:
+        scale = json.dumps(sorted((k, round(lo), round(hi)) for k, (lo, hi) in display_ranges.items()))
+        stem += "_scaled" + hashlib.sha256(scale.encode()).hexdigest()[:10]
+        display_ranges = {k: (round(lo), round(hi)) for k, (lo, hi) in display_ranges.items()}
+    target = Path(cache_dir) / f"{stem}_composite.png"
     if not target.exists():
         source = ome_tiff_path(root, cache_dir, link)
-        outputs = render(source, Path(cache_dir), f"link{link['id']}_{link['sha256'][:12]}")
+        outputs = (render(source, Path(cache_dir), stem, display_ranges) if display_ranges
+                   else render(source, Path(cache_dir), stem))
         composite = next(o for o in outputs if o["display_role"] == "composite")
         produced = Path(cache_dir) / composite["image_filename"]
         if produced != target:
