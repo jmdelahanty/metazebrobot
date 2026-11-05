@@ -1041,6 +1041,10 @@ class TestEnforcedConstructCatalog:
         assert data_manager.resolve_construct_key("GCaMP7ff") == "jgcamp8p"
         assert data_manager.resolve_construct_key("jGCaMP8p") == "jgcamp8p"
         assert data_manager.resolve_construct_key("H2B-GCaMP7ff") == "jgcamp8ph2b"
+        # The published jGCaMP7f is a different sensor from the lab's GCaMP7ff.
+        assert data_manager.resolve_construct_key("H2B-GCaMP7f") == "jgcamp7fh2b"
+        assert data_manager.resolve_construct_key("GCaMP7f") == "jgcamp7f"
+        assert data_manager.get_construct("jgcamp7fh2b")["variant_of"] == "jgcamp7f"
         assert data_manager.resolve_construct_key("b-ARK") == "bark"
         assert data_manager.resolve_construct_key("b-ARK-D110") == "barkd110a"
         assert data_manager.resolve_construct_key("pmca2-mcherry-zf") == "pmca2mcherryzf"

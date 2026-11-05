@@ -139,6 +139,7 @@ References per entry (go into `construct_references`):
 | `cochregfp` | Klapoetke et al. 2014 Nat Methods, 10.1038/nmeth.2836 (tool); Mu et al. 2019 Cell, 10.1016/j.cell.2019.05.050 (line) | #124233 pTol1-UAS:CoChR-tdTomato (zebrafish vector, tdTomato, not an exact match) | ZDB-TGCONSTRCT-200206-4 `Tg(gfap:CoChR-EGFP)`, jf29Tg (ZDB-ALT-200206-8); no her4.1 line |
 | `jgcamp8f` | Zhang et al. 2023 Nature, 10.1038/s41586-023-05828-9 | #162373 pGP-CMV-jGCaMP8f, #162376 pGP-AAV-syn-jGCaMP8f-WPRE | ZDB-TGCONSTRCT-260409-6 `Tg(elavl3:GCaMP8f)` (no allele; not in `features.txt`, unverified) |
 | `jgcamp8p` | none yet (in preparation) | none | none |
+| `jgcamp7f`, `jgcamp7fh2b` | Dana et al. 2019 Nat Methods, 10.1038/s41592-019-0435-6 | #104483 pGP-CMV-jGCaMP7f | none found for `Tg(elavl3:H2B-GCaMP7f)` |
 | `gcamp6s` | Chen et al. 2013 Nature, 10.1038/nature12354 | #59531 Tol2-elavl3-GCaMP6s | ZDB-TGCONSTRCT-141023-2 `Tg(elavl3:GCaMP6s)`, jf4Tg (ZDB-ALT-141023-1) |
 | `jrgeco1b` | Dana et al. 2016 eLife, 10.7554/eLife.12727 | #100857 pAAV.Syn.NES-jRGECO1b | `Tg(elavl3:jRGECO1b)` jf17Tg (ZDB-ALT-200206-5); `Tg(gfap:jRGECO1b)` jf33Tg (ZDB-ALT-200206-6); no her4.1 line |
 | `grab5ht` | Wan et al. 2021 Nat Neurosci, 10.1038/s41593-021-00823-7; Deng et al. 2024 Nat Methods, 10.1038/s41592-024-02188-8 | #140552 GRAB_5-HT1.0, #208717 GRAB_g5-HT3.0 | ZDB-TGCONSTRCT-260211-5 `Tg(elavl3:GRABht-4.0)`, ct876Tg (ZDB-ALT-231109-10); ZFIN notes it was published as "GRAB5-HT2.0" |
@@ -147,7 +148,10 @@ References per entry (go into `construct_references`):
 | `campari`, `campari2` | Fosque et al. 2015 Science, 10.1126/science.1260922; Moeyaert et al. 2018 Nat Commun, 10.1038/s41467-018-06935-2 | #137185 pTol2-HuC(elavl3)-CaMPARI2 | `Tg(elavl3:CaMPARI)` jf9Tg (ZDB-ALT-150403-1); `Tg(elavl3:CaMPARI2)` jf92Tg (ZDB-ALT-180410-5) |
 
 **GCaMP7ff is jGCaMP8p.** It isn't jGCaMP7f, as name-based research had
-guessed. The lab asked aquatics in October 2026 to rename "GCaMP7ff" to
+guessed. The published jGCaMP7f is in the catalog as its own sensor
+(`jgcamp7f`, nuclear variant `jgcamp7fh2b`) for lines like
+`Tg(elavl3:H2B-GCaMP7f)`; the one-f and two-f spellings resolve to different
+sensors. The lab asked aquatics in October 2026 to rename "GCaMP7ff" to
 jGCaMP8p, the name it will be published under. PyRAT can't rename closed tanks,
 so only active tanks changed:
 

@@ -129,6 +129,54 @@
       ]
     },
     {
+      "key": "jgcamp7f",
+      "canonical_name": "jGCaMP7f",
+      "role": "sensor",
+      "family": "GCaMP",
+      "payload": "jGCaMP7f",
+      "sensor_target": "calcium",
+      "readout_fluorophore": "cpGFP",
+      "readout_link": "intrinsic",
+      "localization": "cytosolic",
+      "screen_color": "green",
+      "aliases": [
+        "jgcamp7f",
+        "gcamp7f"
+      ],
+      "notes": "The published jGCaMP7f, not the lab's GCaMP7ff (see jgcamp8p). Peak spectra not yet sourced.",
+      "references": [
+        {
+          "kind": "doi",
+          "value": "10.1038/s41592-019-0435-6",
+          "note": "Dana et al. 2019"
+        },
+        {
+          "kind": "addgene",
+          "value": "104483",
+          "note": "pGP-CMV-jGCaMP7f"
+        }
+      ]
+    },
+    {
+      "key": "jgcamp7fh2b",
+      "canonical_name": "H2B-jGCaMP7f",
+      "role": "sensor",
+      "family": "GCaMP",
+      "payload": "H2B-jGCaMP7f",
+      "sensor_target": "calcium",
+      "readout_fluorophore": "cpGFP",
+      "readout_link": "intrinsic",
+      "localization": "nuclear",
+      "screen_color": "green",
+      "variant_of": "jgcamp7f",
+      "aliases": [
+        "H2B-jGCaMP7f",
+        "H2B-GCaMP7f"
+      ],
+      "notes": "Nuclear-localized jGCaMP7f, as in Tg(elavl3:H2B-GCaMP7f). No ZFIN record found yet.",
+      "references": []
+    },
+    {
       "key": "jgcamp8f",
       "canonical_name": "jGCaMP8f",
       "role": "sensor",
