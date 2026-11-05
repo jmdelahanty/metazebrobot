@@ -646,6 +646,34 @@ class FishDishController:
         data_manager.data_cache.setdefault('fish_dishes', {})[dish_id] = payload
         return True, "screened count raised by one"
 
+    def rebook_placed_fish(self, source_dish_id: str, screening_datetime: str, plate_dish_id: str,
+                           label: str, old_result: str, new_result: str) -> Tuple[bool, str]:
+        """Move one placed fish's allocation from the ``old_result`` bucket to ``new_result``.
+
+        The allocation is the one placing ``label`` on the plate wrote
+        (count 1, notes "<label> placed in <well>"). Counts don't change.
+        """
+        dish = self.get_dish(source_dish_id)
+        step = dish.get_screening_step(screening_datetime) if dish else None
+        if step is None:
+            return False, f"Screening step {screening_datetime} not found on {source_dish_id}."
+        if dish.screening_results.final_positive_count is not None:
+            return False, f"{source_dish_id}'s screening is finalized, so its counts can't change."
+        allocation = next((a for a in step.allocations
+                           if a.bucket == f"{old_result}_screened" and a.count == 1
+                           and a.destination_dish_id == plate_dish_id
+                           and (a.notes or "").startswith(f"{label} placed in ")), None)
+        if allocation is None:
+            return False, (f"{source_dish_id}'s step {screening_datetime} has no {old_result} "
+                           f"allocation for {label} to correct.")
+        allocation.bucket = f"{new_result}_screened"
+        allocation.notes = f"{allocation.notes} (corrected from {old_result})"
+        payload = dish.model_dump(mode='json', exclude_none=True)
+        if not data_manager.save_fish_dish(payload):
+            return False, f"Failed to save {source_dish_id}."
+        data_manager.data_cache.setdefault('fish_dishes', {})[source_dish_id] = payload
+        return True, f"{source_dish_id}'s step now counts {label} as {new_result}"
+
     def plate_growth_check(self, plate_dish_id: str, living_fish: int) -> Tuple[bool, str]:
         """Can one more fish be placed? Refuses when it would exceed the screen.
 

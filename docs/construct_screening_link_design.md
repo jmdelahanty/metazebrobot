@@ -277,6 +277,16 @@ the pinned consumer slice yet. As built:
   result, the fish is booked into the source's latest screening step (as an
   allocation to the plate) and the result is recorded on the fish. Without a
   result it moves by a one-fish transfer. Its origin is the source dish.
+- **Correcting a misclicked result** (2026-11-04): a fish placed with a
+  result shows "Wrong result? → Mark negative/positive" in its well
+  (`POST /dishes/{plate}/plate/fish/{fish_id}/result`). It records the
+  corrected result as a new observation on the fish (note "Corrected from
+  … on the plate map"; the original stays in the timeline). For a fish
+  booked into another dish's step it also moves that booking, the count-1
+  allocation noted "<label> placed in <well>", to the other bucket. Counts
+  don't change. It refuses when the source's screening is finalized, when
+  no matching allocation exists, and on a plate that is one screening
+  group, whose fish are counted by the group's bucket.
 - **Which screening step a placement books into** (2026-10-15): the plate page
   shows the source's steps and books into **today's latest step** by default,
   never silently an older one. Alternatives are "Start a new screening step

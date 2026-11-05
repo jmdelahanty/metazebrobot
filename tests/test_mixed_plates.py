@@ -246,3 +246,55 @@ def test_split_plate_refuses_a_contradicting_result(client):
     assert _selected(refused.text, "result") == "negative"  # the choice is kept to change
     placed = client.post(f"/dishes/{plate}/plate/add-fish", data={"result": "positive"})
     assert "Placed Z1 (positive)" in placed.text
+
+
+def _booked(client, dish_id):
+    step = client.get(f"/dishes/{dish_id}").json()["data"]["screening_results"]["screenings"][0]
+    return sorted((a["bucket"], a["notes"]) for a in step["allocations"])
+
+
+def test_correct_a_misclicked_result_moves_the_booking(client):
+    cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+    screened = _dish(cross, 1, screened=10)
+    plate = _new_plate(client, screened, 12)
+    for result in ("positive", "positive"):
+        client.post(f"/dishes/{plate}/plate/add-fish",
+                    data={"source_dish_id": screened, "result": result, "step": "20261015T15:13:00"})
+    z2 = _by_label(client, plate)["Z2"]["fish_id"]
+    assert "Mark negative" in client.get(f"/dishes/{plate}/plate-map").text
+
+    page = client.post(f"/dishes/{plate}/plate/fish/{z2}/result", data={"result": "negative"})
+    assert "Z2 corrected from positive to negative" in page.text
+    assert _calls(client, z2) == [(GENOTYPE, "negative", "observed")]
+    assert _booked(client, screened) == [
+        ("negative_screened", "Z2 placed in A2 (corrected from positive)"),
+        ("positive_screened", "Z1 placed in A1")]
+    assert (_count(client, screened), _count(client, plate)) == (8, 2)
+
+    again = client.post(f"/dishes/{plate}/plate/fish/{z2}/result", data={"result": "negative"})
+    assert "Z2 is already negative" in again.text
+
+
+def test_correction_refuses_a_result_that_contradicts_a_split_plate(client):
+    cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+    screened = _dish(cross, 1, screened=10)
+    resp = client.post(f"/screening/{screened}/steps/20261015T15:13:00/split",
+                       data={"population_type": "positive_screened", "container_type": "well_plate",
+                             "plate_wells": "6", "fish_count": ""}, follow_redirects=False)
+    plate = resp.headers["location"].split("/")[2]
+    client.post(f"/dishes/{plate}/plate/add-fish", data={"result": "positive"})
+    z1 = _by_label(client, plate)["Z1"]["fish_id"]
+    refused = client.post(f"/dishes/{plate}/plate/fish/{z1}/result", data={"result": "negative"})
+    assert "This plate holds positives" in refused.text
+    assert _calls(client, z1) == [(GENOTYPE, "positive", "observed")]
+
+
+def test_fish_placed_without_a_result_has_no_correction(client):
+    cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+    source = _dish(cross, 1)
+    plate = _new_plate(client, source, 6)
+    client.post(f"/dishes/{plate}/plate/add-fish", data={"source_dish_id": source})
+    z1 = _by_label(client, plate)["Z1"]["fish_id"]
+    assert "Wrong result?" not in client.get(f"/dishes/{plate}/plate-map").text
+    refused = client.post(f"/dishes/{plate}/plate/fish/{z1}/result", data={"result": "negative"})
+    assert "placed with a result; re-check it" in refused.text

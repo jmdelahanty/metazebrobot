@@ -5921,9 +5921,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         unassigned = [f for f in fish if f.get("current_unit_id") is None]
         # Each placed fish's inherited screening result, shown in its well.
         results: Dict[str, str] = {}
+        correctable: Dict[str, str] = {}  # fish placed with a result: the result to switch to
         with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
             for f in fish:
                 calls = (fish_screening_calls(conn, f["fish_id"]) or {}).get("calls", [])
+                observed = {c["result"] for c in calls if c["kind"] == "construct"
+                            and c["source"] == "observed"}
+                if observed in ({"positive"}, {"negative"}):
+                    correctable[f["fish_id"]] = "negative" if observed == {"positive"} else "positive"
                 results[f["fish_id"]] = " ".join(
                     ("pig" if c["kind"] == "pigment" else _short_construct(c["dish_construct"]))
                     + {"positive": "+", "negative": "−", "pigmented": ""}.get(c["result"], "?")
@@ -5964,6 +5969,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "flash_level": flash_level,
             "fish": fish if refresh_fish_table else None,
             "results": results,
+            "correctable": correctable,
         })
 
     def _plate_bucket(dish_id: str) -> Optional[str]:
@@ -6196,6 +6202,63 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         what = f" ({result})" if result else ""
         return plate_map(request, dish_id, f"Placed {label}{what}{where} in {target['position_label']}.",
                          refresh_fish_table=True, chosen=chosen)
+
+    @app.post("/dishes/{dish_id}/plate/fish/{fish_id}/result", response_class=HTMLResponse)
+    def plate_correct_result(request: Request, dish_id: str, fish_id: str,
+                             result: str = Form(default="")):
+        """Correct the result a fish was placed with (a misclick).
+
+        Records the corrected result on the fish and, for a fish booked into
+        another dish's screening step, moves that booking to the other bucket.
+        A plate that is one screening group counts its fish by the group's
+        bucket, so it refuses a contradicting result.
+        """
+        if result not in ("positive", "negative"):
+            return plate_map(request, dish_id, f"Unknown result {result!r}.", "error")
+        fish = next((f for f in data_manager.get_fish_subjects(dish_id) if f["fish_id"] == fish_id), None)
+        if fish is None:
+            return plate_map(request, dish_id, "That fish isn't on this plate.", "error")
+        label = fish.get("subject_label") or fish_id[:8]
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            placed = conn.execute(
+                "SELECT source_dish_id, screening_datetime FROM fish_screening_observations "
+                "WHERE fish_id = ? AND source_dish_id IS NOT NULL AND screening_datetime IS NOT NULL "
+                "ORDER BY id LIMIT 1", (fish_id,)).fetchone()
+            constructs = (fish_observations.step_constructs(
+                conn, placed["source_dish_id"], placed["screening_datetime"]) if placed else [])
+            keys = {c["dish_construct"] for c in constructs}
+            current = {c["result"] for c in (fish_screening_calls(conn, fish_id) or {}).get("calls", [])
+                       if c["kind"] == "construct" and c["dish_construct"] in keys}
+        if not constructs:
+            return plate_map(request, dish_id, f"{label} wasn't placed with a result; re-check it "
+                             "on its fish page instead.", "error")
+        if current == {result}:
+            return plate_map(request, dish_id, f"{label} is already {result}.", "error")
+        if len(current) != 1:
+            return plate_map(request, dish_id, f"{label}'s calls disagree; re-check it on its fish page.",
+                             "error")
+        old = current.pop()
+        source, step_time = placed["source_dish_id"], placed["screening_datetime"]
+        if (fish.get("origin_dish_id") or dish_id) == dish_id:
+            # From this plate's own screening group: counted by the plate's bucket.
+            group_result = {"positive_screened": "positive", "negative_screened": "negative"}.get(
+                _plate_bucket(dish_id))
+            if group_result and result != group_result:
+                return plate_map(request, dish_id, f"This plate holds {group_result}s from {source}'s "
+                                 f"screen, so {label} can't be {result} here. Move it to a mixed "
+                                 "plate, or re-check it on its fish page.", "error")
+        else:
+            ok, message = fish_dish_ctrl.rebook_placed_fish(source, step_time, dish_id, label, old, result)
+            if not ok:
+                return plate_map(request, dish_id, message, "error")
+        with data_manager.get_connection() as conn:
+            fish_observations.record(
+                conn, fish_id, result, constructs, observed_by=_selected_user(request),
+                source_dish_id=source, screening_datetime=step_time,
+                notes=f"Corrected from {old} on the plate map")
+            conn.commit()
+        return plate_map(request, dish_id, f"{label} corrected from {old} to {result}.",
+                         refresh_fish_table=True)
 
     @app.post("/fish/{fish_id}/observations", response_model=FishScreeningResponse,
               responses={404: {"model": ApiErrorResponse, "description": "fish_not_found"},

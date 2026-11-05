@@ -102,6 +102,15 @@
                     {% for f in unit.fish %}
                     <div class="plate-well__fish"><a href="/fish/{{ f.fish_id }}/view">{{ f.subject_label or f.fish_id[:8] }}</a></div>
                     {% if results and results.get(f.fish_id) %}<small class="plate-well__result">{{ results[f.fish_id] }}</small>{% endif %}
+                    {% if correctable and correctable.get(f.fish_id) %}
+                    <details class="plate-well__fix">
+                        <summary><small>Wrong result?</small></summary>
+                        <button type="button" class="outline secondary"
+                                hx-post="/dishes/{{ dish_id }}/plate/fish/{{ f.fish_id }}/result"
+                                hx-vals='{"result": "{{ correctable[f.fish_id] }}"}'
+                                hx-target="#plate-map" hx-swap="innerHTML">Mark {{ correctable[f.fish_id] }}</button>
+                    </details>
+                    {% endif %}
                     {% endfor %}
                 </div>
                 {% else %}
