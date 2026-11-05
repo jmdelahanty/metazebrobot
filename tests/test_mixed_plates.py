@@ -298,3 +298,18 @@ def test_fish_placed_without_a_result_has_no_correction(client):
     assert "Wrong result?" not in client.get(f"/dishes/{plate}/plate-map").text
     refused = client.post(f"/dishes/{plate}/plate/fish/{z1}/result", data={"result": "negative"})
     assert "placed with a result; re-check it" in refused.text
+
+
+def test_finalize_form_is_prefilled_with_the_computed_positives(client):
+    cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+    screened = _dish(cross, 1, screened=10)
+    assert 'name="final_positive_count" min="0" required\n                       value=""' in \
+        client.get(f"/screening/{screened}").text  # no allocations yet: nothing guessed
+    plate = _new_plate(client, screened, 12)
+    for result in ("positive", "positive", "negative"):
+        client.post(f"/dishes/{plate}/plate/add-fish",
+                    data={"source_dish_id": screened, "result": result, "step": "20261015T15:13:00"})
+    page = client.get(f"/screening/{screened}").text
+    assert "2 positives\n            moved to other dishes or plates" in page
+    assert 'value="2"' in page
+    assert __import__("re").search(r'name="date_finalized"[^>]*value="\d{8}"', page)

@@ -255,16 +255,21 @@
 {# Finalize form #}
 <details>
     <summary><strong>Finalize Screening</strong></summary>
+    {% set cp = computed_positives or {} %}
     <form method="post" action="/screening/{{ dish.dish_id }}/finalize">
+        {% if cp %}<p><small>From this dish's steps: {{ cp.moved_out }} positive{{ "" if cp.moved_out == 1 else "s" }}
+            moved to other dishes or plates{% if cp.remaining %}, plus {{ cp.remaining }} left in the dish at the latest step{% endif %}.
+            Change the count if the steps don't add up.</small></p>{% endif %}
         <div class="grid">
             <label>
                 Final Positive Count
-                <input type="number" name="final_positive_count" min="0" required>
+                <input type="number" name="final_positive_count" min="0" required
+                       value="{{ cp.total if cp else '' }}">
             </label>
             <label>
                 Date Finalized (YYYYMMDD)
                 <input type="text" name="date_finalized" pattern="\d{8}"
-                       placeholder="e.g. 20260330" required>
+                       placeholder="e.g. 20260330" required value="{{ today_yyyymmdd or '' }}">
             </label>
         </div>
         <button type="submit" class="secondary">Finalize Screening</button>

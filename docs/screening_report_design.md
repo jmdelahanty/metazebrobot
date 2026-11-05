@@ -9,7 +9,7 @@ verified_against: 2bc31ad
 
 # Screening Report
 
-Status (2026-11-04): proposal; nothing below is built.
+Status (2026-11-04): proposal; only finalizing without typing is built.
 
 Goal: when a cross's screening is done, the person who owns the cross gets a
 short report of what was screened, what was kept and what it looked like,
@@ -44,6 +44,12 @@ allocations. The finalize form becomes:
 - One button: "Finalize: N positives".
 
 This is independent of the report and small, so it goes first.
+
+Built (2026-11-04, `FishDish.computed_positive_count`): the form is prefilled
+with the count and today's date and says how the count was made. It leaves
+the count blank for dishes whose steps have no allocations (legacy or
+unscreened) instead of guessing 0. Checked against the dishes already
+finalized: every one with allocations matches its recorded count.
 
 ## Phase 1: build and download
 

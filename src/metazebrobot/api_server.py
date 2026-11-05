@@ -5057,6 +5057,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "steps": steps,
             "finalized": finalized,
             "final_count": final_count,
+            "computed_positives": dish.computed_positive_count(),
+            "today_yyyymmdd": lab_now().strftime("%Y%m%d"),
             "indicator_images": indicator_images,
             "step_images": step_images,
             "transgenes": transgenes,

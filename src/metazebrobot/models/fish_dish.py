@@ -697,6 +697,24 @@ class FishDish(BaseModel):
         self.current_fish_count = max(current_count - remaining_deaths, 0)
 
 
+    def computed_positive_count(self) -> Optional[Dict[str, int]]:
+        """Positives found by this dish's screening, from its steps' allocations.
+
+        Positives moved out (to derived dishes or plates, or discarded) count
+        from every step; positives left in the dish count from the latest step
+        only, since a later step screens them again. None when no step has
+        allocations (unscreened, or legacy steps), rather than a wrong 0.
+        """
+        steps = self.screening_results.screenings if self.screening_results else []
+        if not any(s.allocations for s in steps):
+            return None
+        moved_out = sum(a.count for s in steps for a in s.allocations
+                        if a.bucket == "positive_screened" and a.disposition != "remain_parent")
+        latest = max(steps, key=lambda s: s.screening_datetime, default=None)
+        remaining = sum(a.count for a in (latest.allocations if latest else [])
+                        if a.bucket == "positive_screened" and a.disposition == "remain_parent")
+        return {"total": moved_out + remaining, "moved_out": moved_out, "remaining": remaining}
+
     def finalize_screening(self, final_count: int, date_finalized: str) -> None:
         """Set the final positive count and date finalized for screening."""
         if self.screening_results is None:
