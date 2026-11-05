@@ -90,6 +90,12 @@ people. Agreed design, built in this order:
    - Names don't identify people: the same person can have two PyRAT accounts
      with near-identical names. Store the id; when two accounts are one
      person, the lab says which one is current.
+   - Built 2026-11-04 (`data/users.py`, `scripts/sync_users.py`):
+     `sync_users.py --db-path … --mark-lab <lab-owner-username>` refreshes all
+     users and adds the lab owner's active lab members (Responsible for an
+     open tank the owner owns) to the picker; it never removes anyone and
+     keeps local emails. The picker shows "First Last" and falls back to the
+     mapping file while the table is empty. Not yet on the nightly timer.
 2. **`screened_by` on each screening step:** one username, set from the user
    picker when the step is created (screening form, or a step started from
    the plate page), editable in the steps table. A session is almost always
