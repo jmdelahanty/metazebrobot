@@ -146,3 +146,21 @@ def test_send_returns_the_servers_queue_reply(monkeypatch):
     assert report_mail.send(message, config) == "2.0.0 abc123 Message accepted for delivery"
     assert calls == [("connect", "mail.example.org", 25), ("mail", "lab@example.org"),
                      ("rcpt", "a@example.org"), ("rcpt", "b@example.org")]
+
+
+def test_plates_count_their_fish_by_current_call(client, monkeypatch, tmp_path):
+    _no_mail(monkeypatch, tmp_path)
+    cross = f"9{uuid.uuid4().int % 10**8}"
+    screened = _dish(cross, 1, allocations=[])
+    other = _dish(cross, 2, allocations=[])
+    plate = client.post(f"/dishes/{screened}/plate/new", data={"wells": 12},
+                        follow_redirects=False).headers["location"].split("/")[2]
+    for source, result in ((screened, "positive"), (screened, "positive"), (other, "negative")):
+        client.post(f"/dishes/{plate}/plate/add-fish",
+                    data={"source_dish_id": source, "result": result, "step": STEP})
+    page = client.get(f"/crosses/{cross}/screening-report").text
+    row = page.split(f"<td>{plate}")[1].split("</tr>")[0]
+    cells = [c.split(">", 1)[1].split("<")[0].strip() for c in row.split("<td")[1:]]
+    assert cells[4:8] == ["—", "2", "1", "0"]  # Screened, +, −, pig
+    assert f"from {screened} (2), {other} (1); fish calls" in row
+    assert "2 fish screened" not in page  # the plate's fish are already in its sources' screens

@@ -126,7 +126,11 @@ within mail limits.
 - **Counts per dish** use `FishDish.computed_bucket_count` (moved out from
   every step, left in the dish from the latest step). "No result" is the
   latest step's screened fish with no allocation. Derived dishes and plates
-  show as "fish from <parent>'s screen", not as unscreened.
+  show what they hold, not a screen of their own: tracked fish by their
+  current call (positive if any construct call is positive), otherwise the
+  dish's group bucket, with where the fish came from ("from 19498_1 (6),
+  19498_3 (6)" on a mixed plate). The cross totals count only original
+  dishes, since a plate's fish are already in their source's screen.
 - **Thumbnails:** each well's enhanced preview, downsized to 320 px JPEG and
   inlined. A cross whose CZIs were never previewed takes a while the first
   time (12 CZIs: about 40 s), then about a second.

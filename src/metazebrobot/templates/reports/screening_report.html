@@ -94,6 +94,11 @@
         <td>{{ d.not_booked or "" }}</td>
         <td>{{ d.screened_by | join(", ") or "—" }}{% if d.dates %}<br><span class="muted">{% for t in d.dates %}{{ t[:4] }}-{{ t[4:6] }}-{{ t[6:] }}{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}</td>
         <td>{{ "yes (" ~ d.final_count ~ ")" if d.finalized else "no" }}</td>
+        {% elif d.derived_from and d.held %}
+        <td class="muted">—</td>
+        {% for label in ["positive", "negative", "pigmented"] %}<td>{{ d.held.counts[label] }}</td>{% endfor %}
+        <td>{{ d.held.counts.no_result or "" }}</td>
+        <td class="muted" colspan="2">{% if d.held.origins | length > 1 %}from {% for o, n in d.held.origins %}{{ o }} ({{ n }}){% if not loop.last %}, {% endif %}{% endfor %}{% else %}from {{ d.held.origins[0][0] if d.held.origins else d.derived_from }}'s screen{% endif %}; {{ d.held.source }}</td>
         {% elif d.derived_from %}
         <td class="muted" colspan="7">fish from {{ d.derived_from }}'s screen</td>
         {% else %}

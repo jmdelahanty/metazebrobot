@@ -79,6 +79,37 @@ def _name(conn, username: Optional[str]) -> Optional[str]:
     return users.display_name(users.by_username(conn, username), username) if username else None
 
 
+def _held_counts(conn, dish: FishDish) -> Optional[Dict[str, Any]]:
+    """What a derived dish or plate holds: its tracked fish by current call, else its group.
+
+    A fish counts as positive when any construct call is positive, negative
+    when every construct call is negative, and "no result" otherwise.
+    """
+    fish = data_manager.get_fish_subjects(dish.dish_id)
+    if fish:
+        counts = {"positive": 0, "negative": 0, "pigmented": 0, "no_result": 0}
+        for f in fish:
+            calls = [c for c in (fish_calls(conn, f["fish_id"]) or {}).get("calls", []) if c["kind"] == "construct"]
+            if any(c["result"] == "positive" for c in calls):
+                counts["positive"] += 1
+            elif calls and all(c["result"] == "negative" for c in calls):
+                counts["negative"] += 1
+            else:
+                counts["no_result"] += 1
+        origins: Dict[str, int] = {}
+        for f in fish:
+            origin = f.get("origin_dish_id") or dish.parent_dish_id
+            origins[origin] = origins.get(origin, 0) + 1
+        return {"counts": counts, "source": "fish calls", "origins": sorted(origins.items())}
+    label = dict(BUCKETS).get(dish.source_screening_bucket or dish.dish_population_type or "")
+    if label:
+        counts = {"positive": 0, "negative": 0, "pigmented": 0, "no_result": 0}
+        counts[label] = dish.current_fish_count or 0
+        return {"counts": counts, "source": "dish group",
+                "origins": [(dish.parent_dish_id, dish.current_fish_count or 0)]}
+    return None
+
+
 def _dish_row(conn, dish: FishDish) -> Dict[str, Any]:
     steps = dish.screening_results.screenings if dish.screening_results else []
     counts = {label: (dish.computed_bucket_count(bucket) or {}).get("total") for bucket, label in BUCKETS}
@@ -114,6 +145,8 @@ def _dish_row(conn, dish: FishDish) -> Dict[str, Any]:
         "finalized": final is not None,
         "final_count": final,
         "computed_positives": (dish.computed_positive_count() or {}).get("total"),
+        # Derived dishes and plates: what they hold (already counted in the parent's screen).
+        "held": _held_counts(conn, dish) if dish.parent_dish_id else None,
     }
 
 
