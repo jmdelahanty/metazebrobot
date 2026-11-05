@@ -1,0 +1,143 @@
+<!doctype html>
+{# Per-cross screening report (docs/screening_report_design.md). Self-contained: #}
+{# inline styles and data: thumbnails, so the saved file and the attachment open anywhere. #}
+{% set c = report.cross %}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cross {{ c.cross_id }} screening report</title>
+<style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1d2329;
+           background: #fff; margin: 0; padding: 16px; line-height: 1.4; }
+    main { max-width: 1100px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 17px; margin: 24px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+    .meta { color: #5a6570; font-size: 13px; }
+    table.data { border-collapse: collapse; font-size: 13px; width: 100%; }
+    table.data th, table.data td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #e5e5e5;
+                                   vertical-align: top; }
+    table.data th { background: #f4f6f8; }
+    .muted { color: #777; }
+    .plate { display: grid; gap: 6px; margin-bottom: 8px; }
+    .well { border: 2px solid #d5d9dd; border-radius: 6px; padding: 4px; font-size: 12px; }
+    .well.pos { border-color: #5aa469; background: #eef7f0; }
+    .well img { width: 100%; border-radius: 3px; display: block; }
+    .well .label { font-weight: 600; color: #5a6570; }
+    .flags li { margin-bottom: 4px; }
+    .toolbar { background: #f4f6f8; border: 1px solid #dde2e6; border-radius: 6px; padding: 10px 12px;
+               margin-bottom: 16px; font-size: 14px; }
+    .toolbar input[type=text] { width: min(28rem, 100%); }
+    .scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+{% if preview %}
+<div class="toolbar">
+    <a href="/screening/">← Screening</a> ·
+    <a href="/crosses/{{ c.cross_id }}/screening-report?download=1">Download HTML</a>
+    <form method="post" action="/crosses/{{ c.cross_id }}/screening-report/send" style="margin:8px 0 0">
+        <label>To <input type="text" name="recipients" value="{{ default_recipients or '' }}"
+                         placeholder="name@hhmi.org, another@hhmi.org"></label>
+        <button type="submit" name="action" value="save">Save report</button>
+        <button type="submit" name="action" value="send"{% if mail_mode != "smtp" %} disabled{% endif %}>Send</button>
+        <br><small>Mail mode: <strong>{{ mail_mode }}</strong>{% if mail_problem %} ({{ mail_problem }}){% endif %}.
+            {% if mail_mode == "smtp" %}Send saves the report and emails the summary with the report attached.
+            {% elif mail_mode == "outbox" %}Save writes the report and a ready-to-send .eml; nothing is sent.
+            {% else %}Save writes the report; sending is off.{% endif %}</small>
+    </form>
+    {% if flash %}<p style="margin:8px 0 0"><strong>{{ flash }}</strong></p>{% endif %}
+    {% if history %}
+    <details style="margin-top:8px"><summary><small>Saved and sent ({{ history | length }})</small></summary>
+        <ul>{% for h in history %}<li><small>{{ h.generated_at }} · {{ h.mode }}{% if h.recipients %} → {{ h.recipients }}{% endif %} · {{ h.result }}</small></li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+</div>
+{% endif %}
+
+<h1>Cross {{ c.cross_id }} screening report</h1>
+<p class="meta">Generated at {{ report.generated_at }} · MetaZebrobot {{ report.service_commit or "unknown commit" }}{% if report.generated_by %} · by {{ report.generated_by }}{% endif %}</p>
+
+{% include "reports/_screening_summary.html" %}
+
+<h2>Parents</h2>
+{% if report.parents.parents %}
+<div class="scroll"><table class="data">
+    <thead><tr><th>Role</th><th>Tank</th><th>Strain</th><th>Generation</th><th>Born</th></tr></thead>
+    <tbody>
+    {% for p in report.parents.parents %}
+    <tr><td>{{ p.role }}{% if p.manual %} <span class="muted">(entered by hand)</span>{% endif %}</td>
+        <td>{{ p.where or p.tank_id or "" }}</td><td>{{ p.strain or "" }}</td>
+        <td>{{ p.generation or "" }}</td><td>{{ p.born or "" }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table></div>
+{% else %}<p class="muted">No parent tanks on record.</p>{% endif %}
+{% if report.parents.description %}<p><small>Request: {{ report.parents.description }}</small></p>{% endif %}
+
+<h2>Dishes</h2>
+<div class="scroll"><table class="data">
+    <thead><tr><th>Dish</th><th>From</th><th>Container</th><th>Owner</th><th>Fish</th><th>Screened</th>
+        <th>+</th><th>−</th><th>Pig</th><th>No result</th><th>Screened by</th><th>Finalized</th></tr></thead>
+    <tbody>
+    {% for d in report.dishes %}
+    <tr>
+        <td>{{ d.dish_id }}{% if d.status != "active" %} <span class="muted">({{ d.status }})</span>{% endif %}</td>
+        <td>{{ d.derived_from or "" }}</td>
+        <td>{{ d.container }}</td>
+        <td>{{ d.owner or "" }}</td>
+        <td>{{ d.current if d.current is not none else "" }}</td>
+        {% if d.steps %}
+        <td>{{ d.screened }}</td>
+        {% for label in ["positive", "negative", "pigmented"] %}<td>{{ d.counts[label] if d.counts[label] is not none else "?" }}</td>{% endfor %}
+        <td>{{ d.not_booked or "" }}</td>
+        <td>{{ d.screened_by | join(", ") or "—" }}{% if d.dates %}<br><span class="muted">{% for t in d.dates %}{{ t[:4] }}-{{ t[4:6] }}-{{ t[6:] }}{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}</td>
+        <td>{{ "yes (" ~ d.final_count ~ ")" if d.finalized else "no" }}</td>
+        {% elif d.derived_from %}
+        <td class="muted" colspan="7">fish from {{ d.derived_from }}'s screen</td>
+        {% else %}
+        <td class="muted" colspan="7">not screened</td>
+        {% endif %}
+    </tr>
+    {% endfor %}
+    </tbody>
+</table></div>
+
+{% for p in report.plates %}
+<h2>Plate {{ p.dish_id }}</h2>
+<div class="scroll">
+<div class="plate" style="grid-template-columns: 1.5rem repeat({{ p.layout.cols | length }}, minmax(8rem, 1fr)); min-width: {{ p.layout.cols | length * 8 + 2 }}rem">
+    <div></div>{% for col in p.layout.cols %}<div class="label" style="text-align:center">{{ col }}</div>{% endfor %}
+    {% for row in p.layout.rows %}
+    <div class="label" style="align-self:center">{{ row }}</div>
+    {% for col in p.layout.cols %}{% set w = p.wells.get(row ~ col) %}
+    <div class="well{% if w and w.positive %} pos{% endif %}">
+        <span class="label">{{ row }}{{ col }}</span>{% if w and w.fish %} {{ w.fish }}{% endif %}
+        {% if w and w.thumbnail %}<img src="{{ w.thumbnail }}" alt="{{ row }}{{ col }}">{% endif %}
+        {% if w and w.call %}<div>{{ w.call }}</div>{% elif w and w.fish %}<div class="muted">no call</div>{% elif not w or not w.fish %}<div class="muted">empty</div>{% endif %}
+    </div>
+    {% endfor %}
+    {% endfor %}
+</div>
+</div>
+<p class="meta">{{ p.imaged }} of {{ p.wells | length }} wells imaged. Thumbnails stretch each image's own contrast, so brightness doesn't compare between wells.</p>
+{% endfor %}
+
+<h2>Notes and flags</h2>
+{% set f = report.flags %}
+<ul class="flags">
+    {% for d in f.not_finalized %}
+    <li>{{ d.dish_id }} isn't finalized{% if d.computed_positives is not none %} ({{ d.computed_positives }} positive{{ "" if d.computed_positives == 1 else "s" }} by its steps){% endif %}.
+        {% if preview %}<a href="/screening/{{ d.dish_id }}">Finalize</a>{% endif %}</li>
+    {% endfor %}
+    {% if f.not_screened %}<li>Not screened yet: {{ f.not_screened | join(", ") }}.</li>{% endif %}
+    {% if f.positives_from_one_dish %}<li>All positives came from {{ f.positives_from_one_dish }}; the cross's other screened dishes had none. Worth checking for a mix-up.</li>{% endif %}
+    {% for x in f.corrections %}
+    <li>{{ x.fish }} on {{ x.dish_id }}: {{ x.notes }}; now {{ x.result }}{% if x.observed_by %} ({{ x.observed_by }}){% endif %}.</li>
+    {% endfor %}
+    {% if not (f.not_finalized or f.not_screened or f.positives_from_one_dish or f.corrections) %}<li class="muted">None.</li>{% endif %}
+</ul>
+</main>
+</body>
+</html>

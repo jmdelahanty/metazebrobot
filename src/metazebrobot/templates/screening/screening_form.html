@@ -18,7 +18,8 @@
 {% if dish.cross_id %}
 <section class="transgene-block">
     <small><strong>Parents</strong> &mdash; cross {{ dish.cross_id }}
-        (<a href="/crosses/{{ dish.cross_id }}/parents">add one PyRAT doesn't list</a>)</small>
+        (<a href="/crosses/{{ dish.cross_id }}/parents">add one PyRAT doesn't list</a>)
+        · <a href="/crosses/{{ dish.cross_id }}/screening-report"><strong>Screening report</strong></a></small>
     {% if cross_parents.parents %}
     <figure>
         <table role="grid" class="screening-steps-table transgene-table">

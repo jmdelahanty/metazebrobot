@@ -9,7 +9,8 @@ verified_against: 2bc31ad
 
 # Screening Report
 
-Status (2026-11-04): proposal; only finalizing without typing is built.
+Status (2026-11-04): built. Finalizing without typing, the report page, saving
+and sending are in place (see "As built" at the end).
 
 Goal: when a cross's screening is done, the person who owns the cross gets a
 short report of what was screened, what was kept and what it looked like,
@@ -114,3 +115,31 @@ within mail limits.
 
 - Also a per-session report ("everything I screened today") for the
   screener?
+
+## As built (2026-11-04)
+
+- **Page:** `GET /crosses/{cross_id}/screening-report`, linked from the
+  screening page's Parents line. `?download=1` returns the self-contained
+  file. Built by `reports/screening_report.py` and rendered with
+  `templates/reports/screening_report.html`; the email body is
+  `reports/_screening_summary.html`.
+- **Counts per dish** use `FishDish.computed_bucket_count` (moved out from
+  every step, left in the dish from the latest step). "No result" is the
+  latest step's screened fish with no allocation. Derived dishes and plates
+  show as "fish from <parent>'s screen", not as unscreened.
+- **Thumbnails:** each well's enhanced preview, downsized to 320 px JPEG and
+  inlined. A cross whose CZIs were never previewed takes a while the first
+  time (12 CZIs: about 40 s), then about a second.
+- **Flags:** unfinalized dishes (with their computed positives and a
+  Finalize link in the preview), unscreened dishes, positives from only one
+  of several screened dishes, and corrections (notes starting "Corrected
+  from" or "Correction:").
+- **Save and send:** `POST /crosses/{cross_id}/screening-report/send` with
+  `action` save or send. Files go to `<db dir>/screening_reports/<cross>/`;
+  every save or send is logged in `screening_reports` (generated-at, commit,
+  user, paths, checksum, mode, recipients, result) and listed on the page.
+  Mail settings: `utils/report_mail.py`, from the environment or
+  `~/.config/metazebrobot/mail.env`. Send stays disabled unless the mode is
+  `smtp` with a host and sender.
+- **Not yet:** recipients are typed (or the owner's email once the users
+  table has one); there's no page to edit user emails.

@@ -3,7 +3,9 @@ FastAPI service for MetaZebrobot web UI + HTTP API.
 """
 
 import argparse
+import base64
 import hashlib
+import io
 import json
 import logging
 import os
@@ -46,7 +48,16 @@ from .models.fish_dish import (
     termination_reason_label,
     termination_reason_options_text,
 )
+from .reports import screening_report
+from .reports.screening_report import cross_parents as _cross_parents_for_screening
+from .utils import report_mail
 from .utils.actor import current_actor
+from .utils.screening_labels import (  # noqa: F401 (old names)
+    plate_layout as _plate_layout,
+    result_label as _result_label,
+    short_construct as _short_construct,
+    well_sort_key as _well_sort_key,
+)
 from .utils.lab_time import LAB_TIMEZONE, lab_calendar_date, lab_now, lab_today  # noqa: F401 (re-exported)
 from .utils.label_generator import generate_dish_label
 from .utils import czi_images
@@ -467,33 +478,6 @@ def _plate_labels(wells: int) -> List[str]:
     rows, cols = PLATE_FORMATS[wells]
     return [f"{'ABCDEFGH'[r]}{c}" for r in range(rows) for c in range(1, cols + 1)]
 
-
-def _well_sort_key(label: str) -> Tuple[str, int]:
-    """Row-major order: A1, A2, ..., A12, B1 (not text order A1, A10, A2)."""
-    match = re.match(r"^([A-Za-z]+)(\d+)$", label or "")
-    return (match.group(1), int(match.group(2))) if match else (label or "", 0)
-
-
-def _result_label(calls: List[Dict[str, Any]]) -> str:
-    """A fish's screening calls in short form, e.g. 'PMCA2-mCherry-zf+ pig'."""
-    return " ".join(
-        ("pig" if c["kind"] == "pigment" else _short_construct(c["dish_construct"]))
-        + {"positive": "+", "negative": "−", "pigmented": ""}.get(c["result"], "?")
-        for c in calls)
-
-
-def _plate_layout(well_labels: List[str]) -> Optional[Dict[str, Any]]:
-    """Rows and columns of a well plate from its well labels (A1..C4 -> A-C, 1-4)."""
-    keys = [_well_sort_key(w) for w in well_labels]
-    if not keys or any(col == 0 for _, col in keys):
-        return None
-    return {"rows": sorted({row for row, _ in keys}), "cols": list(range(1, max(c for _, c in keys) + 1))}
-
-
-def _short_construct(construct: Optional[str]) -> str:
-    """'Tg(gfap:PMCA2-mCherry-zf)' -> 'PMCA2-mCherry-zf' for compact display."""
-    match = re.search(r":([^)]+)\)", construct or "")
-    return match.group(1) if match else (construct or "?")
 
 
 def _source_steps(dish_id: str) -> List[Dict[str, Any]]:
@@ -1939,42 +1923,6 @@ def _cross_snapshot_from_payload(cross_id: str, payload: Dict[str, Any], source:
         "parents": _parent_snapshots_from_payload(payload),
         "source": source,
     }
-
-
-def _cross_parents_for_screening(conn: sqlite3.Connection, cross_id: str) -> Dict[str, Any]:
-    """The cross's parent tanks and request text, as the screening page shows them."""
-    try:
-        rows = conn.execute(
-            """
-            SELECT role, tank_id, tank_label, location_display, raw_strain_name,
-                   generation, source, raw_payload
-            FROM cross_parents WHERE cross_id = ? ORDER BY parent_index
-            """,
-            (cross_id,),
-        ).fetchall()
-        cross = conn.execute("SELECT data FROM crosses WHERE cross_id = ?", (cross_id,)).fetchone()
-    except sqlite3.OperationalError:
-        return {"parents": [], "description": None}
-    parents = []
-    for row in rows:
-        try:
-            raw = json.loads(row["raw_payload"] or "{}")
-        except (TypeError, ValueError):
-            raw = {}
-        parents.append({
-            "role": row["role"],
-            "tank_id": row["tank_id"],
-            "where": row["location_display"] or row["tank_label"],
-            "strain": row["raw_strain_name"],
-            "generation": row["generation"],
-            "born": str(raw.get("date_of_birth") or "")[:10] or None,
-            "manual": row["source"] == "manual",
-        })
-    try:
-        description = (json.loads(cross["data"] or "{}").get("description") or "").strip() if cross else ""
-    except (TypeError, ValueError):
-        description = ""
-    return {"parents": parents, "description": description or None}
 
 
 def _load_cross_parent_provenance(conn: sqlite3.Connection, cross_id: str) -> Dict[str, Any]:
@@ -7345,6 +7293,109 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     # ------------------------------------------------------------------
     # In-browser walkthrough setup / cleanup
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Screening report (docs/screening_report_design.md)
+    # ------------------------------------------------------------------
+
+    def _report_thumbnail(link: Dict[str, Any]) -> Optional[str]:
+        """A well's enhanced preview as a small inline JPEG, or None if unreadable."""
+        try:
+            from PIL import Image
+            path = image_links.preview_path(_image_root(), app.state.image_cache_dir, link,
+                                            export_reference_pngs_from_ome_tiff)
+            with Image.open(path) as image:
+                image = image.convert("RGB")
+                image.thumbnail((320, 320))
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG", quality=80)
+        except Exception as exc:  # a missing or unreadable file shouldn't sink the report
+            logger.warning("Report thumbnail skipped for image link %s: %s", link.get("id"), exc)
+            return None
+        return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+    def _screening_report(request: Request, cross_id: str) -> Dict[str, Any]:
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            if not conn.execute("SELECT 1 FROM dishes WHERE cross_id = ? LIMIT 1", (cross_id,)).fetchone():
+                raise HTTPException(status_code=404, detail={"error": "cross_not_found", "cross_id": cross_id})
+            return screening_report.build(
+                conn, cross_id, thumbnail=_report_thumbnail,
+                generated_at=lab_now().strftime("%Y-%m-%d %H:%M %Z"),
+                generated_by=_selected_user(request), service_commit=app.state.service_commit)
+
+    def _report_page(request: Request, report: Dict[str, Any], flash: Optional[str] = None):
+        config = report_mail.MailConfig.load()
+        owner = report["cross"].get("owner_user") or {}
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            history = screening_report.history(conn, report["cross"]["cross_id"])
+        return templates.TemplateResponse(request, "reports/screening_report.html", {
+            "report": report, "preview": True, "flash": flash, "history": history,
+            "mail_mode": config.mode, "mail_problem": config.problem(),
+            "default_recipients": owner.get("email") or "",
+        })
+
+    @app.get("/crosses/{cross_id}/screening-report", response_class=HTMLResponse)
+    def screening_report_page(request: Request, cross_id: str, download: bool = False):
+        """Preview the cross's screening report; ``download=1`` returns the file itself."""
+        report = _screening_report(request, cross_id)
+        if download:
+            html = templates.get_template("reports/screening_report.html").render(report=report, preview=False)
+            stamp = lab_now().strftime("%Y%m%d_%H%M")
+            return HTMLResponse(html, headers={"Content-Disposition":
+                                               f'attachment; filename="cross_{cross_id}_screening_{stamp}.html"'})
+        return _report_page(request, report)
+
+    @app.post("/crosses/{cross_id}/screening-report/send", response_class=HTMLResponse)
+    def screening_report_send(request: Request, cross_id: str, action: str = Form(default="save"),
+                              recipients: str = Form(default="")):
+        """Save the report (HTML, and the .eml when mail is on) and send it in smtp mode."""
+        report = _screening_report(request, cross_id)
+        config = report_mail.MailConfig.load()
+        to = [r.strip() for r in re.split(r"[,;\s]+", recipients) if r.strip()]
+        if action == "send":
+            if config.mode != "smtp" or config.problem():
+                return _report_page(request, report, f"Sending is off ({config.problem() or config.mode}).")
+            if not to or any("@" not in r for r in to):
+                return _report_page(request, report, "Enter at least one email address to send to.")
+        html = templates.get_template("reports/screening_report.html").render(report=report, preview=False)
+        summary = templates.get_template("reports/_screening_summary.html").render(report=report)
+        stamp = lab_now().strftime("%Y%m%d_%H%M%S")
+        folder = Path(_require_db_path()).parent / "screening_reports" / cross_id
+        folder.mkdir(parents=True, exist_ok=True)
+        html_path = folder / f"cross_{cross_id}_screening_{stamp}.html"
+        html_path.write_text(html)
+        eml_path = None
+        result = "saved"
+        if config.mode in ("outbox", "smtp"):
+            text = (f"Cross {cross_id} screening summary\n\n"
+                    f"{report['totals']['screened']} fish screened: {report['totals']['positive']} positive, "
+                    f"{report['totals']['negative']} negative.\n\nThe full report is attached "
+                    f"(generated {report['generated_at']}, MetaZebrobot {report['service_commit'] or 'unknown'}).\n")
+            message = report_mail.build_message(
+                sender=config.sender, recipients=to, subject=f"Cross {cross_id} screening summary",
+                text=text, html=summary + f"<p style='font-size:12px;color:#777'>Full report attached. "
+                f"Generated {report['generated_at']} · MetaZebrobot {report['service_commit'] or 'unknown'}</p>",
+                attachment_name=html_path.name, attachment=html.encode())
+            eml_path = html_path.with_suffix(".eml")
+            eml_path.write_bytes(bytes(message))
+            result = "saved with .eml"
+            if action == "send":
+                try:
+                    report_mail.send(message, config)
+                    result = "sent"
+                except Exception as exc:
+                    logger.warning("Screening report for %s not sent: %s", cross_id, exc)
+                    result = f"send failed: {exc}"[:300]
+        with data_manager.get_connection() as conn:
+            screening_report.log(
+                conn, cross_id=cross_id, generated_at=report["generated_at"],
+                generated_by=_selected_user(request), service_commit=report["service_commit"],
+                html_path=str(html_path), eml_path=str(eml_path) if eml_path else None,
+                sha256=hashlib.sha256(html.encode()).hexdigest(), mode=config.mode,
+                recipients=", ".join(to) or None, result=result)
+            conn.commit()
+        return _report_page(request, report, f"Report {result}: {html_path.name}"
+                            + (f" to {', '.join(to)}" if result == "sent" else ""))
 
     @app.post("/walkthrough/setup")
     def walkthrough_setup() -> Dict[str, Any]:

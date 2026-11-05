@@ -14,12 +14,11 @@ from metazebrobot.data.data_manager import data_manager
 def _no_users_left_behind():
     """The test database is shared: users seeded here would change other tests' pages."""
     yield
-    try:
-        with data_manager.get_connection() as conn:
-            conn.execute("DELETE FROM users")
-            conn.commit()
-    except Exception:  # this test never opened the shared database
-        pass
+    if data_manager.database_path is None:  # this test never opened the shared database
+        return
+    with data_manager.get_connection() as conn:
+        conn.execute("DELETE FROM users")
+        conn.commit()
 
 PEOPLE = [
     {"userid": 115, "username": "lovelacea", "first_name": "Ada", "last_name": "Lovelace", "fullname": "Lovelace Ada"},

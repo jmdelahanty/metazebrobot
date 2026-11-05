@@ -951,6 +951,9 @@ class DataManager:
                 propagation.ensure_schema(cursor)
                 # PyRAT users: names and the user picker
                 users.ensure_schema(cursor)
+                # Saved and sent screening reports
+                from ..reports import screening_report
+                screening_report.ensure_schema(cursor)
 
                 # Housing units — physical positions within a dish
                 cursor.execute("""
