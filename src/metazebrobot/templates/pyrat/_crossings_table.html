@@ -54,6 +54,10 @@
                 |
                 <a href="/dishes/new?cross_id={{ c.crossing_id }}">New dish</a>
                 {% endif %}
+                {% if c.has_report %}
+                |
+                <a href="/crosses/{{ c.crossing_id }}/screening-report"><strong>Screening report</strong></a>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}

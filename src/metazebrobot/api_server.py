@@ -1285,6 +1285,11 @@ def _load_cross_dish_counts(conn: sqlite3.Connection) -> Dict[str, int]:
     return {r["cross_id"]: r["cnt"] for r in rows}
 
 
+def _load_cross_reportable(conn: sqlite3.Connection) -> set:
+    """Cross ids with any local dish, active or not (they have a screening report)."""
+    return {r["cross_id"] for r in conn.execute("SELECT DISTINCT cross_id FROM dishes WHERE cross_id IS NOT NULL")}
+
+
 def _load_destination_dish_options(
     db_path: Path,
     busy_timeout_ms: int,
@@ -7670,12 +7675,15 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             db_path = _require_db_path()
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
                 dish_counts = _load_cross_dish_counts(conn)
+                reportable = _load_cross_reportable(conn)
                 cached_payloads = _load_cached_cross_payloads(
                     conn,
                     [str(item.get("crossing_id", "")) for item in raw if item.get("crossing_id")],
                 )
 
             crossings = _prepare_crossings_for_display(raw, dish_counts, cached_payloads)
+            for c in crossings:
+                c["has_report"] = str(c.get("crossing_id", "")) in reportable
             logger.info("PyRAT crossings page built %s row(s) in %.2fs", len(crossings), perf_counter() - page_started)
         except HTTPException as e:
             error_msg = e.detail
@@ -7731,11 +7739,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             db_path = _require_db_path()
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
                 dish_counts = _load_cross_dish_counts(conn)
+                reportable = _load_cross_reportable(conn)
                 cached_payloads = _load_cached_cross_payloads(
                     conn,
                     [str(item.get("crossing_id", "")) for item in raw if item.get("crossing_id")],
                 )
             crossings = _prepare_crossings_for_display(raw, dish_counts, cached_payloads)
+            for c in crossings:
+                c["has_report"] = str(c.get("crossing_id", "")) in reportable
             logger.info(
                 "PyRAT crossings table refresh rendered %s row(s) in %.2fs",
                 len(crossings),

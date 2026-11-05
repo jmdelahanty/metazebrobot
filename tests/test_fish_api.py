@@ -3067,6 +3067,24 @@ class TestPyRATCrossingsPage:
         assert 'title="1 / 1"' in failed and "100%" in failed
         assert "showing the last known counts" in failed
 
+    def test_crossings_table_links_the_screening_report_for_crosses_with_dishes(self, client, monkeypatch):
+        import metazebrobot.api_server as api_server
+        from metazebrobot.models.fish_dish import FishDish
+
+        dish = FishDish.create_new(cross_id="14791", dish_number=1, genotype="wt", responsible="t",
+                                   fish_count=5, dof="20250121").model_dump(mode="json", exclude_none=True)
+        dish["status"] = "inactive"  # a finished cross still has its report
+        assert data_manager.save_fish_dish(dish)
+        rows = [{"crossing_id": cid, "status": "set-up", "date_of_record": "2025-01-20T00:00:00",
+                 "strain_name": "AB", "description": "1 group", "tanks": {"children": []}}
+                for cid in (14791, 14792)]
+        monkeypatch.setattr(api_server, "_fetch_pyrat", lambda endpoint, params=None: [dict(r) for r in rows])
+        monkeypatch.setattr(api_server, "get_pyrat_frontend_credentials", lambda: None)
+        for path in ("/pyrat/crossings/", "/pyrat/crossings/table"):
+            page = client.get(path).text
+            assert 'href="/crosses/14791/screening-report"' in page
+            assert 'href="/crosses/14792/screening-report"' not in page
+
 
 class TestMortalityInventory:
     def test_dish_care_updates_inventory_and_replacement(self, client, seed_full_dish, tmp_db_path):
