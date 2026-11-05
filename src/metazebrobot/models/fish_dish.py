@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime
+from ..utils.actor import current_actor
 from ..utils.lab_time import lab_now
 from typing import Optional, Dict, Any, Iterable, List, Literal, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -284,6 +285,7 @@ class ScreeningStepAllocation(BaseModel):
     )
     derived_dish_id: Optional[str] = None
     notes: Optional[str] = None
+    recorded_by: Optional[str] = Field(default=None, description="Username who booked these fish (the user picker)")
 
     @model_validator(mode='after')
     def validate_destination_dish_link(self):
@@ -313,6 +315,7 @@ class ScreeningStep(BaseModel):
     pigment_screened: bool = Field(default=False, description="Whether pigmentation was assessed this step")
     criteria: Optional[str] = Field(default=None, description="Free-text screening criteria (e.g. 'fluorescence', 'brightest')")
     count_screened_this_step: int = Field(..., ge=0, description="Total number of fish actually screened in this specific step")
+    screened_by: Optional[str] = Field(default=None, description="Username of the person who screened (the user picker)")
     count_before_step: Optional[int] = Field(
         default=None,
         ge=0,
@@ -607,6 +610,12 @@ class FishDish(BaseModel):
         """
         if self.screening_results is None:
             self.screening_results = ScreeningResults(screenings=[])
+        # New records name who made them (utils/actor.py); loaded ones keep theirs.
+        if step_data.screened_by is None:
+            step_data.screened_by = current_actor.get()
+        for allocation in step_data.allocations:
+            if allocation.recorded_by is None:
+                allocation.recorded_by = current_actor.get()
         # Append the validated ScreeningStep object directly
         self.screening_results.screenings.append(step_data)
         # Sort screenings by datetime
@@ -642,6 +651,8 @@ class FishDish(BaseModel):
                 f"Allocation would over-assign step {screening_datetime}: "
                 f"{new_total} > {step.count_screened_this_step}"
             )
+        if allocation.recorded_by is None:
+            allocation.recorded_by = current_actor.get()
         step.allocations.append(allocation)
         self.refresh_screening_state()
 

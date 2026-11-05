@@ -105,6 +105,14 @@ people. Agreed design, built in this order:
      18") without a handover action. No handover button for now.
    - Backfill only from evidence: a step whose fish observations all name
      one observer gets that observer; others stay blank.
+   - Built 2026-11-04: the web layer names the picker user as the request's
+     actor (`utils/actor.py`); `FishDish.add_screening_step` and
+     `add_screening_step_allocation` stamp it on new steps and allocations
+     only, so loading and re-saving never attributes old records. Stored in
+     `screening_steps.screened_by` and `screening_step_allocations.recorded_by`
+     (dishes load steps from these tables). The steps table shows "Screened
+     by" and "recorded by …" on allocations booked by someone else.
+     `scripts/backfill_screened_by.py` does the evidence-only backfill.
 3. **Dish owner from PyRAT, not free text.** New `responsible_user` on dishes,
    defaulting to the cross's PyRAT `responsible_id` (every cached cross of
    the 270 dishes on 2026-11-04 has one). It can be changed to another user,

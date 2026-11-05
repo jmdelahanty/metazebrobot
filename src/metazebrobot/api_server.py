@@ -46,6 +46,7 @@ from .models.fish_dish import (
     termination_reason_label,
     termination_reason_options_text,
 )
+from .utils.actor import current_actor
 from .utils.lab_time import LAB_TIMEZONE, lab_calendar_date, lab_now, lab_today  # noqa: F401 (re-exported)
 from .utils.label_generator import generate_dish_label
 from .utils import czi_images
@@ -3291,14 +3292,21 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     # Make user info available to all templates via Jinja2 globals
     @app.middleware("http")
     async def inject_user_context(request: Request, call_next):
-        """Add current_user and user_list to Jinja2 template globals."""
+        """Add current_user and user_list to Jinja2 template globals.
+
+        Also names the selected user as the actor for records this request
+        creates (utils/actor.py): screening steps and allocations.
+        """
+        actor_token = current_actor.set(_selected_user(request))
         templates.env.globals["current_user"] = _current_user(request)
         picker = _app_users(app.state.db_path)
         templates.env.globals["user_list"] = ([u["username"] for u in picker] if picker
                                               else _load_user_list())
         templates.env.globals["user_names"] = {u["username"]: users.display_name(u) for u in picker}
-        response = await call_next(request)
-        return response
+        try:
+            return await call_next(request)
+        finally:
+            current_actor.reset(actor_token)
 
     @app.post("/set-user")
     def set_user(request: Request, username: str = Form(...)):

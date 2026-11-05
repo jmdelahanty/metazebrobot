@@ -387,6 +387,12 @@ class DataManager:
                 allocation_cols = {row[1] for row in cursor.fetchall()}
                 if 'destination_dish_id' not in allocation_cols:
                     cursor.execute("ALTER TABLE screening_step_allocations ADD COLUMN destination_dish_id TEXT")
+                # Who screened / booked (docs/user_scoped_workflow_design.md)
+                if 'recorded_by' not in allocation_cols:
+                    cursor.execute("ALTER TABLE screening_step_allocations ADD COLUMN recorded_by TEXT")
+                step_cols = {row[1] for row in cursor.execute("PRAGMA table_info(screening_steps)")}
+                if 'screened_by' not in step_cols:
+                    cursor.execute("ALTER TABLE screening_steps ADD COLUMN screened_by TEXT")
                 cursor.execute("""
                     UPDATE screening_step_allocations
                     SET destination_dish_id = derived_dish_id
@@ -1460,8 +1466,8 @@ class DataManager:
             (dish_id, screening_datetime, dpf_screened, indicators_screened,
              pigment_screened, criteria, count_screened_this_step, count_before_step, count_after_step, number_kept,
              number_removed_pigmented, number_removed_negative, number_removed_other,
-             tricaine_used, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             tricaine_used, notes, screened_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 dish_id,
                 step.get('screening_datetime'),
@@ -1477,14 +1483,16 @@ class DataManager:
                 step.get('number_removed_negative'),
                 step.get('number_removed_other'),
                 step.get('tricaine_used', False),
-                step.get('notes')
+                step.get('notes'),
+                step.get('screened_by'),
             ))
 
             for allocation in step.get('allocations', []) or []:
                 cursor.execute("""
                 INSERT INTO screening_step_allocations
-                (dish_id, screening_datetime, bucket, disposition, count, destination_dish_id, derived_dish_id, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (dish_id, screening_datetime, bucket, disposition, count, destination_dish_id, derived_dish_id,
+                 notes, recorded_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     dish_id,
                     step.get('screening_datetime'),
@@ -1494,6 +1502,7 @@ class DataManager:
                     allocation.get('destination_dish_id') or allocation.get('derived_dish_id'),
                     allocation.get('derived_dish_id') or allocation.get('destination_dish_id'),
                     allocation.get('notes'),
+                    allocation.get('recorded_by'),
                 ))
 
         # Update the dish's screening result columns
@@ -1548,7 +1557,8 @@ class DataManager:
                         count,
                         destination_dish_id,
                         derived_dish_id,
-                        notes
+                        notes,
+                        recorded_by
                     FROM screening_step_allocations
                     WHERE dish_id = ?
                     ORDER BY screening_datetime ASC, id ASC
@@ -1563,6 +1573,7 @@ class DataManager:
                     "destination_dish_id": row["destination_dish_id"] or row["derived_dish_id"],
                     "derived_dish_id": row["derived_dish_id"],
                     "notes": row["notes"],
+                    "recorded_by": row["recorded_by"],
                 })
             return grouped
         except Exception as e:
@@ -2052,7 +2063,7 @@ class DataManager:
                            pigment_screened, criteria, count_screened_this_step,
                            count_before_step, count_after_step, number_kept,
                            number_removed_pigmented, number_removed_negative, number_removed_other,
-                           tricaine_used, notes
+                           tricaine_used, notes, screened_by
                     FROM screening_steps
                     WHERE dish_id = ?
                     ORDER BY screening_datetime ASC
@@ -2079,7 +2090,8 @@ class DataManager:
                         'number_removed_negative': row['number_removed_negative'],
                         'number_removed_other': row['number_removed_other'],
                         'tricaine_used': bool(row['tricaine_used']),
-                        'notes': row['notes']
+                        'notes': row['notes'],
+                        'screened_by': row['screened_by'],
                     }
                     step_allocations = allocations_by_step.get(row['screening_datetime'], [])
                     step['allocations'] = step_allocations or self._legacy_screening_step_allocations(step)

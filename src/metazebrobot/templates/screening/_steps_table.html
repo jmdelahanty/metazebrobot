@@ -186,6 +186,7 @@
     <thead>
         <tr>
             <th>Date/Time</th>
+            <th>Screened by</th>
             <th>DPF</th>
             <th>Indicators</th>
             <th>Pigment?</th>
@@ -203,6 +204,7 @@
         {% set has_indicator_screen = s.indicators_screened and (s.indicators_screened | length > 0) %}
         <tr id="step-{{ loop.index }}">
             <td>{{ s.screening_datetime }}</td>
+            <td>{% if s.screened_by %}{{ (user_names or {}).get(s.screened_by) or s.screened_by }}{% else %}-{% endif %}</td>
             <td>{{ s.dpf_screened }}</td>
             <td>{{ s.indicators_screened | join(", ") if s.indicators_screened else "-" }}</td>
             <td>{{ "Yes" if s.pigment_screened else "No" }}</td>
@@ -224,6 +226,9 @@
                         {% if allocation.notes %}
                         <br><small>{{ allocation.notes }}</small>
                         {% endif %}
+                        {% if allocation.recorded_by and allocation.recorded_by != s.screened_by %}
+                        <br><small>recorded by {{ (user_names or {}).get(allocation.recorded_by) or allocation.recorded_by }}</small>
+                        {% endif %}
                     </li>
                     {% endfor %}
                 </ul>
@@ -242,7 +247,7 @@
             <td>{{ s.notes or "-" }}</td>
         </tr>
         <tr class="screening-step-detail-row">
-            <td colspan="11">
+            <td colspan="12">
                 <details {% if s.unallocated_count > 0 %}open{% endif %}>
                     <summary><strong>Manage Step Outcomes</strong></summary>
                     <div class="screening-step-action-grid">
