@@ -7435,6 +7435,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 conn.execute("DELETE FROM quality_checks WHERE dish_id = ?", (did,))
                 conn.execute("DELETE FROM dish_transgenes WHERE dish_id = ?", (did,))
                 conn.execute("DELETE FROM screening_step_images WHERE dish_id = ?", (did,))
+                conn.execute("DELETE FROM screening_step_allocations WHERE dish_id = ?", (did,))
+                conn.execute("DELETE FROM screening_step_indicators WHERE dish_id = ?", (did,))
                 conn.execute("DELETE FROM screening_steps WHERE dish_id = ?", (did,))
                 conn.execute("DELETE FROM dishes WHERE dish_id = ?", (did,))
             conn.commit()
