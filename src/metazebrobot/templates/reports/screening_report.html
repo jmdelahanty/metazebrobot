@@ -128,8 +128,7 @@
 {% set f = report.flags %}
 <ul class="flags">
     {% for d in f.not_finalized %}
-    <li>{{ d.dish_id }} isn't finalized{% if d.computed_positives is not none %} ({{ d.computed_positives }} positive{{ "" if d.computed_positives == 1 else "s" }} by its steps){% endif %}.
-        {% if preview %}<a href="/screening/{{ d.dish_id }}">Finalize</a>{% endif %}</li>
+    <li>{{ d.dish_id }} isn't finalized{% if d.computed_positives is not none %} ({{ d.computed_positives }} positive{{ "" if d.computed_positives == 1 else "s" }} by its steps){% endif %}.</li>
     {% endfor %}
     {% if f.not_screened %}<li>Not screened yet: {{ f.not_screened | join(", ") }}.</li>{% endif %}
     {% if f.positives_from_one_dish %}<li>All positives came from {{ f.positives_from_one_dish }}; the cross's other screened dishes had none. Worth checking for a mix-up.</li>{% endif %}

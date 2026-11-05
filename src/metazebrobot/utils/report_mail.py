@@ -19,7 +19,7 @@ import shlex
 import smtplib
 from dataclasses import dataclass
 from email.message import EmailMessage
-from email.utils import formatdate, make_msgid
+from email.utils import formatdate, getaddresses, make_msgid, parseaddr
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -105,12 +105,30 @@ def build_message(*, sender: Optional[str], recipients: List[str], subject: str,
     return message
 
 
-def send(message: EmailMessage, config: MailConfig) -> None:
-    """Send over SMTP as configured (raises on failure)."""
+def send(message: EmailMessage, config: MailConfig) -> str:
+    """Send over SMTP as configured; returns the server's reply (with its queue id).
+
+    "Accepted" only means the server queued the message; the reply's id is
+    what to quote when a message never arrives. Raises on refusal.
+    """
     smtp_class = smtplib.SMTP_SSL if config.ssl else smtplib.SMTP
+    sender = parseaddr(message["From"])[1]
+    recipients = [address for _, address in getaddresses(message.get_all("To", []))]
     with smtp_class(config.host, config.port, timeout=30) as smtp:
+        smtp.ehlo()
         if config.starttls and not config.ssl:
             smtp.starttls()
+            smtp.ehlo()
         if config.username:
             smtp.login(config.username, config.password or "")
-        smtp.send_message(message)
+        code, reply = smtp.mail(sender)
+        if code != 250:
+            raise smtplib.SMTPSenderRefused(code, reply, sender)
+        for address in recipients:
+            code, reply = smtp.rcpt(address)
+            if code not in (250, 251):
+                raise smtplib.SMTPRecipientsRefused({address: (code, reply)})
+        code, reply = smtp.data(message.as_bytes())
+        if code != 250:
+            raise smtplib.SMTPDataError(code, reply)
+        return reply.decode(errors="replace")

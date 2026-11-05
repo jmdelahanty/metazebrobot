@@ -85,7 +85,7 @@ def test_send_needs_smtp_mode_and_a_recipient_then_logs_it(client, cross, monkey
     _no_mail(monkeypatch, tmp_path, MAIL_MODE="smtp", SMTP_HOST="mail.example.org",
              MAIL_FROM="Lab <lab@example.org>")
     sent = []
-    monkeypatch.setattr(report_mail, "send", lambda message, config: sent.append((message, config)))
+    monkeypatch.setattr(report_mail, "send", lambda message, config: sent.append((message, config)) or "2.0.0 q1 accepted")
     assert "Enter at least one email address" in client.post(
         f"/crosses/{cross}/screening-report/send", data={"action": "send", "recipients": ""}).text
     page = client.post(f"/crosses/{cross}/screening-report/send",
@@ -97,7 +97,7 @@ def test_send_needs_smtp_mode_and_a_recipient_then_logs_it(client, cross, monkey
     with data_manager.get_connection() as conn:
         results = [r[0] for r in conn.execute(
             "SELECT result FROM screening_reports WHERE cross_id = ? ORDER BY id", (cross,))]
-    assert results[-1] == "sent"
+    assert results[-1] == "sent (2.0.0 q1 accepted)"
 
 
 def test_mail_config_reads_a_local_file(tmp_path):
@@ -109,3 +109,40 @@ def test_mail_config_reads_a_local_file(tmp_path):
         "smtp", "mail.example.org", 25, "Lab <lab@example.org>")
     assert config.problem() is None
     assert report_mail.MailConfig.load({"METAZEBROBOT_MAIL_CONFIG": str(tmp_path / "x")}).mode == "disabled"
+
+
+def test_send_returns_the_servers_queue_reply(monkeypatch):
+    calls = []
+
+    class _SMTP:
+        def __init__(self, host, port, timeout):
+            calls.append(("connect", host, port))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def ehlo(self):
+            return (250, b"ok")
+
+        def mail(self, sender):
+            calls.append(("mail", sender))
+            return (250, b"ok")
+
+        def rcpt(self, address):
+            calls.append(("rcpt", address))
+            return (250, b"ok")
+
+        def data(self, body):
+            return (250, b"2.0.0 abc123 Message accepted for delivery")
+
+    monkeypatch.setattr(report_mail.smtplib, "SMTP", _SMTP)
+    message = report_mail.build_message(sender="Lab <lab@example.org>", recipients=["a@example.org", "b@example.org"],
+                                        subject="s", text="t", html="<p>t</p>", attachment_name="r.html",
+                                        attachment=b"<html></html>")
+    config = report_mail.MailConfig(mode="smtp", host="mail.example.org", sender="Lab <lab@example.org>")
+    assert report_mail.send(message, config) == "2.0.0 abc123 Message accepted for delivery"
+    assert calls == [("connect", "mail.example.org", 25), ("mail", "lab@example.org"),
+                     ("rcpt", "a@example.org"), ("rcpt", "b@example.org")]

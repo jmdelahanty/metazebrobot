@@ -7381,8 +7381,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             result = "saved with .eml"
             if action == "send":
                 try:
-                    report_mail.send(message, config)
-                    result = "sent"
+                    reply = report_mail.send(message, config)
+                    result = f"sent ({reply})"[:300]
                 except Exception as exc:
                     logger.warning("Screening report for %s not sent: %s", cross_id, exc)
                     result = f"send failed: {exc}"[:300]
@@ -7395,7 +7395,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 recipients=", ".join(to) or None, result=result)
             conn.commit()
         return _report_page(request, report, f"Report {result}: {html_path.name}"
-                            + (f" to {', '.join(to)}" if result == "sent" else ""))
+                            + (f" to {', '.join(to)}" if result.startswith("sent") else ""))
 
     @app.post("/walkthrough/setup")
     def walkthrough_setup() -> Dict[str, Any]:
