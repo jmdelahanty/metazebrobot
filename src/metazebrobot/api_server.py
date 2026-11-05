@@ -7599,6 +7599,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """HTMX partial: crossing table with fresh backend/v1 detail enrichment."""
         crossings: List[Dict[str, Any]] = []
         error_msg = None
+        details_missing = False
         try:
             responsible_id = _pyrat_user_id(_current_user(request), app.state.db_path)
             params = {
@@ -7624,12 +7625,21 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 len(raw),
                 perf_counter() - enrich_started,
             )
+            # The detail counts come only from backend/v1; when that fails the
+            # rows fall back to the last cached counts instead of '?' and 0.
+            details_missing = bool(raw) and not any("crossing_tanks" in item for item in raw)
+            if details_missing:
+                logger.warning("PyRAT backend/v1 detail counts unavailable; showing cached counts.")
             _cache_cross_rows(raw)
 
             db_path = _require_db_path()
             with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
                 dish_counts = _load_cross_dish_counts(conn)
-            crossings = _prepare_crossings_for_display(raw, dish_counts)
+                cached_payloads = _load_cached_cross_payloads(
+                    conn,
+                    [str(item.get("crossing_id", "")) for item in raw if item.get("crossing_id")],
+                )
+            crossings = _prepare_crossings_for_display(raw, dish_counts, cached_payloads)
             logger.info(
                 "PyRAT crossings table refresh rendered %s row(s) in %.2fs",
                 len(crossings),
@@ -7646,7 +7656,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "error": error_msg,
             "details_refresh_enabled": details_refresh_enabled,
             "details_refresh_trigger": "every 5m",
-            "details_refresh_note": "PyRAT detail counts refresh every 5 minutes.",
+            "details_refresh_note": ("PyRAT detail counts couldn't be fetched; showing the last "
+                                     "known counts. Retrying every 5 minutes."
+                                     if details_missing else
+                                     "PyRAT detail counts refresh every 5 minutes."),
         })
 
     # ------------------------------------------------------------------

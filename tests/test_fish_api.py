@@ -3047,6 +3047,26 @@ class TestPyRATCrossingsPage:
         assert 'title="1 / 2"' in table_resp.text
         assert 'href="/crosses/14783/lineage/"' in table_resp.text
 
+    def test_crossings_table_keeps_cached_counts_when_details_fail(self, client, monkeypatch):
+        import metazebrobot.api_server as api_server
+
+        row = {"crossing_id": 14790, "status": "set-up", "date_of_record": "2025-01-20T00:00:00",
+               "strain_name": "AB", "description": "Can two crosses share one tank?",
+               "tanks": {"children": []}}
+        monkeypatch.setattr(api_server, "_fetch_pyrat", lambda endpoint, params=None: [dict(row)])
+        monkeypatch.setattr(api_server, "get_pyrat_frontend_credentials",
+                            lambda: {"base_url": "https://example.invalid/aquatic/", "username": "t", "password": "p"})
+        monkeypatch.setattr(api_server, "enrich_crossings_with_frontend_details",
+                            lambda crossings, creds, **kw: [{**c, "crossing_tanks": 1, "raised_tanks": 1}
+                                                            for c in crossings])
+        assert 'title="1 / 1"' in client.get("/pyrat/crossings/table").text  # details fetched and cached
+
+        monkeypatch.setattr(api_server, "enrich_crossings_with_frontend_details",
+                            lambda crossings, creds, **kw: list(crossings))  # backend/v1 login failed
+        failed = client.get("/pyrat/crossings/table").text
+        assert 'title="1 / 1"' in failed and "100%" in failed
+        assert "showing the last known counts" in failed
+
 
 class TestMortalityInventory:
     def test_dish_care_updates_inventory_and_replacement(self, client, seed_full_dish, tmp_db_path):
