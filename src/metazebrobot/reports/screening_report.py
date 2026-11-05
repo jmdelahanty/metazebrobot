@@ -16,7 +16,7 @@ from ..data import users
 from ..data.data_manager import data_manager
 from ..data.screening_calls import fish_calls
 from ..models.fish_dish import FishDish
-from ..utils.screening_labels import plate_layout, result_label, well_sort_key
+from ..utils.screening_labels import plate_layout, result_label, short_construct, well_sort_key
 
 BUCKETS = (("positive_screened", "positive"), ("negative_screened", "negative"),
            ("pigmented_screened", "pigmented"))
@@ -79,6 +79,31 @@ def _name(conn, username: Optional[str]) -> Optional[str]:
     return users.display_name(users.by_username(conn, username), username) if username else None
 
 
+def _screened_constructs(conn, dish_id: str) -> List[str]:
+    return [r["dish_construct"] for r in conn.execute(
+        "SELECT DISTINCT dish_construct FROM screening_step_indicators WHERE dish_id = ? AND kind = 'construct'",
+        (dish_id,))]
+
+
+def _mixed_fish_calls(conn, dish_id: str) -> List[Dict[str, str]]:
+    """Fish booked from this dish's steps with different results per construct (the 'other' bucket).
+
+    Their latest observation per construct, recorded against this dish.
+    """
+    latest: Dict[str, Dict[str, str]] = {}
+    for r in conn.execute(
+            """SELECT fish_id, dish_construct, result FROM fish_screening_observations
+               WHERE source_dish_id = ? ORDER BY id""", (dish_id,)):
+        latest.setdefault(r["fish_id"], {})[r["dish_construct"]] = r["result"]
+    return [calls for calls in latest.values() if len(set(calls.values())) > 1]
+
+
+def _per_construct_from_buckets(counts: Dict[str, Optional[int]], constructs: List[str]) -> Dict[str, Dict[str, int]]:
+    """A step's positive/negative groups apply to every construct it screened."""
+    return {c: {"positive": counts.get("positive") or 0, "negative": counts.get("negative") or 0}
+            for c in constructs}
+
+
 def _held_counts(conn, dish: FishDish) -> Optional[Dict[str, Any]]:
     """What a derived dish or plate holds: its tracked fish by current call, else its group.
 
@@ -88,8 +113,13 @@ def _held_counts(conn, dish: FishDish) -> Optional[Dict[str, Any]]:
     fish = data_manager.get_fish_subjects(dish.dish_id)
     if fish:
         counts = {"positive": 0, "negative": 0, "pigmented": 0, "no_result": 0}
+        per_construct: Dict[str, Dict[str, int]] = {}
         for f in fish:
             calls = [c for c in (fish_calls(conn, f["fish_id"]) or {}).get("calls", []) if c["kind"] == "construct"]
+            for c in calls:
+                if c["result"] in ("positive", "negative"):
+                    slot = per_construct.setdefault(c["dish_construct"], {"positive": 0, "negative": 0})
+                    slot[c["result"]] += 1
             if any(c["result"] == "positive" for c in calls):
                 counts["positive"] += 1
             elif calls and all(c["result"] == "negative" for c in calls):
@@ -100,13 +130,17 @@ def _held_counts(conn, dish: FishDish) -> Optional[Dict[str, Any]]:
         for f in fish:
             origin = f.get("origin_dish_id") or dish.parent_dish_id
             origins[origin] = origins.get(origin, 0) + 1
-        return {"counts": counts, "source": "fish calls", "origins": sorted(origins.items())}
+        return {"counts": counts, "source": "fish calls", "origins": sorted(origins.items()),
+                "per_construct": per_construct}
     label = dict(BUCKETS).get(dish.source_screening_bucket or dish.dish_population_type or "")
     if label:
         counts = {"positive": 0, "negative": 0, "pigmented": 0, "no_result": 0}
         counts[label] = dish.current_fish_count or 0
+        constructs = [r["construct"] for r in conn.execute(
+            "SELECT DISTINCT construct FROM dish_transgenes WHERE dish_id = ?", (dish.dish_id,))]
         return {"counts": counts, "source": "dish group",
-                "origins": [(dish.parent_dish_id, dish.current_fish_count or 0)]}
+                "origins": [(dish.parent_dish_id, dish.current_fish_count or 0)],
+                "per_construct": _per_construct_from_buckets(counts, constructs)}
     return None
 
 
@@ -124,6 +158,13 @@ def _dish_row(conn, dish: FishDish) -> Dict[str, Any]:
                 discarded += a.count
     screeners = sorted({s.screened_by for s in steps if s.screened_by})
     final = dish.screening_results.final_positive_count if dish.screening_results else None
+    per_construct = None
+    if steps and any(s.allocations for s in steps):
+        per_construct = _per_construct_from_buckets(counts, _screened_constructs(conn, dish.dish_id))
+        for calls in _mixed_fish_calls(conn, dish.dish_id):  # booked as 'other': count each construct
+            for construct, outcome in calls.items():
+                if outcome in ("positive", "negative"):
+                    per_construct.setdefault(construct, {"positive": 0, "negative": 0})[outcome] += 1
     return {
         "dish_id": dish.dish_id,
         "derived_from": dish.parent_dish_id,
@@ -145,6 +186,7 @@ def _dish_row(conn, dish: FishDish) -> Dict[str, Any]:
         "finalized": final is not None,
         "final_count": final,
         "computed_positives": (dish.computed_positive_count() or {}).get("total"),
+        "per_construct": per_construct,
         # Derived dishes and plates: what they hold (already counted in the parent's screen).
         "held": _held_counts(conn, dish) if dish.parent_dish_id else None,
     }
@@ -210,11 +252,18 @@ def build(conn, cross_id: str, *, thumbnail: Callable[[Dict[str, Any]], Optional
     }
     plates = [p for p in (_plate(conn, d.dish_id, thumbnail) for d in dishes) if p]
     totals = {label: sum(r["counts"][label] or 0 for r in primary) for _, label in BUCKETS}
+    constructs = [r["construct"] for r in conn.execute(
+        f"SELECT DISTINCT construct FROM dish_transgenes WHERE dish_id IN ({','.join('?' for _ in dish_ids) or 'NULL'}) "
+        "ORDER BY construct", dish_ids)]
+    construct_totals = {c: {o: sum(((r["per_construct"] or {}).get(c) or {}).get(o, 0) for r in primary)
+                            for o in ("positive", "negative")} for c in constructs}
     screeners = sorted({n for r in rows for n in r["screened_by"]})
     return {
         "cross": _cross_info(conn, cross_id),
         "parents": cross_parents(conn, cross_id),
         "dishes": rows,
+        "constructs": [{"construct": c, "short": short_construct(c)} for c in constructs],
+        "construct_totals": construct_totals,
         "totals": dict(totals, screened=sum(r["screened"] for r in primary),
                        not_booked=sum(r["not_booked"] for r in primary)),
         "screeners": screeners,

@@ -131,6 +131,13 @@ within mail limits.
   dish's group bucket, with where the fish came from ("from 19498_1 (6),
   19498_3 (6)" on a mixed plate). The cross totals count only original
   dishes, since a plate's fish are already in their source's screen.
+- **Per construct:** the dish tables have one +/− pair per construct on the
+  cross ("—" where a dish wasn't screened for it), and the summary gives
+  totals per construct when there are several. A step's positive/negative
+  group counts for every construct the step screened (as inherited calls
+  do); fish booked as `other` (different results per construct) count per
+  construct from their own observations; plates count each fish's call per
+  construct.
 - **Thumbnails:** each well's enhanced preview, downsized to 320 px JPEG and
   inlined. A cross whose CZIs were never previewed takes a while the first
   time (12 CZIs: about 40 s), then about a second.

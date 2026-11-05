@@ -164,3 +164,28 @@ def test_plates_count_their_fish_by_current_call(client, monkeypatch, tmp_path):
     assert cells[4:8] == ["—", "2", "1", "0"]  # Screened, +, −, pig
     assert f"from {screened} (2), {other} (1); fish calls" in row
     assert "2 fish screened" not in page  # the plate's fish are already in its sources' screens
+
+
+def test_two_color_cross_reports_each_construct(client, monkeypatch, tmp_path):
+    _no_mail(monkeypatch, tmp_path)
+    cross = f"9{uuid.uuid4().int % 10**8}"
+    two = "Tg(elavl3:H2B-GCaMP7f); Tg(gfap:PMCA2-mCherry-zf)"
+    dish = FishDish.create_new(cross_id=cross, dish_number=1, genotype=two, responsible="t",
+                               fish_count=10, dof="20261028").model_dump(mode="json", exclude_none=True)
+    assert data_manager.save_fish_dish(dish)
+    source = dish["dish_id"]
+    plate = client.post(f"/dishes/{source}/plate/new", data={"wells": 12},
+                        follow_redirects=False).headers["location"].split("/")[2]
+    gcamp, mcherry = "Tg(elavl3:H2B-GCaMP7f)", "Tg(gfap:PMCA2-mCherry-zf)"
+    for i, results in enumerate(((f"{gcamp}=positive", f"{mcherry}=negative"),
+                                 (f"{gcamp}=positive", f"{mcherry}=positive"),
+                                 (f"{gcamp}=negative", f"{mcherry}=negative"))):
+        client.post(f"/dishes/{plate}/plate/add-fish",  # one new step, then today's step
+                    data={"source_dish_id": source, "step": "" if i else "new",
+                          "construct_results": list(results)})
+    page = client.get(f"/crosses/{cross}/screening-report").text
+    assert "H2B-GCaMP7f: <strong>2 positive</strong>, 1 negative" in page
+    assert "PMCA2-mCherry-zf: <strong>1 positive</strong>, 2 negative" in page
+    plate_row = page.split(f"<td>{plate}")[1].split("</tr>")[0]
+    cells = [c.split(">", 1)[1].split("<")[0].strip() for c in plate_row.split("<td")[1:]]
+    assert cells[4:9] == ["—", "2", "1", "1", "2"]  # Screened, GCaMP +/−, mCherry +/−

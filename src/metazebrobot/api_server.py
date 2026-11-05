@@ -6005,6 +6005,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "selected_source": selected_source,
             "chosen": chosen or {},
             "source_steps": _source_steps(selected_source) if selected_source else [],
+            "source_constructs": _source_constructs(selected_source),
             "units": units,
             "unassigned_fish": unassigned,
             "plate_formats": sorted(PLATE_FORMATS),
@@ -6063,6 +6064,15 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                           "step now' (or an earlier step explicitly).")
         return todays[0]["value"], None
 
+    def _source_constructs(source_dish_id: Optional[str]) -> List[Dict[str, Any]]:
+        """A source dish's constructs, for per-construct results when it has several."""
+        if not source_dish_id:
+            return []
+        with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+            rows = conn.execute("SELECT DISTINCT construct FROM dish_transgenes "
+                                "WHERE dish_id = ? ORDER BY construct", (source_dish_id,)).fetchall()
+        return [{"key": r["construct"], "short": _short_construct(r["construct"])} for r in rows]
+
     @app.get("/dishes/{dish_id}/plate/steps", response_class=HTMLResponse)
     def plate_step_picker(request: Request, dish_id: str,
                           source_dish_id: Optional[str] = Query(default=None)):
@@ -6070,6 +6080,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return templates.TemplateResponse(request, "fish/_plate_step_picker.html", {
             "source_dish_id": source_dish_id or "",
             "source_steps": _source_steps(source_dish_id) if source_dish_id else [],
+            "source_constructs": _source_constructs(source_dish_id),
+            "chosen": {},
         })
 
     @app.post("/dishes/{dish_id}/plate/new", response_class=HTMLResponse)
@@ -6115,8 +6127,15 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         source_dish_id: Optional[str] = Form(default=None),
         result: Optional[str] = Form(default=None),
         step: Optional[str] = Form(default=None),
+        construct_results: List[str] = Form(default=[]),
     ):
         """Register one fish and place it in a well: the given one, or the next empty.
+
+        ``construct_results`` ("<construct>=positive|negative", one per construct
+        as named on the dish) gives a multi-construct fish its own result per construct;
+        a construct without one takes ``result``. A fish whose constructs
+        differ is booked into the source step's ``other`` bucket, noted with
+        the combination.
 
         ``source_dish_id`` (default: this plate) is where the fish comes from; it
         becomes the fish's origin. ``result`` (positive / negative) records this
@@ -6126,10 +6145,20 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         """
         source = (source_dish_id or "").strip() or dish_id
         result = (result or "").strip() or None
+        per_construct = {}
+        for item in construct_results:
+            key, _, value = (item or "").rpartition("=")
+            if key and value in ("positive", "negative"):
+                per_construct[key] = value
         chosen = {"source": (source_dish_id or "").strip(), "result": result or "",
-                  "step": (step or "").strip(), "prefix": label_prefix.strip() or "Z"}
+                  "step": (step or "").strip(), "prefix": label_prefix.strip() or "Z",
+                  "construct_results": per_construct}
         if result not in (None, "positive", "negative"):
             return plate_map(request, dish_id, f"Unknown result {result!r}.", "error", chosen=chosen)
+        if per_construct and source == dish_id:
+            return plate_map(request, dish_id, "Results per construct need a mixed plate: choose which "
+                             "dish the fish comes from.", "error", chosen=chosen)
+        construct_calls: Dict[str, str] = {}  # construct key -> result, for a placement with results
         dish = _dish_context_for_fish_page(dish_id)
         wells = [u for u in data_manager.get_housing_units_with_fish(dish_id)
                  if u["unit_kind"] == "well"]
@@ -6172,7 +6201,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             origin_dish = dish
         else:
             origin_dish = _dish_context_for_fish_page(source)
-            if result:
+            if result or per_construct:
                 step_time, problem = _step_for_placement(source, origin_dish, (step or "").strip())
                 if step_time:
                     chosen["step"] = step_time  # a new step: later fish join it, not another
@@ -6183,6 +6212,18 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 if not constructs:
                     return plate_map(request, dish_id, f"{source}'s step {step_time} has no "
                                      "construct indicator to record this result against.", "error", chosen=chosen)
+                construct_calls = {c["dish_construct"]: per_construct.get(c["dish_construct"]) or result
+                                   for c in constructs}
+                missing = [_short_construct(c["dish_construct"]) for c in constructs
+                           if not construct_calls[c["dish_construct"]]]
+                if missing:
+                    return plate_map(request, dish_id, f"Give a result for {', '.join(missing)} too.",
+                                     "error", chosen=chosen)
+                outcomes = set(construct_calls.values())
+                bucket = f"{outcomes.pop()}_screened" if len(outcomes) == 1 else "other"
+                combination = " ".join(
+                    _short_construct(c["dish_construct"]) + ("+" if construct_calls[c["dish_construct"]] == "positive"
+                                                             else "−") for c in constructs)
                 source_dish_obj = fish_dish_ctrl.get_dish(source)
                 st = source_dish_obj.get_screening_step(step_time) if source_dish_obj else None
                 if st and st.total_allocated_count + 1 > st.count_screened_this_step:
@@ -6195,8 +6236,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     if not grown:
                         return plate_map(request, dish_id, grow_msg, "error", chosen=chosen)
                 ok, message, _ = fish_dish_ctrl.allocate_screening_step_to_existing_dish(
-                    source, step_time, f"{result}_screened", 1, dish_id,
-                    notes=f"{label} placed in {target['position_label']}")
+                    source, step_time, bucket, 1, dish_id,
+                    notes=f"{label} placed in {target['position_label']}"
+                          + (f" ({combination})" if bucket == "other" else ""))
             else:
                 ok, message, _ = fish_dish_ctrl.transfer_fish_between_dishes(
                     source_dish_id=source, destination_dish_id=dish_id, count=1,
@@ -6221,7 +6263,17 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 return plate_map(request, dish_id, f"Placed {label} in {target['position_label']}, "
                                  f"but the dish counts weren't updated: {grow_message}", "error",
                                  refresh_fish_table=True, chosen=chosen)
-        if result:
+        if construct_calls:
+            with data_manager.get_connection() as conn:
+                for outcome in ("positive", "negative"):
+                    chosen_constructs = [c for c in constructs if construct_calls[c["dish_construct"]] == outcome]
+                    if chosen_constructs:
+                        fish_observations.record(
+                            conn, fish_id, outcome, chosen_constructs, observed_by=_selected_user(request),
+                            source_dish_id=source, screening_datetime=step_time,
+                            notes="Recorded when placed in the well plate")
+                conn.commit()
+        elif result:
             with data_manager.get_connection() as conn:
                 if not constructs:  # a plate split from a step: use that step's constructs
                     plate_row = conn.execute(
@@ -6243,7 +6295,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                         notes="Recorded when placed in the well plate")
                     conn.commit()
         where = f" from {source}" if source != dish_id else ""
-        what = f" ({result})" if result else ""
+        if construct_calls and len(set(construct_calls.values())) > 1:
+            what = f" ({combination})"
+        else:
+            what = f" ({result or next(iter(construct_calls.values()), '')})" if (result or construct_calls) else ""
         return plate_map(request, dish_id, f"Placed {label}{what}{where} in {target['position_label']}.",
                          refresh_fish_table=True, chosen=chosen)
 

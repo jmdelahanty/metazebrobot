@@ -313,3 +313,39 @@ def test_finalize_form_is_prefilled_with_the_computed_positives(client):
     assert "2 positives\n            moved to other dishes or plates" in page
     assert 'value="2"' in page
     assert __import__("re").search(r'name="date_finalized"[^>]*value="\d{8}"', page)
+
+
+TWO_COLOR = "Tg(elavl3:H2B-GCaMP7f); Tg(gfap:PMCA2-mCherry-zf)"
+
+
+def test_multi_construct_fish_get_a_result_per_construct(client):
+    cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+    dish = FishDish.create_new(
+        cross_id=cross, dish_number=1, genotype=TWO_COLOR, responsible="t",
+        fish_count=10, dof="20261008", container_type="petri_dish",
+    ).model_dump(mode="json", exclude_none=True)
+    assert data_manager.save_fish_dish(dish)
+    source = dish["dish_id"]
+    plate = _new_plate(client, source, 12)
+    form = client.get(f"/dishes/{plate}/plate/steps", params={"source_dish_id": source}).text
+    assert 'value="Tg(elavl3:H2B-GCaMP7f)=positive"' in form
+    gcamp, mcherry = "Tg(elavl3:H2B-GCaMP7f)", "Tg(gfap:PMCA2-mCherry-zf)"
+
+    page = client.post(f"/dishes/{plate}/plate/add-fish", data={
+        "source_dish_id": source, "step": "new",
+        "construct_results": [f"{gcamp}=positive", f"{mcherry}=negative"]})
+    assert "Placed Z1 (H2B-GCaMP7f+ PMCA2-mCherry-zf−)" in page.text
+    z1 = _by_label(client, plate)["Z1"]["fish_id"]
+    assert sorted(_calls(client, z1)) == [
+        ("Tg(elavl3:H2B-GCaMP7f)", "positive", "observed"), ("Tg(gfap:PMCA2-mCherry-zf)", "negative", "observed")]
+    step = client.get(f"/dishes/{source}").json()["data"]["screening_results"]["screenings"][0]
+    assert [(a["bucket"], a["notes"]) for a in step["allocations"]] == [
+        ("other", "Z1 placed in A1 (H2B-GCaMP7f+ PMCA2-mCherry-zf−)")]
+
+    client.post(f"/dishes/{plate}/plate/add-fish", data={
+        "source_dish_id": source, "result": "positive", "construct_results": [f"{mcherry}=positive"]})
+    z2 = _by_label(client, plate)["Z2"]["fish_id"]
+    assert {r for _, r, _ in _calls(client, z2)} == {"positive"}  # agreeing results book as positive
+    missing = client.post(f"/dishes/{plate}/plate/add-fish", data={
+        "source_dish_id": source, "construct_results": [f"{gcamp}=negative"]})
+    assert "Give a result for PMCA2-mCherry-zf too." in missing.text

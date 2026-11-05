@@ -5,16 +5,18 @@
     PyRAT responsible: {{ c.owner or "unknown" }}{% if c.set_up %} · set up {{ c.set_up }}{% endif %}<br>
     {% if report.screeners %}Screened by {{ report.screeners | join(", ") }}{% else %}Screener not recorded{% endif %}
 </p>
+{% set ks = report.constructs %}
 <p style="margin:0 0 8px">
-    {{ report.totals.screened }} fish screened: <strong>{{ report.totals.positive }} positive</strong>,
-    {{ report.totals.negative }} negative{% if report.totals.pigmented %}, {{ report.totals.pigmented }} pigmented{% endif %}{% if report.totals.not_booked %}, {{ report.totals.not_booked }} screened without a recorded result{% endif %}.
+    {{ report.totals.screened }} fish screened{% if ks | length == 1 %}: <strong>{{ report.construct_totals[ks[0].construct].positive }} positive</strong>,
+    {{ report.construct_totals[ks[0].construct].negative }} negative{% else %}.{% for k in ks %}<br>{{ k.short }}: <strong>{{ report.construct_totals[k.construct].positive }} positive</strong>, {{ report.construct_totals[k.construct].negative }} negative{% endfor %}<br>{% endif %}{% if report.totals.pigmented %}, {{ report.totals.pigmented }} pigmented{% endif %}{% if report.totals.not_booked %}{% if ks | length == 1 %}, {% endif %}{{ report.totals.not_booked }} screened without a recorded result{% endif %}{% if ks | length == 1 %}.{% endif %}
 </p>
 <table style="border-collapse:collapse; font-size:13px">
     <thead>
         <tr>
-            {% for h in ["Dish", "Screened", "+", "−", "No result", "Went to", "Finalized"] %}
-            <th style="text-align:left; padding:3px 8px; border-bottom:1px solid #bbb">{{ h }}</th>
-            {% endfor %}
+            {% set th = "text-align:left; padding:3px 8px; border-bottom:1px solid #bbb" %}
+            <th style="{{ th }}">Dish</th><th style="{{ th }}">Screened</th>
+            {% for k in ks %}<th style="{{ th }}">{% if ks | length > 1 %}{{ k.short }} {% endif %}+</th><th style="{{ th }}">{% if ks | length > 1 %}{{ k.short }} {% endif %}−</th>{% endfor %}
+            <th style="{{ th }}">No result</th><th style="{{ th }}">Went to</th><th style="{{ th }}">Finalized</th>
         </tr>
     </thead>
     <tbody>
@@ -23,13 +25,15 @@
             <td style="padding:3px 8px">{{ d.dish_id }}</td>
             {% if d.steps %}
             <td style="padding:3px 8px">{{ d.screened }}</td>
-            <td style="padding:3px 8px">{{ d.counts.positive if d.counts.positive is not none else "?" }}</td>
-            <td style="padding:3px 8px">{{ d.counts.negative if d.counts.negative is not none else "?" }}</td>
+            {% for k in ks %}{% set pc = (d.per_construct or {}).get(k.construct) %}
+            <td style="padding:3px 8px">{{ pc.positive if pc else ("?" if d.per_construct is none else "—") }}</td>
+            <td style="padding:3px 8px">{{ pc.negative if pc else ("?" if d.per_construct is none else "—") }}</td>
+            {% endfor %}
             <td style="padding:3px 8px">{{ d.not_booked or "" }}</td>
             <td style="padding:3px 8px">{% for dest, n in d.destinations %}{{ n }} → {{ dest }}{% if not loop.last %}, {% endif %}{% endfor %}{% if d.discarded %}{% if d.destinations %}, {% endif %}{{ d.discarded }} discarded{% endif %}</td>
             <td style="padding:3px 8px">{{ "yes (" ~ d.final_count ~ ")" if d.finalized else "no" }}</td>
             {% else %}
-            <td style="padding:3px 8px; color:#777" colspan="6">not screened</td>
+            <td style="padding:3px 8px; color:#777" colspan="{{ 4 + 2 * (ks | length) }}">not screened</td>
             {% endif %}
         </tr>
         {% endfor %}

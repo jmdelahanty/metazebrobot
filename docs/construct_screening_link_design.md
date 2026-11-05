@@ -277,6 +277,14 @@ the pinned consumer slice yet. As built:
   result, the fish is booked into the source's latest screening step (as an
   allocation to the plate) and the result is recorded on the fish. Without a
   result it moves by a one-fish transfer. Its origin is the source dish.
+- **Results per construct when placing** (2026-11-04): when the source dish
+  has more than one construct, the plate form offers one result per
+  construct (`construct_results`, "<construct>=positive|negative"; a
+  construct left blank takes "This fish's result"). Each construct gets its
+  own observation. The fish is booked into the source step's positive or
+  negative bucket when all constructs agree, otherwise into `other`, noted
+  with the combination ("Z1 placed in A1 (H2B-GCaMP7f+ PMCA2-mCherry-zf−)").
+  Dish-level combination buckets for bulk screening are not designed yet.
 - **Correcting a misclicked result** (2026-11-04): a fish placed with a
   result shows "Wrong result? → Mark negative/positive" in its well
   (`POST /dishes/{plate}/plate/fish/{fish_id}/result`). It records the

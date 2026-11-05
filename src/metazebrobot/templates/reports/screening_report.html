@@ -77,9 +77,14 @@
 {% if report.parents.description %}<p><small>Request: {{ report.parents.description }}</small></p>{% endif %}
 
 <h2>Dishes</h2>
+{# One +/− pair per construct on the cross. A step's positive/negative group counts for every #}
+{# construct it screened; plates count each fish's call per construct. #}
+{% set ks = report.constructs %}
+{% set ncols = 1 + 2 * (ks | length) + 4 %}
 <div class="scroll"><table class="data">
     <thead><tr><th>Dish</th><th>From</th><th>Container</th><th>Owner</th><th>Fish</th><th>Screened</th>
-        <th>+</th><th>−</th><th>Pig</th><th>No result</th><th>Screened by</th><th>Finalized</th></tr></thead>
+        {% for k in ks %}<th>{{ k.short }} +</th><th>{{ k.short }} −</th>{% endfor %}
+        <th>Pig</th><th>No result</th><th>Screened by</th><th>Finalized</th></tr></thead>
     <tbody>
     {% for d in report.dishes %}
     <tr>
@@ -90,24 +95,31 @@
         <td>{{ d.current if d.current is not none else "" }}</td>
         {% if d.steps %}
         <td>{{ d.screened }}</td>
-        {% for label in ["positive", "negative", "pigmented"] %}<td>{{ d.counts[label] if d.counts[label] is not none else "?" }}</td>{% endfor %}
+        {% for k in ks %}{% set pc = (d.per_construct or {}).get(k.construct) %}
+        {% if d.per_construct is none %}<td>?</td><td>?</td>{% elif pc %}<td>{{ pc.positive }}</td><td>{{ pc.negative }}</td>{% else %}<td class="muted">—</td><td class="muted">—</td>{% endif %}
+        {% endfor %}
+        <td>{{ d.counts.pigmented if d.counts.pigmented is not none else "?" }}</td>
         <td>{{ d.not_booked or "" }}</td>
         <td>{{ d.screened_by | join(", ") or "—" }}{% if d.dates %}<br><span class="muted">{% for t in d.dates %}{{ t[:4] }}-{{ t[4:6] }}-{{ t[6:] }}{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}</td>
         <td>{{ "yes (" ~ d.final_count ~ ")" if d.finalized else "no" }}</td>
         {% elif d.derived_from and d.held %}
         <td class="muted">—</td>
-        {% for label in ["positive", "negative", "pigmented"] %}<td>{{ d.held.counts[label] }}</td>{% endfor %}
+        {% for k in ks %}{% set pc = (d.held.per_construct or {}).get(k.construct) %}
+        {% if pc %}<td>{{ pc.positive }}</td><td>{{ pc.negative }}</td>{% else %}<td class="muted">—</td><td class="muted">—</td>{% endif %}
+        {% endfor %}
+        <td>{{ d.held.counts.pigmented }}</td>
         <td>{{ d.held.counts.no_result or "" }}</td>
         <td class="muted" colspan="2">{% if d.held.origins | length > 1 %}from {% for o, n in d.held.origins %}{{ o }} ({{ n }}){% if not loop.last %}, {% endif %}{% endfor %}{% else %}from {{ d.held.origins[0][0] if d.held.origins else d.derived_from }}'s screen{% endif %}; {{ d.held.source }}</td>
         {% elif d.derived_from %}
-        <td class="muted" colspan="7">fish from {{ d.derived_from }}'s screen</td>
+        <td class="muted" colspan="{{ ncols }}">fish from {{ d.derived_from }}'s screen</td>
         {% else %}
-        <td class="muted" colspan="7">not screened</td>
+        <td class="muted" colspan="{{ ncols }}">not screened</td>
         {% endif %}
     </tr>
     {% endfor %}
     </tbody>
 </table></div>
+<p class="meta">— : not screened for that construct.</p>
 
 {% for p in report.plates %}
 <h2>Plate {{ p.dish_id }}</h2>

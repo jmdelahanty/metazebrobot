@@ -14,4 +14,22 @@
     </select>
 </label>
 <small>Used only when you choose a result. A new step's screened count grows by one with each fish you place.</small>
+{% if source_constructs and source_constructs | length > 1 %}
+{% set kept_results = (chosen or {}).get("construct_results") or {} %}
+<fieldset>
+    <legend><small>Result per construct, for a fish that's positive for one and negative for another</small></legend>
+    <div class="grid">
+    {% for c in source_constructs %}
+    <label>{{ c.short }}
+        <select name="construct_results">
+            <option value="">as "This fish's result"</option>
+            {% for outcome in ["positive", "negative"] %}
+            <option value="{{ c.key }}={{ outcome }}"{% if kept_results.get(c.key) == outcome %} selected{% endif %}>{{ outcome }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    {% endfor %}
+    </div>
+</fieldset>
+{% endif %}
 {% endif %}
