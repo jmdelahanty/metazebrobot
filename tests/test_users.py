@@ -4,8 +4,22 @@ import importlib.util
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from metazebrobot.data import users
 from metazebrobot.data.data_manager import data_manager
+
+
+@pytest.fixture(autouse=True)
+def _no_users_left_behind():
+    """The test database is shared: users seeded here would change other tests' pages."""
+    yield
+    try:
+        with data_manager.get_connection() as conn:
+            conn.execute("DELETE FROM users")
+            conn.commit()
+    except Exception:  # this test never opened the shared database
+        pass
 
 _spec = importlib.util.spec_from_file_location(
     "sync_users", Path(__file__).resolve().parents[1] / "scripts" / "sync_users.py")

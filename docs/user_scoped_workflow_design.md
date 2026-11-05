@@ -120,8 +120,16 @@ people. Agreed design, built in this order:
    another member's crosses but raised and used by someone else, and their
    owner is the person who used the fish. The free-text `responsible` stays
    as the legacy display value.
-   - Backfill: dishes whose `responsible` text names the cross owner get the
-     cross owner; the rest are listed for review, not changed automatically.
+   - Backfill: a dish gets the user its `responsible` text names (either
+     name order), since the text records who the dish was for; otherwise the
+     cross owner; otherwise it is listed. On 2026-11-04 every dish matched by
+     name, including the 16 on another member's crosses.
+   - Built 2026-11-04: `responsible_user` lives in the dish's `data` JSON;
+     the new-dish form picks the owner from the cross owner and the picker
+     users (default: the cross owner), and `responsible` becomes the owner's
+     PyRAT full name. Derived dishes and plates inherit the owner. Without a
+     users table the free-text field remains.
+     `scripts/backfill_dish_owner.py` does the backfill.
 4. **Screening report** ([`screening_report_design.md`](screening_report_design.md))
    uses all three: "Cross 19498 (PyRAT responsible: <First Last>), screened by
    <First Last> on 11-04".

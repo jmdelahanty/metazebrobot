@@ -139,7 +139,8 @@ class FishDishController:
         room: str = "2E.282",
         container_type: str = "petri_dish",
         vol_water_total: Optional[int] = None,
-        notes: Optional[str] = None
+        notes: Optional[str] = None,
+        responsible_user: Optional[str] = None,
         # Lineage fields default to primary here
     ) -> Tuple[bool, str, Optional[FishDish]]:
         """
@@ -152,6 +153,7 @@ class FishDishController:
                 dish_number=dish_number,
                 genotype=genotype,
                 responsible=responsible,
+                responsible_user=responsible_user,
                 source_group_id=source_group_id,
                 cross_setup_date=cross_setup_date,
                 dof_source=dof_source,
@@ -295,6 +297,7 @@ class FishDishController:
                 cross_id=parent_dish.cross_id,
                 genotype=parent_dish.genotype,
                 responsible=parent_dish.responsible,
+                responsible_user=parent_dish.responsible_user,
                 cross_setup_date=parent_dish.cross_setup_date,
                 dof_source=parent_dish.dof_source,
                 dof=parent_dish.dof,
@@ -937,6 +940,7 @@ class FishDishController:
                 cross_id=source_dish.cross_id,
                 genotype=source_dish.genotype,
                 responsible=source_dish.responsible,
+                responsible_user=source_dish.responsible_user,
                 source_group_id=source_dish.source_group_id,
                 cross_setup_date=source_dish.cross_setup_date,
                 dof_source=source_dish.dof_source,

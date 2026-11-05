@@ -3644,6 +3644,28 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     # Dish creation (web UI)
     # ------------------------------------------------------------------
 
+    def _owner_choices(cross_id: Optional[str]) -> Dict[str, Any]:
+        """Who can own a new dish: the cross's PyRAT responsible (the default) and picker users.
+
+        Empty choices (no users table yet, or an unknown owner) keep the
+        free-text Responsible field.
+        """
+        try:
+            with _open_readonly_connection(_require_db_path(), app.state.busy_timeout_ms) as conn:
+                if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'users'").fetchone():
+                    return {"owner_choices": [], "owner_default": None, "cross_owner": None}
+                choices = users.app_users(conn)
+                row = conn.execute("SELECT json_extract(data, '$.responsible_id') AS rid FROM crosses "
+                                   "WHERE cross_id = ?", (cross_id,)).fetchone() if cross_id else None
+                owner = users.by_pyrat_id(conn, row["rid"]) if row and row["rid"] is not None else None
+        except (sqlite3.Error, HTTPException):
+            return {"owner_choices": [], "owner_default": None, "cross_owner": None}
+        if owner and owner["username"] not in {u["username"] for u in choices}:
+            choices = [owner] + choices
+        return {"owner_choices": [{"username": u["username"], "name": users.display_name(u)} for u in choices],
+                "owner_default": owner["username"] if owner else None,
+                "cross_owner": owner["username"] if owner else None}
+
     @app.get("/dishes/new", response_class=HTMLResponse)
     def new_dish_form(request: Request, cross_id: Optional[str] = Query(default=None)):
         """Dish creation form with optional PyRAT cross auto-fill."""
@@ -3688,6 +3710,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "parent_provenance": prefill["parent_provenance"],
             "error": prefill["error"],
             "include_dof_oob": False,
+            **_owner_choices(cross_id),
         })
 
     @app.get("/dishes/new/cross-info", response_class=HTMLResponse)
@@ -3714,6 +3737,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "parent_provenance": prefill["parent_provenance"],
             "error": prefill["error"],
             "include_dof_oob": True,
+            **_owner_choices(cross_id),
         })
 
     @app.post("/dishes/new/refresh-crosses", response_class=HTMLResponse)
@@ -3785,7 +3809,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         cross_id: str = Form(...),
         dish_number: int = Form(...),
         genotype: str = Form(...),
-        responsible: str = Form(...),
+        responsible: Optional[str] = Form(default=None),
+        responsible_user: Optional[str] = Form(default=None),
         cross_setup_date: Optional[str] = Form(default=None),
         dof: str = Form(...),
         dof_source: Optional[str] = Form(default=None),
@@ -3802,8 +3827,18 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         notes: Optional[str] = Form(default=None),
         source_group_id: Optional[str] = Form(default=None),
     ):
-        """Create a new dish from the web form."""
-        _require_db_path()
+        """Create a new dish from the web form.
+
+        The owner is ``responsible_user`` (a users-table username); its PyRAT
+        full name becomes the ``responsible`` text. Without a users table the
+        free-text ``responsible`` is used as before.
+        """
+        db_path_for_owner = _require_db_path()
+        owner = None
+        if responsible_user:
+            with _open_readonly_connection(db_path_for_owner, app.state.busy_timeout_ms) as conn:
+                owner = users.by_username(conn, responsible_user)
+        responsible = (owner["fullname"] or users.display_name(owner)) if owner else (responsible or "").strip()
 
         # Convert date format: YYYY-MM-DD → YYYYMMDD
         dof_formatted = dof.replace("-", "")
@@ -3831,6 +3866,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             vol_water_total=vol_water_total,
             notes=notes or None,
             source_group_id=_normalize_source_group(cross_id, source_group_id),
+            responsible_user=owner["username"] if owner else None,
         )
 
         if success:
@@ -3874,6 +3910,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             "parents": parents,
             "flash_message": message,
             "flash_level": "error",
+            **{**_owner_choices(cross_id), **({"owner_default": owner["username"]} if owner else {})},
         })
 
     @app.get("/dishes/", response_class=HTMLResponse)

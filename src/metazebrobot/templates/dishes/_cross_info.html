@@ -15,7 +15,17 @@
     </label>
     <label>
         Responsible
+        {% if owner_choices %}
+        <select name="responsible_user" required>
+            {% if not owner_default %}<option value="" selected disabled>Choose the dish's owner</option>{% endif %}
+            {% for u in owner_choices %}
+            <option value="{{ u.username }}"{% if u.username == owner_default %} selected{% endif %}>{{ u.name }}{% if u.username == cross_owner %} (cross owner){% endif %}</option>
+            {% endfor %}
+        </select>
+        <small>Defaults to the cross's PyRAT responsible; choose who will use the fish if that's someone else.</small>
+        {% else %}
         <input type="text" name="responsible" value="{{ responsible or '' }}" required>
+        {% endif %}
     </label>
 </div>
 <label>

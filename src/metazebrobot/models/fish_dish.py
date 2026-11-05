@@ -424,7 +424,11 @@ class FishDish(BaseModel):
     genotype: str
     sex: Literal["unknown", "M", "F"] = "unknown"
     species: str = "Danio rerio"
-    responsible: str # Person managing dish day-to-day
+    responsible: str # Person managing dish day-to-day (display text; PyRAT "Last First")
+    responsible_user: Optional[str] = Field(
+        default=None,
+        description="Username of the dish's owner (users table); defaults to the cross's PyRAT responsible",
+    )
     # --- DESCRIPTION CLARIFIED ---
     fish_count: int = Field(..., ge=0, description="Initial fish count when dish record created (can be an estimate)")
     incoming_fish_count: int = Field(
@@ -536,6 +540,7 @@ class FishDish(BaseModel):
         dish_population_type: DishPopulationType = "primary",
         source_screening_datetime: Optional[str] = None,
         source_screening_bucket: Optional[str] = None,
+        responsible_user: Optional[str] = None,
     ) -> 'FishDish':
         """
         Create a new fish dish with default values. Handles primary and derived dishes.
@@ -570,6 +575,7 @@ class FishDish(BaseModel):
             sex=sex,
             species=species,
             responsible=responsible,
+            responsible_user=responsible_user,
             fish_count=fish_count, # Use provided count
             current_fish_count=fish_count,
             parent_dish_id=parent_dish_id, # Added
