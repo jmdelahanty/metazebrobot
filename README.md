@@ -84,6 +84,23 @@ For a persistent install, `deploy/metazebrobot-api.service` is an example
 systemd unit (see [`API_SERVICE_GUIDE.md`](API_SERVICE_GUIDE.md), which also
 covers PyRAT credentials for systemd and an optional nginx front end).
 
+### Demo copy
+
+To show real records without adding to them, serve a snapshot of the database
+read-only on another port:
+
+```bash
+sqlite3 "file:/path/to/zebrobot.db?mode=ro" ".backup /path/to/demo/zebrobot_demo.db"
+METAZEBROBOT_DEMO=1 METAZEBROBOT_MAIL_MODE=disabled \
+  pixi run python -m metazebrobot.api_server --db-path /path/to/demo/zebrobot_demo.db --port 8001
+```
+
+With `METAZEBROBOT_DEMO=1` every page and saved report carries a "DEMO COPY"
+banner, and every write (POST, PATCH, PUT, DELETE) is refused with 403
+`demo_read_only`, except choosing who is viewing. Rigs and other services keep
+talking to the real server's port. Leave PyRAT credentials out of a demo's
+environment, and delete the copy afterwards.
+
 ### Desktop app
 
 ```bash
