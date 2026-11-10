@@ -67,6 +67,11 @@
     </style>
 </head>
 <body>
+    {% if demo_mode %}
+    <div role="status" style="background:#b45309; color:#fff; text-align:center; padding:6px 12px; font-weight:600">
+        DEMO COPY: a snapshot of the lab record, read-only. Nothing here is recorded.
+    </div>
+    {% endif %}
     <nav class="container-fluid">
         <ul>
             <li><a href="/"><strong>MetaZebrobot</strong></a></li>

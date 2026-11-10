@@ -56,6 +56,7 @@
 </div>
 {% endif %}
 
+{% if demo_mode %}<p style="background:#b45309; color:#fff; padding:6px 10px; font-weight:600">DEMO COPY: made from a snapshot of the lab record, not the lab record itself.</p>{% endif %}
 <h1>Cross {{ c.cross_id }} screening report</h1>
 <p class="meta">Generated at {{ report.generated_at }} · MetaZebrobot {{ report.service_commit or "unknown commit" }}{% if report.generated_by %} · by {{ report.generated_by }}{% endif %}</p>
 

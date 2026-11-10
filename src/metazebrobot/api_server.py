@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
@@ -2598,6 +2598,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     app.state.started_at_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     app.state.service_commit, app.state.service_commit_dirty = _git_commit()
     app.state.consumer_schema_sha256 = None  # computed on first /version call
+    # A demo copy (METAZEBROBOT_DEMO=1) serves a snapshot of the database read-only,
+    # so a demo never writes records, sends mail or answers a rig as the lab record.
+    app.state.demo = (os.environ.get("METAZEBROBOT_DEMO") or "").strip().lower() in (
+        "1", "true", "yes", "on")
 
     # Jinja2 templates & static files
     templates = Jinja2Templates(directory=str(_PACKAGE_DIR / "templates"))
@@ -3260,6 +3264,19 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             return await call_next(request)
         finally:
             current_actor.reset(actor_token)
+
+    @app.middleware("http")
+    async def demo_read_only(request: Request, call_next):
+        """In a demo copy, refuse every write except choosing who is viewing."""
+        if (app.state.demo and request.method not in ("GET", "HEAD", "OPTIONS")
+                and request.url.path != "/set-user"):
+            return JSONResponse(status_code=403, content={
+                "error": "demo_read_only",
+                "detail": "This is a demo copy of MetaZebrobot; it records nothing.",
+            })
+        return await call_next(request)
+
+    templates.env.globals["demo_mode"] = app.state.demo
 
     @app.post("/set-user")
     def set_user(request: Request, username: str = Form(...)):
