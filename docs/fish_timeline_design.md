@@ -232,7 +232,7 @@ if an end with different values is already recorded. `404 usage_link_not_found`.
 
 ## Correcting the fish a recording names (design, 2026-11-09)
 
-Status: proposal for review. Nothing below is built.
+Status: proposal; decisions of 2026-11-09 below. Nothing is built.
 
 ### The problem
 
@@ -250,8 +250,8 @@ Usage links with one fish in two arenas at overlapping times, as of
 |---|---|---|---|
 | `2026_11_06_15_48_57` | arena_2, arena_3 | `5a50397a` (19498_4 Z5, C1) | arena_3 was Z6 (`a21ac2c1`, C2) |
 | `2026_11_06_17_16_17` | arena_3, arena_4 | `f3fce668` (19498_4 Z9, A4) | arena_3 was Z10 (`efb06650`, B3) |
-| `2026_10_17_15_57_07` | arena_1, arena_3 | `784c1937` (19329_1_pos1, B1) | not yet checked |
-| `2026_10_16_17_28_25` | arena_3, arena_4 | `5870527e` (19329_3, no well) | not yet checked |
+| `2026_10_17_15_57_07` | arena_1, arena_3 | `784c1937` (19329_1_pos1, B1) | misclick; which fish were there can't be known |
+| `2026_10_16_17_28_25` | arena_3, arena_4 | `5870527e` (19329_3, no well) | misclick; which fish were there can't be known |
 
 In both checked cases one misclick copied the neighbouring arena's fish; the
 other arenas were right. A wrong pick doesn't have to duplicate a fish,
@@ -292,8 +292,15 @@ Rules:
   `fish_in_another_arena`) if the corrected fish is the effective fish of
   another link whose time overlaps. Correct that arena first, so the
   recording never ends up claiming one fish twice.
-- A dish-level link (no `fish_id`) can be corrected to name a fish. A
-  correction to "no fish known" is an open question.
+- A dish-level link (no `fish_id`) can be corrected to name a fish.
+- **"Fish unknown"** (decided 2026-11-09): a correction may set `fish_id`
+  null when nobody can tell which fish was in the arena. The link then reads
+  as a dish-level row ("possibly used, fish not recorded") for every fish in
+  the dish, `fish_revision` and `unit_id` are null, and the one-fish-one-arena
+  check doesn't apply.
+- When a duplicate can't be resolved, neither arena can be trusted: both
+  links get "fish unknown", because nothing says which arena held the sealed
+  fish.
 
 ### What changes for readers
 
@@ -329,7 +336,7 @@ corrections.
 
 ### Across systems (needs an agent-contracts amendment)
 
-- **One owner for the correction.** Proposed: MetaZebrobot owns it, because
+- **One owner for the correction** (decided 2026-11-09): MetaZebrobot owns it, because
   it owns fish identity, and people already correct fish there. Palette's
   intake already replays the sealed usage link; its 200 carries the
   `correction`, so Palette records "corrected per MetaZebrobot correction
@@ -348,15 +355,16 @@ corrections.
    overlap flag, needs-review list, "Wrong fish?" action.
 2. agent-contracts amendment: `UsageLinkResponse.correction`; Palette and
    Citrus review; merges on the operator's word; re-pin.
-3. Apply the two checked corrections (after a database backup); check the
-   two October cases.
+3. Apply the data (after a database backup): the two 2026-11-06
+   corrections (arena_3 → Z6 and arena_3 → Z10), and "fish unknown" for
+   both arenas of each October duplicate (misclicks; the fish can't be
+   known).
 4. Palette: read `correction` at intake and on reconcile.
 5. Citrus: the one-fish-one-arena start check.
 
-### Open questions
+### Decisions (2026-11-09)
 
-1. MetaZebrobot as the single owner of corrections, with Palette reading
-   them (recommended), or a correction in each system?
-2. Should a correction be able to say "fish unknown" (back to dish level)
-   when the operator can't tell which fish it was?
-3. The two October cases: are they misclicks too, and who was really there?
+1. MetaZebrobot is the single owner of corrections; Palette reads them.
+2. A correction can say "fish unknown".
+3. The October cases were misclicks, and which fish were in those arenas
+   can't be known: both arenas of each become "fish unknown".
