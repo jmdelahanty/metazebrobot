@@ -12,6 +12,7 @@ verified_against: c6a88c1
 Status (2026-10-15): steps 1–3 built (`data/fish_timeline.py`; `GET /fish/{fish_id}/timeline`
 and the page `/fish/{fish_id}/view`, linked from the plate map, fish tables and
 cross view). Step 3 is `data/usage_links.py` with the endpoints below. Step 4 (deaths) is built: [fish deaths and endings](fish_deaths_design.md).
+Proposed (2026-11-09): [correcting the fish a recording names](#correcting-the-fish-a-recording-names-design-2026-11-09).
 
 Goal (Jeremy): follow where an individual fish went, inspectably. For example:
 minted during screening or at an experiment, started in parent A, moved to a
@@ -228,3 +229,142 @@ if an end with different values is already recorded. `404 usage_link_not_found`.
   comparison, so a replay of the sealed request stays a 200.
 - **Stable request bytes:** Citrus seals the exact start POST (method, path,
   body) in snapshot v4.x, so the request carries no server-filled fields.
+
+## Correcting the fish a recording names (design, 2026-11-09)
+
+Status: proposal; decisions of 2026-11-09 below. Nothing is built.
+
+### The problem
+
+The Citrus picker can seal the wrong fish for an arena. Nothing in any
+system can correct that afterwards: the H5 is sealed, MetaZebrobot's usage
+link is idempotent on its creation body, and Palette's planned manual link
+(palette#402, design only) covers unconfirmed fish, not a `registered` fish
+that is the wrong one. Palette's intake has no cross-arena check either, so
+these recordings are admitted silently.
+
+Usage links with one fish in two arenas at overlapping times, as of
+2026-11-09:
+
+| Recording | Arenas | Sealed fish | Actually there (operator's account) |
+|---|---|---|---|
+| `2026_11_06_15_48_57` | arena_2, arena_3 | `5a50397a` (19498_4 Z5, C1) | arena_3 was Z6 (`a21ac2c1`, C2) |
+| `2026_11_06_17_16_17` | arena_3, arena_4 | `f3fce668` (19498_4 Z9, A4) | arena_3 was Z10 (`efb06650`, B3) |
+| `2026_10_17_15_57_07` | arena_1, arena_3 | `784c1937` (19329_1_pos1, B1) | misclick; which fish were there can't be known |
+| `2026_10_16_17_28_25` | arena_3, arena_4 | `5870527e` (19329_3, no well) | misclick; which fish were there can't be known |
+
+In both checked cases one misclick copied the neighbouring arena's fish; the
+other arenas were right. A wrong pick doesn't have to duplicate a fish,
+though: an arena can name a real, distinct, wrong fish, which only a person
+can catch.
+
+### Principles
+
+- **The sealed record is never edited.** The H5, the snapshot and the usage
+  link's creation values stay as recorded. A replay of the sealed request
+  keeps getting 200.
+- **A correction is its own record** that outranks the sealed value, and
+  says who attested it, on what evidence, and when.
+- **Corrections are append-only.** The newest correction for an arena is the
+  effective one. Undoing a correction is a new correction back to the sealed
+  fish, with its own evidence.
+- **Readers see both.** Every view that shows the effective fish can show
+  that it was corrected and what was sealed.
+
+### MetaZebrobot: `usage_link_corrections`
+
+| Column | Meaning |
+|---|---|
+| `id` | Primary key |
+| `recording_ref` | The corrected link (references `usage_links`) |
+| `fish_id` | The fish that was actually in the arena |
+| `dish_id` | That fish's dish at `started_at`; usually the link's dish |
+| `fish_revision`, `unit_id` | Filled by MetaZebrobot from the fish's revisions at the link's `started_at`, not typed |
+| `attested_by` | The username who made the correction (the viewer picker for the web; required) |
+| `evidence` | Free text, required (e.g. "bench notes: arena 3 held Z6") |
+| `corrected_at` | Server UTC |
+
+Rules:
+
+- The corrected fish must exist, and differ from the link's current
+  effective fish.
+- **One fish, one arena:** a correction is refused (409
+  `fish_in_another_arena`) if the corrected fish is the effective fish of
+  another link whose time overlaps. Correct that arena first, so the
+  recording never ends up claiming one fish twice.
+- A dish-level link (no `fish_id`) can be corrected to name a fish.
+- **"Fish unknown"** (decided 2026-11-09): a correction may set `fish_id`
+  null when nobody can tell which fish was in the arena. The link then reads
+  as a dish-level row ("possibly used, fish not recorded") for every fish in
+  the dish, `fish_revision` and `unit_id` are null, and the one-fish-one-arena
+  check doesn't apply.
+- When a duplicate can't be resolved, neither arena can be trusted: both
+  links get "fish unknown", because nothing says which arena held the sealed
+  fish.
+
+### What changes for readers
+
+- `UsageLinkResponse` gains an optional `correction`: the effective
+  correction (fields above plus `id`), or null. The top-level fields stay as
+  sealed, so the idempotency comparison and anything reading them unchanged
+  keep working. This is additive; `api_schema_version` stays 2.
+- `GET /usage-links?fish_id=` matches the **effective** fish. A fish that was
+  sealed but corrected away gets a timeline entry instead: "recording R,
+  arena 3 named this fish; corrected to Z6 by <user> on <date>: <evidence>".
+- The fish timeline and "out of well" entries use the effective fish and
+  well, so Z6's timeline shows it out of C2, and Z5's shows it out of C1 for
+  arena_2 only.
+- Overlap flag: a link whose fish has another overlapping link is marked
+  "one fish in two arenas" on the timeline and on a needs-review list, until
+  a correction resolves it. New links are still accepted as sent (recording
+  never waits on MetaZebrobot); the flag is only shown.
+
+### Endpoints (proposed)
+
+- `POST /usage-links/{recording_ref}/corrections` with
+  `{fish_id, dish_id?, evidence}`. Returns 201 and the link with its new
+  `correction`. Errors: 404 `usage_link_not_found` / `fish_not_found`, 409
+  `fish_in_another_arena` / `correction_unchanged`, 422
+  `invalid_correction`.
+- `GET /usage-links/{recording_ref}/corrections`: every correction, oldest
+  first.
+- Web: a "Wrong fish?" action on the fish timeline's recording entry and on
+  the needs-review list, like the plate map's "Wrong result?".
+
+Who may write: the web UI only at first. Citrus and Palette don't send
+corrections.
+
+### Across systems (needs an agent-contracts amendment)
+
+- **One owner for the correction** (decided 2026-11-09): MetaZebrobot owns it, because
+  it owns fish identity, and people already correct fish there. Palette's
+  intake already replays the sealed usage link; its 200 carries the
+  `correction`, so Palette records "corrected per MetaZebrobot correction
+  <id>" in its registry above the sealed value, keeping the sealed value as
+  recorded. Palette needs `correction` in its consumer pin. The alternative,
+  Palette owning a separate correction (keyed on session id + file sha256),
+  gives two attestations that can disagree.
+- **Citrus:** refuse a Start that seals one fish in two arenas, and show each
+  arena's Z label and well in the start summary. That prevents the checked
+  cases; only a person catches a distinct wrong fish.
+- Orange: no change. The receipt and declaration stay as sealed.
+
+### Build order
+
+1. MetaZebrobot: table, endpoints, `correction` on responses, timeline and
+   overlap flag, needs-review list, "Wrong fish?" action.
+2. agent-contracts amendment: `UsageLinkResponse.correction`; Palette and
+   Citrus review; merges on the operator's word; re-pin.
+3. Apply the data (after a database backup): the two 2026-11-06
+   corrections (arena_3 → Z6 and arena_3 → Z10), and "fish unknown" for
+   both arenas of each October duplicate (misclicks; the fish can't be
+   known).
+4. Palette: read `correction` at intake and on reconcile.
+5. Citrus: the one-fish-one-arena start check.
+
+### Decisions (2026-11-09)
+
+1. MetaZebrobot is the single owner of corrections; Palette reads them.
+2. A correction can say "fish unknown".
+3. The October cases were misclicks, and which fish were in those arenas
+   can't be known: both arenas of each become "fish unknown".
