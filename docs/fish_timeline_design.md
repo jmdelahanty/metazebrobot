@@ -406,14 +406,15 @@ and Palette):
 | `recording_ref` | The link (references `usage_links`) |
 | `fish_id` | A member's fish UUID (its Z label is only a display name) |
 | `fish_revision` | The revision Citrus sealed for that member |
-| `unit_id` | The well it was picked from, or null for a larva from a bulk dish |
 
 The primary key is (`recording_ref`, `fish_id`).
 
 ### Request
 
-`POST /usage-links` gains an optional `members: [{fish_id, fish_revision, unit_id}]`.
-The member fields mirror the individual link's fields, as Citrus seals them.
+`POST /usage-links` gains an optional `members: [{fish_id, fish_revision}]`.
+These are the member fields the snapshot seals (agent-contracts #125). There
+is no `unit_id`: the snapshot doesn't seal a well per member, and a larva
+minted at loading has none.
 
 - `members` is allowed only when `fish_id` is null. An individual link stays
   as it is today.
@@ -475,13 +476,20 @@ This extends the correction design above.
 ### Across systems
 
 - **agent-contracts:** add `members` to the snapshot's sealed
-  `usage_link_request`, which is a closed body today. Also add `members` and
+  `usage_link_request`, which is a closed body today. Palette's check that
+  the link matches the sealed fish (R6) extends to members. Also add `members` and
   the per-member `correction` to `UsageLinkResponse`. Palette prefers one
   request carrying the list.
 - **Citrus:** send `members` once its pin includes them. Branch
   `agent/citrus/group-members` already fills the H5 members.
-- **Palette:** read members from its usage-link replay. Its registry records
-  members of group arenas instead of re-deriving them from the dish.
+- **Palette** (intake-workflow, 2026-11-15, from Palette `f090d503`): today a
+  group arena writes no `recording_subjects` row, so "was fish X recorded?"
+  misses group members. With members it writes one `recording_subjects` row
+  per member, keyed (`recording_id`, fish id), marked as a group member. The
+  existing query then covers members unchanged. Palette's correction design
+  (unmerged) is per arena and has no "fish unknown". It needs a member key
+  and an unknown outcome (a null subject in its effective view) to match
+  this design.
 - **orchard:** the run plan's checker reads `members` for "already used".
 
 ### Build order
