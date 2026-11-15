@@ -1744,6 +1744,46 @@
         "title": "UsageLinkListResponse",
         "type": "object"
       },
+      "UsageLinkMemberResponse": {
+        "description": "One fish of a group arena, as sealed; ``flag`` says why it needs review.",
+        "properties": {
+          "fish_id": {
+            "title": "Fish Id",
+            "type": "string"
+          },
+          "fish_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fish Revision"
+          },
+          "flag": {
+            "anyOf": [
+              {
+                "enum": [
+                  "dead_at_start",
+                  "not_in_dish_at_start"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flag"
+          }
+        },
+        "required": [
+          "fish_id"
+        ],
+        "title": "UsageLinkMemberResponse",
+        "type": "object"
+      },
       "UsageLinkResponse": {
         "description": "A recording's use of a dish (and fish); docs/fish_timeline_design.md.",
         "properties": {
@@ -1814,6 +1854,14 @@
               }
             ],
             "title": "Fish Revision"
+          },
+          "members": {
+            "description": "A group arena's fish; empty for individual and plain dish-level links",
+            "items": {
+              "$ref": "#/components/schemas/UsageLinkMemberResponse"
+            },
+            "title": "Members",
+            "type": "array"
           },
           "received_at": {
             "title": "Received At",
@@ -2916,7 +2964,7 @@
     },
     "/usage-links": {
       "get": {
-        "description": "Links by fish, by dish (including dish-level rows), or open at an instant.",
+        "description": "Links by fish (its own or as a group member), by dish (including\ndish-level rows), or open at an instant.",
         "operationId": "list_usage_links_usage_links_get",
         "parameters": [
           {
@@ -3025,7 +3073,7 @@
         "summary": "List Usage Links"
       },
       "post": {
-        "description": "Record that an arena recording used a dish (and fish), at Start.\n\nIdempotent on ``recording_ref``: an identical replay is 200, a\ndifferent body 409. An existing ref is answered before any dish or\nfish check. No server-filled fields in the request. An optional\n``X-Delivered-By`` header (e.g. ``citrus``, ``palette``) is recorded on\nfirst creation as ``delivered_by`` and isn't compared on replays.",
+        "description": "Record that an arena recording used a dish (and fish), at Start.\n\nIdempotent on ``recording_ref``: an identical replay is 200, a\ndifferent body 409. An existing ref is answered before any dish or\nfish check. No server-filled fields in the request. An optional\n``X-Delivered-By`` header (e.g. ``citrus``, ``palette``) is recorded on\nfirst creation as ``delivered_by`` and isn't compared on replays.\n\nA group arena (``fish_id`` null) may name its ``members``\n(``[{fish_id, fish_revision}]``, as many as ``subject_count``), compared\nas a set on replays. Each must exist; one that was dead or in another\ndish at ``started_at`` is accepted and flagged, never refused.",
         "operationId": "create_usage_link_usage_links_post",
         "requestBody": {
           "content": {

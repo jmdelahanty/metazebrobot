@@ -189,10 +189,37 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
     try:
         own_links = [dict(r) for r in conn.execute(
             "SELECT * FROM usage_links WHERE fish_id = ? ORDER BY started_norm", (fish_id,))]
+        # A group link names its members; only links that name no fish at all
+        # leave every fish in the dish "possibly used".
+        member_links = [dict(r) for r in conn.execute(
+            """SELECT l.*, m.fish_revision AS member_revision FROM usage_links l
+               JOIN usage_link_members m ON m.recording_ref = l.recording_ref
+               WHERE m.fish_id = ? ORDER BY l.started_norm""", (fish_id,))]
         dish_links = [dict(r) for r in conn.execute(
-            "SELECT * FROM usage_links WHERE fish_id IS NULL ORDER BY started_norm")]
+            """SELECT * FROM usage_links WHERE fish_id IS NULL AND recording_ref NOT IN
+               (SELECT recording_ref FROM usage_link_members) ORDER BY started_norm""")]
     except Exception:  # usage_links absent (older database)
-        own_links, dish_links = [], []
+        own_links, member_links, dish_links = [], [], []
+    for link in member_links:
+        from .usage_links import member_flag
+        flag = member_flag(conn, fish_id, link["dish_id"], link["started_norm"])
+        end = (f", ended {_rfc3339_to_lab_iso(link['ended_at']).replace('T', ' ')} ({link['end_status']})"
+               if link["ended_at"] else ", end not recorded yet")
+        entries.append(_entry(
+            _rfc3339_to_lab_iso(link["started_at"]), "recorded",
+            f"Used in recording {link['recording_id'] or link['recording_ref']} on rig "
+            f"{link['rig_id']} arena {link['arena_id']}, one of {link['subject_count']} "
+            f"from dish {link['dish_id']}" + end
+            + {"dead_at_start": "; needs review: it had already ended before this recording",
+               "not_in_dish_at_start": f"; needs review: it wasn't in dish {link['dish_id']} "
+                                       "when this recording started"}.get(flag, ""),
+            "usage_links, usage_link_members",
+            recording_ref=link["recording_ref"], recording_id=link["recording_id"],
+            rig_id=link["rig_id"], arena_id=link["arena_id"], dish_id=link["dish_id"],
+            subject_count=link["subject_count"], fish_revision=link["member_revision"],
+            group_member=True, flag=flag,
+            ended_at=_rfc3339_to_lab_iso(link["ended_at"]), end_status=link["end_status"],
+        ))
     for link in own_links:
         where = f"rig {link['rig_id']} arena {link['arena_id']}"
         ref = link["recording_id"] or link["recording_ref"]

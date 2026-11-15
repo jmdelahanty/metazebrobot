@@ -402,6 +402,14 @@ class FishTimelineResponse(BaseModel):
     not_yet_recorded: List[str] = Field(default_factory=list)
 
 
+class UsageLinkMemberResponse(BaseModel):
+    """One fish of a group arena, as sealed; ``flag`` says why it needs review."""
+
+    fish_id: str
+    fish_revision: Optional[int] = None
+    flag: Optional[Literal["dead_at_start", "not_in_dish_at_start"]] = None
+
+
 class UsageLinkResponse(BaseModel):
     """A recording's use of a dish (and fish); docs/fish_timeline_design.md."""
 
@@ -421,6 +429,9 @@ class UsageLinkResponse(BaseModel):
     received_at: str
     updated_at: str
     delivered_by: Optional[str] = None
+    members: List[UsageLinkMemberResponse] = Field(
+        default_factory=list,
+        description="A group arena's fish; empty for individual and plain dish-level links")
 
 
 class UsageLinkListResponse(BaseModel):
@@ -6854,6 +6865,11 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         fish check. No server-filled fields in the request. An optional
         ``X-Delivered-By`` header (e.g. ``citrus``, ``palette``) is recorded on
         first creation as ``delivered_by`` and isn't compared on replays.
+
+        A group arena (``fish_id`` null) may name its ``members``
+        (``[{fish_id, fish_revision}]``, as many as ``subject_count``), compared
+        as a set on replays. Each must exist; one that was dead or in another
+        dish at ``started_at`` is accepted and flagged, never refused.
         """
         status, link = _usage_call(
             usage_links.create_link, body,
@@ -6888,7 +6904,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         active_at: Optional[str] = Query(default=None,
                                          description="RFC 3339 UTC instant; links open then"),
     ) -> Dict[str, Any]:
-        """Links by fish, by dish (including dish-level rows), or open at an instant."""
+        """Links by fish (its own or as a group member), by dish (including
+        dish-level rows), or open at an instant."""
         return {"items": _usage_call(usage_links.list_links, fish_id, dish_id, active_at)}
 
     def _refresh_dish_counts(dish_id: str) -> None:
