@@ -13,6 +13,7 @@ Status (2026-10-15): steps 1–3 built (`data/fish_timeline.py`; `GET /fish/{fis
 and the page `/fish/{fish_id}/view`, linked from the plate map, fish tables and
 cross view). Step 3 is `data/usage_links.py` with the endpoints below. Step 4 (deaths) is built: [fish deaths and endings](fish_deaths_design.md).
 Proposed (2026-11-09): [correcting the fish a recording names](#correcting-the-fish-a-recording-names-design-2026-11-09).
+Proposed (2026-11-15): [group members on usage links](#group-members-on-usage-links-design-2026-11-15).
 
 Goal (Jeremy): follow where an individual fish went, inspectably. For example:
 minted during screening or at an experiment, started in parent A, moved to a
@@ -368,3 +369,131 @@ corrections.
 2. A correction can say "fish unknown".
 3. The October cases were misclicks, and which fish were in those arenas
    can't be known: both arenas of each become "fish unknown".
+
+## Group members on usage links (design, 2026-11-15)
+
+Status: proposal for the operator's review. Nothing is built. The operator
+won't make group recordings until this is in place.
+
+### The problem
+
+A group arena (several larvae in one arena dish) gets a dish-level link:
+`dish_id`, `fish_id` null, `subject_count` N. The larvae can be minted when
+they're picked, but their fish ids reach only the Citrus H5. So "was this fish
+ever recorded?" finds nothing for a group member. And the dish-level rule
+above puts "possibly used" on every fish in the dish, although only N of them
+were.
+
+Already agreed (2026-11-14 and 2026-11-15, with experiment-spec, citrus-agent
+and Palette):
+
+- Citrus and Orange declare the **source dish** the larvae were drawn from.
+- Each larva is minted as a fish in the source dish **when it's picked**,
+  before Start. After the recording, each one is moved into a used-fish dish
+  that is terminated as euthanasia. It is never put back into an unused dish.
+- **One link per recording and arena, with a member list.** One link per fish
+  would split one arena-recording into several records, and `recording_ref`
+  and corrections are already keyed per arena.
+- A dish is never counted as used. Only its members are.
+- agent-contracts #125 (merged, `c72c496`) covers member provenance in the
+  snapshot: larvae registered in the declared dish at loading. A non-empty
+  member list has `subject_count` entries.
+
+### MetaZebrobot: `usage_link_members`
+
+| Column | Meaning |
+|---|---|
+| `recording_ref` | The link (references `usage_links`) |
+| `fish_id` | A member's fish UUID (its Z label is only a display name) |
+| `fish_revision` | The revision Citrus sealed for that member |
+| `unit_id` | The well it was picked from, or null for a larva from a bulk dish |
+
+The primary key is (`recording_ref`, `fish_id`).
+
+### Request
+
+`POST /usage-links` gains an optional `members: [{fish_id, fish_revision, unit_id}]`.
+The member fields mirror the individual link's fields, as Citrus seals them.
+
+- `members` is allowed only when `fish_id` is null. An individual link stays
+  as it is today.
+- Its length equals `subject_count`, and the `fish_id`s are distinct. Anything
+  else is 422 `invalid_usage_link` (field `members`).
+- Every member must exist, or the link is refused with 404 `fish_not_found`,
+  the same as for an individual link.
+- Members are part of the idempotent creation body, compared as a set (sorted
+  by `fish_id`). An identical replay is 200; a different list is 409
+  `usage_link_conflict`.
+- A link without `members` is accepted as today, so current Citrus builds
+  keep working.
+
+**Open:** what happens when a member is dead, or isn't in `dish_id`, when the
+link arrives. The recording has already happened, and Citrus retries a refused
+link from its outbox. The recommendation is to accept it as sent and flag it
+for review, the same as the overlap flag: a real recording's record is never
+lost, and a correction fixes the list. The alternative is 409, with no link
+until someone fixes the fish records.
+
+### What changes for readers
+
+- `UsageLinkResponse` gains `members`: the sealed member list, empty for
+  individual and plain dish-level links. The change is additive;
+  `api_schema_version` stays 2, and the consumer schema is re-pinned.
+- `GET /usage-links?fish_id=` matches the link's fish **or a member**.
+  `?dish_id=` is unchanged. It returns links naming the dish, each with its
+  members.
+- Timeline: each member gets "recorded in R, arena N, one of K from dish D".
+  A dish-level link **with** members no longer puts "possibly used" on the
+  dish's other fish. Only a dish-level link without members still does.
+- "Already used" checks, such as orchard's run-plan check, read the fish and
+  its memberships, never the dish.
+- The overlap flag covers members: one fish in two arenas at overlapping
+  times is flagged, whether it was a link's fish or a member.
+
+### Corrections for members
+
+This extends the correction design above.
+
+- `usage_link_corrections` gains `member_fish_id`: the sealed member being
+  corrected, or null when correcting an individual link's fish.
+- `POST /usage-links/{ref}/corrections` takes `{member_fish_id?, fish_id, evidence}`.
+  `member_fish_id` is required for a group link and must be a sealed member.
+- The effective member list is the sealed list with each member's newest
+  correction applied.
+- One fish, one arena: a correction is refused if the new fish is already an
+  effective member or the fish of another overlapping link.
+- **"Fish unknown" for a member** leaves that place in the list unknown. The
+  dish's non-member fish get "possibly used" from this link, because the
+  unknown larva was one of them.
+- In the response, each member carries its own `correction` (the effective
+  one, or null). The link-level `correction` stays for individual links.
+- Changing `subject_count` is out of scope. A miscount is a note on the link,
+  not a correction.
+
+### Across systems
+
+- **agent-contracts:** add `members` to the snapshot's sealed
+  `usage_link_request`, which is a closed body today. Also add `members` and
+  the per-member `correction` to `UsageLinkResponse`. Palette prefers one
+  request carrying the list.
+- **Citrus:** send `members` once its pin includes them. Branch
+  `agent/citrus/group-members` already fills the H5 members.
+- **Palette:** read members from its usage-link replay. Its registry records
+  members of group arenas instead of re-deriving them from the dish.
+- **orchard:** the run plan's checker reads `members` for "already used".
+
+### Build order
+
+1. MetaZebrobot members: the table, the request field and its checks,
+   `members` on responses, `?fish_id=` over members, timeline entries, and the
+   overlap flag over members. Then tests and a consumer re-pin.
+2. MetaZebrobot corrections (the section above), built with `member_fish_id`
+   from the start.
+3. The agent-contracts amendment covering both, then Palette's and Citrus's
+   review, and re-pins.
+4. Citrus sends `members`; Palette reads them.
+5. The first group recording.
+
+Not in this design: batch mint, a batch move returning ids, JSON dish create
+and terminate, and a "who did it" field on moves. Those are the agent-facing
+gaps, designed separately.
