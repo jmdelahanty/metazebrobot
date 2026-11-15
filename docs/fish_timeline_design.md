@@ -470,6 +470,11 @@ This extends the correction design above.
   unknown larva was one of them.
 - In the response, each member carries its own `correction` (the effective
   one, or null). The link-level `correction` stays for individual links.
+- **A corrected fish may be in another dish** (decided 2026-11-15). The
+  correction's `dish_id` records that dish, and the evidence must say why.
+  Only a person can attest where a fish really was. A misclick can pick a
+  fish from another plate, although both checked cases were in the same
+  plate. Palette's correction design should allow the same.
 - Changing `subject_count` is out of scope. A miscount is a note on the link,
   not a correction.
 
