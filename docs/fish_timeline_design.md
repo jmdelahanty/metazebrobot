@@ -492,7 +492,7 @@ This extends the correction design above.
   misses group members. With members it writes one `recording_subjects` row
   per member, keyed (`recording_id`, fish id), marked as a group member. The
   existing query then covers members unchanged. Palette's correction design
-  (unmerged) is per arena and has no "fish unknown". It needs a member key
+  (on Palette main via #435, design only, not built) is per arena and has no "fish unknown". It needs a member key
   and an unknown outcome (a null subject in its effective view) to match
   this design.
 - **orchard:** the run plan's checker reads `members` for "already used".
