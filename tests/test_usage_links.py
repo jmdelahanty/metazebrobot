@@ -173,3 +173,118 @@ def test_delivered_by_recorded_on_first_creation_and_not_compared(client, seed_d
     assert replay.status_code == 200 and replay.json()["delivered_by"] == "palette"
     no_header = _link(seed_dish)
     assert client.post("/usage-links", json=no_header).json()["delivered_by"] is None
+
+
+def _other_dish():
+    """A second minimal dish (seed_dish makes one per test)."""
+    import json
+    import sqlite3
+    from metazebrobot.data.data_manager import data_manager
+    dish_id = f"DISH_{uuid.uuid4().hex[:8]}"
+    conn = sqlite3.connect(str(data_manager.database_path))
+    conn.execute("INSERT INTO dishes (dish_id, data, genotype, species) VALUES (?, ?, ?, ?)",
+                 (dish_id, json.dumps({"dish_id": dish_id}), "Tg(elavl3:GCaMP6s)", "Danio rerio"))
+    conn.commit()
+    conn.close()
+    return dish_id
+
+
+def _mint(client, dish_id, label):
+    return client.post(f"/dishes/{dish_id}/fish", json={"subject_label": label}).json()["fish_id"]
+
+
+# A start after the fish are minted (they're created "now" in these tests).
+LATER = "2099-01-01T12:00:00Z"
+
+
+class TestMembers:
+    """docs/fish_timeline_design.md, "Group members on usage links"."""
+
+    def test_group_link_names_members_compared_as_a_set(self, client, seed_dish):
+        fish = [_mint(client, seed_dish, f"Z{i}") for i in range(3)]
+        body = _link(seed_dish, subject_count=3, started_at=LATER,
+                     members=[{"fish_id": f, "fish_revision": 1} for f in fish])
+        first = client.post("/usage-links", json=body)
+        assert first.status_code == 201
+        assert first.json()["fish_id"] is None
+        assert [m["fish_id"] for m in first.json()["members"]] == sorted(fish)
+        assert all(m["flag"] is None and m["fish_revision"] == 1 for m in first.json()["members"])
+        reordered = {**body, "members": list(reversed(body["members"]))}
+        assert client.post("/usage-links", json=reordered).status_code == 200
+        other = _mint(client, seed_dish, "Z9")
+        changed = {**body, "members": body["members"][:2] + [{"fish_id": other, "fish_revision": 1}]}
+        assert client.post("/usage-links", json=changed).status_code == 409
+        without = {k: v for k, v in body.items() if k != "members"}
+        assert client.post("/usage-links", json=without).status_code == 409
+
+    def test_links_without_members_are_unchanged(self, client, seed_dish):
+        body = _link(seed_dish, subject_count=5)
+        assert client.post("/usage-links", json=body).json()["members"] == []
+        assert client.post("/usage-links", json=body).status_code == 200
+
+    @pytest.mark.parametrize("members, count, with_fish", [
+        ([], 1, False),                                    # empty list
+        (["not-a-dict"], 1, False),
+        ([{"fish_id": "NOT-A-UUID"}], 1, False),
+        ([{"fish_id": "F0", "unit_id": "X:A1"}], 1, False),  # no unit per member
+        ([{"fish_id": "F0"}, {"fish_id": "F0"}], 2, False),  # listed twice
+        ([{"fish_id": "F0"}], 2, False),                   # count differs
+        ([{"fish_id": "F0"}], 1, True),                    # an individual link
+    ])
+    def test_invalid_members_are_422(self, client, seed_dish, members, count, with_fish):
+        real = _mint(client, seed_dish, "Z1")
+        members = [{**m, "fish_id": real} if isinstance(m, dict) and m.get("fish_id") == "F0" else m
+                   for m in members]
+        extra = {"fish_id": real} if with_fish else {}
+        resp = client.post("/usage-links", json=_link(
+            seed_dish, subject_count=count, members=members, **extra))
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["field"] == "members"
+
+    def test_unknown_member_is_404(self, client, seed_dish):
+        missing = str(uuid.uuid4())
+        resp = client.post("/usage-links", json=_link(
+            seed_dish, subject_count=1, members=[{"fish_id": missing}]))
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == {"error": "fish_not_found", "fish_id": missing}
+
+    def test_fish_query_matches_members_and_dish_query_lists_them(self, client, seed_dish):
+        a, b, outsider = (_mint(client, seed_dish, z) for z in ("Z1", "Z2", "Z3"))
+        body = _link(seed_dish, subject_count=2, started_at=LATER,
+                     members=[{"fish_id": a}, {"fish_id": b}])
+        client.post("/usage-links", json=body)
+        refs = [l["recording_ref"] for l in client.get(f"/usage-links?fish_id={a}").json()["items"]]
+        assert refs == [body["recording_ref"]]
+        assert client.get(f"/usage-links?fish_id={outsider}").json()["items"] == []
+        by_dish = client.get(f"/usage-links?dish_id={seed_dish}").json()["items"]
+        assert len(by_dish) == 1 and len(by_dish[0]["members"]) == 2
+
+    def test_member_flags_are_judged_at_start(self, client, seed_dish):
+        elsewhere = _mint(client, _other_dish(), "Z1")
+        died_before = _mint(client, seed_dish, "Z2")
+        died_after = _mint(client, seed_dish, "Z3")
+        client.post(f"/fish/{died_before}/end", json={"reason": "found_dead",
+                                                    "at": "2026-10-01T12:00:00Z"})
+        client.post(f"/fish/{died_after}/end", json={"reason": "euthanized"})
+        body = _link(seed_dish, subject_count=3, started_at="2026-10-09T20:00:18Z",
+                     members=[{"fish_id": f} for f in (elsewhere, died_before, died_after)])
+        flags = {m["fish_id"]: m["flag"]
+                 for m in client.post("/usage-links", json=body).json()["members"]}
+        assert flags == {elsewhere: "not_in_dish_at_start", died_before: "dead_at_start",
+                         died_after: None}
+
+    def test_member_timeline_and_no_possibly_used_for_the_rest(self, client, seed_dish):
+        member, outsider = _mint(client, seed_dish, "Z1"), _mint(client, seed_dish, "Z2")
+        client.post("/usage-links", json=_link(seed_dish, subject_count=1, started_at=LATER,
+                                               members=[{"fish_id": member}]))
+        member_entries = [e for e in client.get(f"/fish/{member}/timeline").json()["entries"]
+                          if e["kind"] == "recorded"]
+        assert len(member_entries) == 1
+        assert member_entries[0]["details"]["group_member"] is True
+        assert "one of 1 from dish" in member_entries[0]["summary"]
+        kinds = [e["kind"] for e in client.get(f"/fish/{outsider}/timeline").json()["entries"]]
+        assert "recorded" not in kinds and "possibly_recorded" not in kinds
+        # A dish-level link that names no members still marks every fish.
+        client.post("/usage-links", json=_link(seed_dish, subject_count=4, started_at=LATER))
+        kinds = [e["kind"] for e in client.get(f"/fish/{outsider}/timeline").json()["entries"]]
+        assert "possibly_recorded" in kinds

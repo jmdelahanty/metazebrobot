@@ -1,5 +1,9 @@
 """Usage links: which arena recording used which dish (and fish).
 
+A group arena's link can name its members (docs/fish_timeline_design.md,
+"Group members on usage links"): ``members`` on the request, stored in
+``usage_link_members``. Only the members count as used, never the dish.
+
 docs/fish_timeline_design.md ("Usage links", "Proposed endpoints",
 "Refinements from Citrus's review"). MetaZebrobot stores only the reference
 and these fields; recordings stay owned by Palette and the H5. Citrus POSTs a
@@ -20,6 +24,8 @@ CREATE_FIELDS = (
     "recording_ref", "ref_kind", "recording_id", "dish_id", "fish_id", "fish_revision",
     "unit_id", "rig_id", "arena_id", "subject_count", "started_at",
 )
+MEMBER_FIELDS = ("fish_id", "fish_revision")
+MAX_MEMBERS = 64
 REQUIRED = ("recording_ref", "ref_kind", "dish_id", "rig_id", "arena_id", "started_at")
 MAX_REF_LENGTH = 160
 
@@ -53,10 +59,19 @@ CREATE TABLE IF NOT EXISTS usage_links (
     CHECK ((ended_at IS NULL) = (end_status IS NULL))
 )
 """
+MEMBERS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS usage_link_members (
+    recording_ref TEXT NOT NULL REFERENCES usage_links(recording_ref),
+    fish_id TEXT NOT NULL,
+    fish_revision INTEGER,
+    PRIMARY KEY (recording_ref, fish_id)
+)
+"""
 INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_usage_links_fish ON usage_links(fish_id)",
     "CREATE INDEX IF NOT EXISTS idx_usage_links_dish ON usage_links(dish_id)",
     "CREATE INDEX IF NOT EXISTS idx_usage_links_started ON usage_links(started_norm)",
+    "CREATE INDEX IF NOT EXISTS idx_usage_link_members_fish ON usage_link_members(fish_id)",
 )
 
 
@@ -74,6 +89,7 @@ _DELIVERED_BY = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 def ensure_schema(conn) -> None:
     conn.execute(SCHEMA)
+    conn.execute(MEMBERS_SCHEMA)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(usage_links)")}
     if "delivered_by" not in cols:
         conn.execute("ALTER TABLE usage_links ADD COLUMN delivered_by TEXT")
@@ -122,7 +138,7 @@ def validate_create(body: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(body, dict):
         raise _invalid("body", "expected a JSON object")
     for key in body:
-        if key not in CREATE_FIELDS:
+        if key not in CREATE_FIELDS and key != "members":
             raise _invalid(key, "unknown field")
     for key in REQUIRED:
         if body.get(key) in (None, ""):
@@ -149,18 +165,87 @@ def validate_create(body: Dict[str, Any]) -> Dict[str, Any]:
         raise _invalid("unit_id", "only with fish_id")
     if normalize_time(values["started_at"]) is None:
         raise _invalid("started_at", "RFC 3339 UTC ending in Z")
+    # Only a body that sends members carries the key, so links stored before
+    # members existed still compare equal on replay.
+    if "members" in body:
+        values["members"] = _validate_members(body["members"], values)
     return values
 
 
-def _row(row) -> Dict[str, Any]:
+def _validate_members(members: Any, values: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """A group's members, sorted by fish_id so replays compare as a set."""
+    if values["fish_id"] is not None:
+        raise _invalid("members", "only when fish_id is null (a group arena)")
+    if not isinstance(members, list) or not members or len(members) > MAX_MEMBERS:
+        raise _invalid("members", f"expected a list of 1 to {MAX_MEMBERS} members")
+    clean = []
+    for member in members:
+        if not isinstance(member, dict) or set(member) - set(MEMBER_FIELDS):
+            raise _invalid("members", "each member is {fish_id, fish_revision}")
+        fish_id, revision = member.get("fish_id"), member.get("fish_revision")
+        if not isinstance(fish_id, str) or not _UUID.match(fish_id):
+            raise _invalid("members", "each fish_id is a lowercase UUID")
+        if revision is not None and (
+                not isinstance(revision, int) or isinstance(revision, bool) or revision < 1):
+            raise _invalid("members", "each fish_revision is an integer >= 1")
+        clean.append({"fish_id": fish_id, "fish_revision": revision})
+    if len({m["fish_id"] for m in clean}) != len(clean):
+        raise _invalid("members", "a fish is listed twice")
+    if values["subject_count"] != len(clean):
+        raise _invalid("members", "the number of members must equal subject_count")
+    return sorted(clean, key=lambda m: m["fish_id"])
+
+
+def _row(conn, row) -> Dict[str, Any]:
     link = {k: row[k] for k in row.keys()
             if k not in ("started_norm", "ended_norm", "creation_body")}
+    link["members"] = [
+        {"fish_id": m["fish_id"], "fish_revision": m["fish_revision"],
+         "flag": member_flag(conn, m["fish_id"], row["dish_id"], row["started_norm"])}
+        for m in conn.execute(
+            "SELECT fish_id, fish_revision FROM usage_link_members "
+            "WHERE recording_ref = ? ORDER BY fish_id", (row["recording_ref"],))
+    ]
     return link
+
+
+def member_flag(conn, fish_id: str, dish_id: str, started_norm: str) -> Optional[str]:
+    """Why a member needs review, judged at the link's start; None when fine.
+
+    ``dead_at_start``: the fish had already ended before the recording
+    started. ``not_in_dish_at_start``: it was in another dish then. Judged
+    from history, so a member moved or euthanized after the recording (the
+    normal case) isn't flagged, however late the link arrives.
+    """
+    from .fish_timeline import _dish_at, _sqlite_utc_to_norm, _rfc3339_to_lab_iso
+
+    fish = conn.execute(
+        "SELECT dish_id, created_at, status, ended_at, ended_precision "
+        "FROM fish_subjects WHERE fish_id = ?", (fish_id,)).fetchone()
+    if fish is None:
+        return "not_in_dish_at_start"
+    if fish["status"] != "alive" and fish["ended_at"]:
+        if fish["ended_precision"] == "day":
+            # A day-precision end only counts when it was an earlier lab day.
+            start_day = (_rfc3339_to_lab_iso(started_norm) or "")[:10]
+            if fish["ended_at"][:10] < start_day:
+                return "dead_at_start"
+        elif _sqlite_utc_to_norm(fish["ended_at"]) < started_norm:
+            return "dead_at_start"
+    revisions = [dict(r) for r in conn.execute(
+        "SELECT dish_id, recorded_at FROM fish_subject_revisions WHERE fish_id = ? "
+        "ORDER BY revision", (fish_id,))]
+    created_norm = _sqlite_utc_to_norm(fish["created_at"])
+    dish_then = _dish_at(revisions, created_norm, started_norm)
+    if dish_then is None:
+        # Registered after the start (Citrus's outbox): its first dish counts.
+        dish_then = revisions[0]["dish_id"] if revisions else fish["dish_id"]
+    return None if dish_then == dish_id else "not_in_dish_at_start"
 
 
 def get_link(conn, recording_ref: str) -> Optional[Dict[str, Any]]:
     row = conn.execute("SELECT * FROM usage_links WHERE recording_ref = ?", (recording_ref,)).fetchone()
-    return _row(row) if row else None
+    return _row(conn, row) if row else None
 
 
 def create_link(conn, body: Dict[str, Any],
@@ -182,9 +267,11 @@ def create_link(conn, body: Dict[str, Any],
         return 200, get_link(conn, values["recording_ref"])
     if not conn.execute("SELECT 1 FROM dishes WHERE dish_id = ?", (values["dish_id"],)).fetchone():
         raise UsageLinkError(404, {"error": "dish_not_found", "dish_id": values["dish_id"]})
-    if values["fish_id"] and not conn.execute(
-            "SELECT 1 FROM fish_subjects WHERE fish_id = ?", (values["fish_id"],)).fetchone():
-        raise UsageLinkError(404, {"error": "fish_not_found", "fish_id": values["fish_id"]})
+    named = ([values["fish_id"]] if values["fish_id"] else []) + [
+        m["fish_id"] for m in values.get("members", [])]
+    for fish_id in named:
+        if not conn.execute("SELECT 1 FROM fish_subjects WHERE fish_id = ?", (fish_id,)).fetchone():
+            raise UsageLinkError(404, {"error": "fish_not_found", "fish_id": fish_id})
     stamp = now_utc()
     conn.execute(
         f"""INSERT INTO usage_links ({', '.join(CREATE_FIELDS)}, started_norm,
@@ -193,6 +280,11 @@ def create_link(conn, body: Dict[str, Any],
         [values[k] for k in CREATE_FIELDS]
         + [normalize_time(values["started_at"]), stamp, stamp,
            json.dumps(values, sort_keys=True), delivered_by],
+    )
+    conn.executemany(
+        "INSERT INTO usage_link_members (recording_ref, fish_id, fish_revision) VALUES (?, ?, ?)",
+        [(values["recording_ref"], m["fish_id"], m["fish_revision"])
+         for m in values.get("members", [])],
     )
     return 201, get_link(conn, values["recording_ref"])
 
@@ -216,7 +308,7 @@ def end_link(conn, recording_ref: str, body: Dict[str, Any]) -> Dict[str, Any]:
         if (row["ended_norm"], row["end_status"]) != (ended_norm, body["end_status"]):
             raise UsageLinkError(409, {"error": "usage_link_end_conflict",
                                        "recording_ref": recording_ref})
-        return _row(row)
+        return _row(conn, row)
     if ended_norm < row["started_norm"]:
         raise _invalid("ended_at", "earlier than started_at")
     conn.execute(
@@ -229,11 +321,13 @@ def end_link(conn, recording_ref: str, body: Dict[str, Any]) -> Dict[str, Any]:
 
 def list_links(conn, fish_id: Optional[str] = None, dish_id: Optional[str] = None,
                active_at: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Links filtered by fish, dish and/or the instant they were open at."""
+    """Links filtered by fish (the link's fish or a member), dish and/or the
+    instant they were open at."""
     where, params = [], []
     if fish_id:
-        where.append("fish_id = ?")
-        params.append(fish_id)
+        where.append("(fish_id = ? OR recording_ref IN "
+                     "(SELECT recording_ref FROM usage_link_members WHERE fish_id = ?))")
+        params += [fish_id, fish_id]
     if dish_id:
         where.append("dish_id = ?")
         params.append(dish_id)
@@ -244,4 +338,4 @@ def list_links(conn, fish_id: Optional[str] = None, dish_id: Optional[str] = Non
         where.append("started_norm <= ? AND (ended_norm IS NULL OR ended_norm >= ?)")
         params += [instant, instant]
     sql = "SELECT * FROM usage_links" + (" WHERE " + " AND ".join(where) if where else "")
-    return [_row(r) for r in conn.execute(sql + " ORDER BY started_norm", params)]
+    return [_row(conn, r) for r in conn.execute(sql + " ORDER BY started_norm", params)]
