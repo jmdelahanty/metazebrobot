@@ -427,12 +427,14 @@ The member fields mirror the individual link's fields, as Citrus seals them.
 - A link without `members` is accepted as today, so current Citrus builds
   keep working.
 
-**Open:** what happens when a member is dead, or isn't in `dish_id`, when the
-link arrives. The recording has already happened, and Citrus retries a refused
-link from its outbox. The recommendation is to accept it as sent and flag it
-for review, the same as the overlap flag: a real recording's record is never
-lost, and a correction fixes the list. The alternative is 409, with no link
-until someone fixes the fish records.
+**Decided (2026-11-15): accept and flag, judged at Start.** Whether a member
+was alive and in `dish_id` is decided from the fish's history at the link's
+`started_at`, not from its state when the link arrives. A link can arrive
+late from Citrus's outbox, after the member has already been moved to the
+used-fish dish or euthanized, and that is normal. A member that was already
+dead, or in another dish, at `started_at` is accepted as sent and flagged
+for review, like the overlap flag. A correction then fixes the list. The
+recording's record is never refused for this.
 
 ### What changes for readers
 
