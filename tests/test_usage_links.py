@@ -288,3 +288,109 @@ class TestMembers:
         client.post("/usage-links", json=_link(seed_dish, subject_count=4, started_at=LATER))
         kinds = [e["kind"] for e in client.get(f"/fish/{outsider}/timeline").json()["entries"]]
         assert "possibly_recorded" in kinds
+
+
+def _kinds(client, fish_id):
+    return [e["kind"] for e in client.get(f"/fish/{fish_id}/timeline").json()["entries"]]
+
+
+class TestSetMembers:
+    """A group link created without members is given them once, later."""
+
+    def _group(self, client, seed_dish, n=2):
+        fish = [_mint(client, seed_dish, f"Z{i}") for i in range(n)]
+        body = _link(seed_dish, subject_count=n, started_at=LATER)
+        assert client.post("/usage-links", json=body).status_code == 201
+        return body, fish
+
+    def _put(self, client, ref, members, **headers):
+        return client.put(f"/usage-links/{quote(ref, safe='')}/members",
+                          json={"members": members}, headers=headers)
+
+    def test_set_once_then_same_set_200_and_different_409(self, client, seed_dish):
+        body, fish = self._group(client, seed_dish)
+        outsider = _mint(client, seed_dish, "Z9")
+        assert "possibly_recorded" in _kinds(client, outsider)
+        members = [{"fish_id": f, "fish_revision": 1} for f in fish]
+        first = self._put(client, body["recording_ref"], members, **{"X-Delivered-By": "orchard"})
+        assert first.status_code == 201
+        link = first.json()
+        assert [m["fish_id"] for m in link["members"]] == sorted(fish)
+        assert link["members_added_at"] and link["members_added_by"] == "orchard"
+        assert link["delivered_by"] is None
+        # The members are recorded; the dish's other fish no longer "possibly used".
+        assert "recorded" in _kinds(client, fish[0])
+        assert "possibly_recorded" not in _kinds(client, outsider)
+        again = self._put(client, body["recording_ref"], list(reversed(members)))
+        assert again.status_code == 200
+        assert again.json()["members_added_by"] == "orchard"
+        changed = members[:1] + [{"fish_id": outsider, "fish_revision": 1}]
+        resp = self._put(client, body["recording_ref"], changed)
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["error"] == "usage_link_members_conflict"
+
+    def test_creation_replays_after_members_are_set(self, client, seed_dish):
+        body, fish = self._group(client, seed_dish)
+        members = [{"fish_id": f, "fish_revision": 1} for f in fish]
+        self._put(client, body["recording_ref"], members)
+        # Citrus's outbox replays the original body: still 200.
+        assert client.post("/usage-links", json=body).status_code == 200
+        assert client.post("/usage-links", json={**body, "members": members}).status_code == 200
+        other = [members[0], {"fish_id": _mint(client, seed_dish, "Z9"), "fish_revision": 1}]
+        resp = client.post("/usage-links", json={**body, "members": other})
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["error"] == "usage_link_members_conflict"
+        moved = {**body, "rig_id": "other_rig", "members": members}
+        assert client.post("/usage-links", json=moved).json()["detail"]["error"] == "usage_link_conflict"
+
+    def test_a_replay_carrying_members_sets_them(self, client, seed_dish):
+        body, fish = self._group(client, seed_dish)
+        resp = client.post("/usage-links", json={**body, "members": [{"fish_id": f} for f in fish]},
+                           headers={"X-Delivered-By": "palette"})
+        assert resp.status_code == 200
+        assert len(resp.json()["members"]) == 2
+        assert resp.json()["members_added_by"] == "palette"
+
+    def test_members_sent_at_start_have_no_added_stamp(self, client, seed_dish):
+        fish = _mint(client, seed_dish, "Z1")
+        body = _link(seed_dish, subject_count=1, started_at=LATER, members=[{"fish_id": fish}])
+        assert client.post("/usage-links", json=body).json()["members_added_at"] is None
+        same = self._put(client, body["recording_ref"], [{"fish_id": fish}])
+        assert same.status_code == 200 and same.json()["members_added_at"] is None
+        other = self._put(client, body["recording_ref"], [{"fish_id": _mint(client, seed_dish, "Z2")}])
+        assert other.status_code == 409
+
+    @pytest.mark.parametrize("payload", [
+        {},                                             # no members
+        {"members": []},
+        {"members": [{"fish_id": "F0"}]},               # count differs from subject_count 2
+        {"members": [{"fish_id": "F0"}, {"fish_id": "F0"}]},
+        {"members": [{"fish_id": "F0"}, {"fish_id": "F1"}], "subject_count": 2},
+    ])
+    def test_invalid_bodies_are_422(self, client, seed_dish, payload):
+        body, fish = self._group(client, seed_dish)
+        swap = {"F0": fish[0], "F1": fish[1]}
+        if "members" in payload:
+            payload = {**payload, "members": [{"fish_id": swap[m["fish_id"]]}
+                                              for m in payload["members"]]}
+        resp = client.put(f"/usage-links/{quote(body['recording_ref'], safe='')}/members",
+                          json=payload)
+        assert resp.status_code == 422
+        assert client.get(f"/usage-links/{quote(body['recording_ref'], safe='')}").json()["members"] == []
+
+    def test_individual_link_is_422_and_unknown_link_or_fish_404(self, client, fish):
+        dish_id, fish_id = fish
+        body = _link(dish_id, fish_id=fish_id)
+        client.post("/usage-links", json=body)
+        resp = self._put(client, body["recording_ref"], [{"fish_id": fish_id}])
+        assert resp.status_code == 422 and resp.json()["detail"]["field"] == "members"
+        assert self._put(client, _ref(), [{"fish_id": fish_id}]).json()["detail"]["error"] == \
+            "usage_link_not_found"
+        group = _link(dish_id, subject_count=1)
+        client.post("/usage-links", json=group)
+        missing = str(uuid.uuid4())
+        resp = self._put(client, group["recording_ref"], [{"fish_id": missing}])
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == {"error": "fish_not_found", "fish_id": missing}
+        assert client.get(f"/usage-links/{quote(group['recording_ref'], safe='')}").json()[
+            "members_added_at"] is None
