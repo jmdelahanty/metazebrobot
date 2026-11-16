@@ -89,7 +89,10 @@ the DB host.
 - Record which recording used a dish/fish (Citrus at Start and Stop):
   - `POST /usage-links`, `PATCH /usage-links/{recording_ref}`
   - `GET /usage-links/{recording_ref}`, `GET /usage-links?fish_id=|dish_id=|active_at=`
-  - Fields, idempotency and errors: [fish timeline design](fish_timeline_design.md#proposed-endpoints-for-review-2026-10-15)
+  - `PUT /usage-links/{recording_ref}/members`: a group link's members, once,
+    when they weren't sent at Start
+  - Fields, idempotency and errors: [fish timeline design](fish_timeline_design.md#proposed-endpoints-for-review-2026-10-15),
+    [group members](fish_timeline_design.md#group-members-on-usage-links-design-2026-11-15)
 - Fetch its cross:
   - `GET /crosses/{cross_id}`
 - Fetch cached parent/background provenance:
@@ -185,7 +188,7 @@ JSON read endpoints return structured errors in FastAPI's `detail` field:
 | 409 | `{"detail": {"error": "dish_inactive", "dish_id": "..."}}` | `POST /dishes/{dish_id}/fish`: new `fish_id` on an inactive dish |
 | 422 | `{"detail": {"error": "invalid_fish_id", "fish_id": "..."}}` | `POST`: `fish_id` isn't a lowercase canonical UUID v4 |
 | 422 | `{"detail": {"error": "invalid_subject_label", "message": "..."}}` | `POST`/`PATCH`: label over 64 characters or with control characters |
-| 409 | `{"detail": {"error": "usage_link_conflict" \| "usage_link_end_conflict", "recording_ref": "..."}}` | `/usage-links`: a different body for an existing link, or a different end |
+| 409 | `{"detail": {"error": "usage_link_conflict" \| "usage_link_end_conflict" \| "usage_link_members_conflict", "recording_ref": "..."}}` | `/usage-links`: a different body for an existing link, a different end, or different members once a link has them |
 | 404 | `{"detail": {"error": "usage_link_not_found", "recording_ref": "..."}}` | `/usage-links/{recording_ref}`: no such link |
 | 422 | `{"detail": {"error": "invalid_usage_link", "field": "...", "message": "..."}}` | `/usage-links`: field fails the contract's rules |
 | 422 | `{"detail": [...]}` | Invalid query parameters or malformed body |
@@ -232,7 +235,8 @@ Field-level shapes are generated from the code, not written by hand:
   `/fish/{fish_id}/revisions`, `/fish/{fish_id}/end`, `/fish/{fish_id}/screening`,
   `/fish/{fish_id}/timeline`, `/dishes/{dish_id}/screening-calls`, `/constructs`,
   `/constructs/{construct_key}`, `/usage-links` (POST, GET),
-  `/usage-links/{recording_ref}` (PATCH, GET) and `/version`, including
+  `/usage-links/{recording_ref}` (PATCH, GET),
+  `/usage-links/{recording_ref}/members` (PUT) and `/version`, including
   their error models.
 - `tests/test_consumer_contract.py` fails if the code and that file
   disagree, and asserts the identity fields explicitly.

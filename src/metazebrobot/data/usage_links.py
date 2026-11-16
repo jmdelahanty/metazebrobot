@@ -2,7 +2,9 @@
 
 A group arena's link can name its members (docs/fish_timeline_design.md,
 "Group members on usage links"): ``members`` on the request, stored in
-``usage_link_members``. Only the members count as used, never the dish.
+``usage_link_members``. Only the members count as used, never the dish. A
+group link created without them can be given its members once, later
+(``set_members``), with the same checks; the link records when and by whom.
 
 docs/fish_timeline_design.md ("Usage links", "Proposed endpoints",
 "Refinements from Citrus's review"). MetaZebrobot stores only the reference
@@ -91,8 +93,9 @@ def ensure_schema(conn) -> None:
     conn.execute(SCHEMA)
     conn.execute(MEMBERS_SCHEMA)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(usage_links)")}
-    if "delivered_by" not in cols:
-        conn.execute("ALTER TABLE usage_links ADD COLUMN delivered_by TEXT")
+    for column in ("delivered_by", "members_added_at", "members_added_by"):
+        if column not in cols:
+            conn.execute(f"ALTER TABLE usage_links ADD COLUMN {column} TEXT")
     for statement in INDEXES:
         conn.execute(statement)
 
@@ -258,10 +261,19 @@ def create_link(conn, body: Dict[str, Any],
     """
     values = validate_create(body)
     existing = conn.execute(
-        "SELECT creation_body FROM usage_links WHERE recording_ref = ?", (values["recording_ref"],)
+        "SELECT * FROM usage_links WHERE recording_ref = ?", (values["recording_ref"],)
     ).fetchone()
     if existing:
-        if json.loads(existing["creation_body"]) != values:
+        stored = json.loads(existing["creation_body"])
+        if "members" in values and "members" not in stored:
+            # A replay that carries the members of a link created without
+            # them (e.g. Palette's backup delivery from the recording file).
+            core = {k: v for k, v in values.items() if k != "members"}
+            if stored != core:
+                raise UsageLinkError(409, {"error": "usage_link_conflict",
+                                           "recording_ref": values["recording_ref"]})
+            _apply_members(conn, existing, values["members"], delivered_by)
+        elif stored != values:
             raise UsageLinkError(409, {"error": "usage_link_conflict",
                                        "recording_ref": values["recording_ref"]})
         return 200, get_link(conn, values["recording_ref"])
@@ -287,6 +299,51 @@ def create_link(conn, body: Dict[str, Any],
          for m in values.get("members", [])],
     )
     return 201, get_link(conn, values["recording_ref"])
+
+
+def set_members(conn, recording_ref: str, body: Dict[str, Any],
+                delivered_by: Optional[str] = None) -> Tuple[int, Dict[str, Any]]:
+    """Give a group link its members once: (201 | 200, link) or UsageLinkError.
+
+    For a link created without ``members``. Same checks as at creation
+    (``fish_id`` null, as many as ``subject_count``, each fish exists, flags
+    judged at ``started_at``). The same set again is 200; a different set
+    once members exist is 409 ``usage_link_members_conflict``.
+    """
+    if not isinstance(body, dict) or set(body) != {"members"}:
+        extra = sorted(set(body) - {"members"}) if isinstance(body, dict) else ["body"]
+        raise _invalid(extra[0] if extra else "members", "unknown field" if extra else "required")
+    row = conn.execute("SELECT * FROM usage_links WHERE recording_ref = ?", (recording_ref,)).fetchone()
+    if not row:
+        raise UsageLinkError(404, {"error": "usage_link_not_found", "recording_ref": recording_ref})
+    added = _apply_members(conn, row, body["members"], delivered_by)
+    return (201 if added else 200), get_link(conn, recording_ref)
+
+
+def _apply_members(conn, row, members: Any, delivered_by: Optional[str]) -> bool:
+    """Store a link's members if it has none; True when they were added."""
+    clean = _validate_members(members, {"fish_id": row["fish_id"],
+                                        "subject_count": row["subject_count"]})
+    ref = row["recording_ref"]
+    current = [dict(m) for m in conn.execute(
+        "SELECT fish_id, fish_revision FROM usage_link_members "
+        "WHERE recording_ref = ? ORDER BY fish_id", (ref,))]
+    if current:
+        if current != clean:
+            raise UsageLinkError(409, {"error": "usage_link_members_conflict",
+                                       "recording_ref": ref})
+        return False
+    for member in clean:
+        if not conn.execute("SELECT 1 FROM fish_subjects WHERE fish_id = ?",
+                            (member["fish_id"],)).fetchone():
+            raise UsageLinkError(404, {"error": "fish_not_found", "fish_id": member["fish_id"]})
+    conn.executemany(
+        "INSERT INTO usage_link_members (recording_ref, fish_id, fish_revision) VALUES (?, ?, ?)",
+        [(ref, m["fish_id"], m["fish_revision"]) for m in clean])
+    stamp = now_utc()
+    conn.execute("UPDATE usage_links SET members_added_at = ?, members_added_by = ?, "
+                 "updated_at = ? WHERE recording_ref = ?", (stamp, delivered_by, stamp, ref))
+    return True
 
 
 def end_link(conn, recording_ref: str, body: Dict[str, Any]) -> Dict[str, Any]:

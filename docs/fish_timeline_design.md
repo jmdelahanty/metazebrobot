@@ -13,7 +13,8 @@ Status (2026-10-15): steps 1–3 built (`data/fish_timeline.py`; `GET /fish/{fis
 and the page `/fish/{fish_id}/view`, linked from the plate map, fish tables and
 cross view). Step 3 is `data/usage_links.py` with the endpoints below. Step 4 (deaths) is built: [fish deaths and endings](fish_deaths_design.md).
 Proposed (2026-11-09): [correcting the fish a recording names](#correcting-the-fish-a-recording-names-design-2026-11-09).
-Proposed (2026-11-15): [group members on usage links](#group-members-on-usage-links-design-2026-11-15).
+Built (2026-11-15): [group members on usage links](#group-members-on-usage-links-design-2026-11-15),
+including giving a link its members after Start.
 
 Goal (Jeremy): follow where an individual fish went, inspectably. For example:
 minted during screening or at an experiment, started in parent A, moved to a
@@ -372,8 +373,16 @@ corrections.
 
 ## Group members on usage links (design, 2026-11-15)
 
-Status: proposal for the operator's review. Nothing is built. The operator
-won't make group recordings until this is in place.
+Status (2026-11-15): members on `POST /usage-links`, responses, queries and
+the timeline are built (`ecaa247`), and so is
+[giving a link its members after Start](#members-given-after-start). The
+overlap flag and corrections for members are not built.
+
+Decided (2026-11-15): the target is Citrus sending `members` on its POST at
+Start, from fish minted when they're picked. Until Citrus does, the members
+are in the recording file, and orchard's tool gives the link its members
+right after Start. Either way the link names the right fish the first time.
+A correction is only for a list that turns out to be wrong.
 
 ### The problem
 
@@ -436,6 +445,28 @@ used-fish dish or euthanized, and that is normal. A member that was already
 dead, or in another dish, at `started_at` is accepted as sent and flagged
 for review, like the overlap flag. A correction then fixes the list. The
 recording's record is never refused for this.
+
+### Members given after Start
+
+A group link Citrus created without members can be given them once:
+`PUT /usage-links/{recording_ref}/members` with `{"members": [{fish_id, fish_revision}]}`.
+
+- The checks are the ones at creation. The link must be a group link (`fish_id`
+  null), the list has `subject_count` distinct fish, and each fish exists.
+  Flags are judged at `started_at`.
+- The first call is 201. The same set again is 200. A different set, once the
+  link has members (from Start or from this call), is 409
+  `usage_link_members_conflict`. Changing a list is a correction.
+- The link records `members_added_at` and, from `X-Delivered-By`,
+  `members_added_by`. Both are null when the members came with the link at
+  Start.
+- The creation body isn't changed, so Citrus's outbox replay of its original
+  POST is still 200. A POST replay that carries members, such as Palette's
+  backup delivery from the recording file, gives the link its members the
+  same way. A replay with different members is 409
+  `usage_link_members_conflict`.
+- Readers can't tell the two apart except by `members_added_at`. The
+  timeline, `?fish_id=` and "possibly used" treat them the same.
 
 ### What changes for readers
 
@@ -501,7 +532,9 @@ This extends the correction design above.
 
 1. MetaZebrobot members: the table, the request field and its checks,
    `members` on responses, `?fish_id=` over members, timeline entries, and the
-   overlap flag over members. Then tests and a consumer re-pin.
+   overlap flag over members. Then tests and a consumer re-pin. Built
+   (`ecaa247`) except the overlap flag. Members given after Start are built
+   after it.
 2. MetaZebrobot corrections (the section above), built with `member_fish_id`
    from the start.
 3. The agent-contracts amendment covering both, then Palette's and Citrus's

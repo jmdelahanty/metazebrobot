@@ -37,6 +37,7 @@ CONSUMER_ENDPOINTS: List[Tuple[str, str]] = [
     ("get", "/constructs/{construct_key}"),
     ("post", "/usage-links"),
     ("patch", "/usage-links/{recording_ref}"),
+    ("put", "/usage-links/{recording_ref}/members"),
     ("get", "/usage-links/{recording_ref}"),
     ("get", "/usage-links"),
     ("get", "/version"),

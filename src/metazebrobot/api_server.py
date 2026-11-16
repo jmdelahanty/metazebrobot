@@ -432,6 +432,12 @@ class UsageLinkResponse(BaseModel):
     members: List[UsageLinkMemberResponse] = Field(
         default_factory=list,
         description="A group arena's fish; empty for individual and plain dish-level links")
+    members_added_at: Optional[str] = Field(
+        default=None,
+        description="When members were given to a link created without them; null when "
+                    "they came with the link at Start")
+    members_added_by: Optional[str] = Field(
+        default=None, description="The X-Delivered-By token of that later request, if any")
 
 
 class UsageLinkListResponse(BaseModel):
@@ -463,7 +469,8 @@ _USAGE_LINK_ERRORS = {
     404: {"model": ApiErrorResponse,
           "description": "dish_not_found / fish_not_found (new link) or usage_link_not_found"},
     409: {"model": ApiErrorResponse,
-          "description": "usage_link_conflict (different creation body) or usage_link_end_conflict"},
+          "description": "usage_link_conflict (different creation body), usage_link_end_conflict, "
+                         "or usage_link_members_conflict (different members)"},
     422: {"model": ApiErrorResponse, "description": "invalid_usage_link (with field)"},
     **_DATABASE_ERROR_RESPONSE,
 }
@@ -6869,7 +6876,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         A group arena (``fish_id`` null) may name its ``members``
         (``[{fish_id, fish_revision}]``, as many as ``subject_count``), compared
         as a set on replays. Each must exist; one that was dead or in another
-        dish at ``started_at`` is accepted and flagged, never refused.
+        dish at ``started_at`` is accepted and flagged, never refused. A replay
+        that adds ``members`` to a link created without them gives the link
+        its members, as ``PUT /usage-links/{recording_ref}/members`` does.
         """
         status, link = _usage_call(
             usage_links.create_link, body,
@@ -6886,6 +6895,27 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         a different end once one is recorded is 409; no link is 404.
         """
         return _usage_call(usage_links.end_link, recording_ref, body)
+
+    @app.put("/usage-links/{recording_ref}/members", status_code=201,
+             response_model=UsageLinkResponse,
+             responses={200: {"model": UsageLinkResponse,
+                              "description": "The same members again; the current link"},
+                        **_USAGE_LINK_ERRORS})
+    def set_usage_link_members(recording_ref: str, request: Request, response: Response,
+                               body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Give a group link created without members its ``members``, once.
+
+        Body ``{"members": [{fish_id, fish_revision}]}``, checked as on
+        ``POST /usage-links``. 201 when added; the same set again is 200; a
+        different set once members exist is 409
+        ``usage_link_members_conflict``. Records ``members_added_at`` and the
+        ``X-Delivered-By`` token as ``members_added_by``.
+        """
+        status, link = _usage_call(
+            usage_links.set_members, recording_ref, body,
+            usage_links.delivered_by_from_header(request.headers.get("X-Delivered-By")))
+        response.status_code = status
+        return link
 
     @app.get("/usage-links/{recording_ref}", response_model=UsageLinkResponse,
              responses=_USAGE_LINK_ERRORS)
