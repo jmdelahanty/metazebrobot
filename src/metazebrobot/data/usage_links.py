@@ -261,19 +261,12 @@ def create_link(conn, body: Dict[str, Any],
     """
     values = validate_create(body)
     existing = conn.execute(
-        "SELECT * FROM usage_links WHERE recording_ref = ?", (values["recording_ref"],)
+        "SELECT creation_body FROM usage_links WHERE recording_ref = ?", (values["recording_ref"],)
     ).fetchone()
     if existing:
-        stored = json.loads(existing["creation_body"])
-        if "members" in values and "members" not in stored:
-            # A replay that carries the members of a link created without
-            # them (e.g. Palette's backup delivery from the recording file).
-            core = {k: v for k, v in values.items() if k != "members"}
-            if stored != core:
-                raise UsageLinkError(409, {"error": "usage_link_conflict",
-                                           "recording_ref": values["recording_ref"]})
-            _apply_members(conn, existing, values["members"], delivered_by)
-        elif stored != values:
+        # Compared with the body as created, so members given later
+        # (set_members) don't turn a replay of the original into a 409.
+        if json.loads(existing["creation_body"]) != values:
             raise UsageLinkError(409, {"error": "usage_link_conflict",
                                        "recording_ref": values["recording_ref"]})
         return 200, get_link(conn, values["recording_ref"])
