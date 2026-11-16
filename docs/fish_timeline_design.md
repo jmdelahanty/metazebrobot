@@ -460,11 +460,10 @@ A group link Citrus created without members can be given them once:
 - The link records `members_added_at` and, from `X-Delivered-By`,
   `members_added_by`. Both are null when the members came with the link at
   Start.
-- The creation body isn't changed, so Citrus's outbox replay of its original
-  POST is still 200. A POST replay that carries members, such as Palette's
-  backup delivery from the recording file, gives the link its members the
-  same way. A replay with different members is 409
-  `usage_link_members_conflict`.
+- The creation body isn't changed, so a replay of the original POST
+  (Citrus's outbox, Palette's backup delivery) is still 200. A POST that adds
+  `members` to a body sealed without them is still 409 `usage_link_conflict`,
+  as agent-contracts #130 records. The PUT is the only way to add them.
 - Readers can't tell the two apart except by `members_added_at`. The
   timeline, `?fish_id=` and "possibly used" treat them the same.
 

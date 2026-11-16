@@ -333,23 +333,12 @@ class TestSetMembers:
         body, fish = self._group(client, seed_dish)
         members = [{"fish_id": f, "fish_revision": 1} for f in fish]
         self._put(client, body["recording_ref"], members)
-        # Citrus's outbox replays the original body: still 200.
-        assert client.post("/usage-links", json=body).status_code == 200
-        assert client.post("/usage-links", json={**body, "members": members}).status_code == 200
-        other = [members[0], {"fish_id": _mint(client, seed_dish, "Z9"), "fish_revision": 1}]
-        resp = client.post("/usage-links", json={**body, "members": other})
-        assert resp.status_code == 409
-        assert resp.json()["detail"]["error"] == "usage_link_members_conflict"
-        moved = {**body, "rig_id": "other_rig", "members": members}
-        assert client.post("/usage-links", json=moved).json()["detail"]["error"] == "usage_link_conflict"
-
-    def test_a_replay_carrying_members_sets_them(self, client, seed_dish):
-        body, fish = self._group(client, seed_dish)
-        resp = client.post("/usage-links", json={**body, "members": [{"fish_id": f} for f in fish]},
-                           headers={"X-Delivered-By": "palette"})
-        assert resp.status_code == 200
-        assert len(resp.json()["members"]) == 2
-        assert resp.json()["members_added_by"] == "palette"
+        # A replay of the original body (Citrus's outbox, Palette) is still 200.
+        replay = client.post("/usage-links", json=body)
+        assert replay.status_code == 200 and len(replay.json()["members"]) == 2
+        # Adding members to a body sealed without them stays a 409.
+        resp = client.post("/usage-links", json={**body, "members": members})
+        assert resp.json()["detail"]["error"] == "usage_link_conflict"
 
     def test_members_sent_at_start_have_no_added_stamp(self, client, seed_dish):
         fish = _mint(client, seed_dish, "Z1")

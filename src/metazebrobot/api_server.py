@@ -6876,9 +6876,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         A group arena (``fish_id`` null) may name its ``members``
         (``[{fish_id, fish_revision}]``, as many as ``subject_count``), compared
         as a set on replays. Each must exist; one that was dead or in another
-        dish at ``started_at`` is accepted and flagged, never refused. A replay
-        that adds ``members`` to a link created without them gives the link
-        its members, as ``PUT /usage-links/{recording_ref}/members`` does.
+        dish at ``started_at`` is accepted and flagged, never refused. A link
+        created without them gets them only through
+        ``PUT /usage-links/{recording_ref}/members``; replaying the original
+        body stays 200, and adding ``members`` to it is 409.
         """
         status, link = _usage_call(
             usage_links.create_link, body,
