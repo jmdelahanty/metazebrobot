@@ -84,8 +84,9 @@ behavioral session:
 4. Session/recording metadata stays in Palette (Citrus creates it in Palette's
    registry, not MetaZebrobot)
 5. After recording, fish are assigned to wells with
-   `POST /fish/{fish_id}/assign` and a `unit_id` (the web UI has no
-   assignment control yet; see `docs/fish_tracking_api.md`)
+   `POST /fish/{fish_id}/assign` and a `unit_id`, or a `dish_id` for a
+   petri dish (the web UI has no assignment control yet; see
+   `docs/fish_tracking_api.md`)
 6. Palette backfills subjects from H5 snapshot (existing path)
 
 ### Fish Identity Details

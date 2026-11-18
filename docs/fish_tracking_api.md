@@ -337,7 +337,22 @@ Content-Type: application/json
 }
 ```
 
-`unit_id` is required (`422` `unit_id_required`). `reason` is stored on the
+Give `unit_id`, or `dish_id` alone for a dish without positions:
+
+```
+{"dish_id": "19668_13"}
+```
+
+- **`dish_id` alone:** the fish goes in the dish's one open unit,
+  `{dish_id}:open` (`unit_kind` `open`), which is created on its first use.
+  That's for a petri dish, where nobody needs to make a unit first, e.g. an
+  empty used-fish dish receiving fish after a recording. A well plate, or a
+  dish that has positioned units, needs a `unit_id`: `422`
+  `unit_id_required`. An unknown dish is `404` `dish_not_found`.
+- **Both:** the unit must be in that dish, else `422` `unit_not_in_dish`.
+- **Neither:** `422` `unit_id_required`.
+
+`reason` is stored on the
 occupancy record as free text; it defaults to `initial` for a fish's first
 placement and `transfer` otherwise. The conventional values are `initial`,
 `transfer`, `terminated` and `experiment`. `transfer_reason` (optional,
