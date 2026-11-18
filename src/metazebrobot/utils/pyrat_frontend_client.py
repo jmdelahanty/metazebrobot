@@ -25,7 +25,7 @@ def _frontend_crossings_url(base_url: str, session_id: str) -> str:
     """Return the PyRAT frontend crossings page URL for a logged-in session."""
     return urljoin(
         normalize_base_url(base_url),
-        f"frontend/tanks/tank_crossing_list?sessionid={session_id}",
+        f"frontend/tanks/tank_crossing_list?session_id={session_id}",
     )
 
 
@@ -88,7 +88,9 @@ def login_pyrat_frontend(
         raise RuntimeError("PyRAT frontend login response did not include a redirect location")
 
     redirect_url = urljoin(login_url, location)
-    session_id = parse_qs(urlparse(redirect_url).query).get("sessionid", [None])[0]
+    # PyRAT 2026-11 renamed the redirect's ``sessionid`` to ``session_id``.
+    query = parse_qs(urlparse(redirect_url).query)
+    session_id = (query.get("session_id") or query.get("sessionid") or [None])[0]
     if not session_id:
         raise RuntimeError("PyRAT frontend login redirect did not include a session id")
 
@@ -117,6 +119,8 @@ def login_pyrat_frontend(
         alias_response = session.post(
             _frontend_choose_alias_url(base_url),
             data={
+                # Both names: PyRAT 2026-11 renamed the field to session_id.
+                "session_id": session_id,
                 "sessionid": session_id,
                 "user_id": "",
             },
@@ -143,7 +147,7 @@ def login_pyrat_frontend(
             if "welcome" in alias_redirect_response.url:
                 welcome_response = session.post(
                     alias_redirect_response.url,
-                    data={"sessionid": session_id},
+                    data={"session_id": session_id, "sessionid": session_id},
                     headers={
                         "Origin": origin,
                         "Referer": alias_redirect_response.url,

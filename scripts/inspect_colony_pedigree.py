@@ -53,7 +53,7 @@ def json_preview(value: Any, max_chars: int = 1000) -> str:
 def frontend_report_url(base_url: str, session_id: str) -> str:
     return urljoin(
         normalize_base_url(base_url),
-        f"frontend/reports/colony_pedigree?sessionid={session_id}",
+        f"frontend/reports/colony_pedigree?session_id={session_id}",
     )
 
 
