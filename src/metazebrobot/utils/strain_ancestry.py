@@ -220,7 +220,7 @@ class StrainPedigreeClient:
                 "Authorization": f"Bearer {self.session_id}",
                 "Referer": urljoin(
                     self.base_url,
-                    f"frontend/reports/colony_pedigree?sessionid={self.session_id}",
+                    f"frontend/reports/colony_pedigree?session_id={self.session_id}",
                 ),
             },
             params={"kind": "strain_pedigree", "label": str(strain_id),

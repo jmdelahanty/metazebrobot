@@ -2,6 +2,7 @@
 Tests for PyRAT frontend-session helpers.
 """
 
+import pytest
 import requests
 
 from metazebrobot.utils import pyrat_frontend_client
@@ -40,7 +41,11 @@ class _Response:
 
 
 class _FrontendSession:
-    def __init__(self):
+    """PyRAT's login flow; ``param`` is the redirect's session parameter name
+    (``session_id`` since 2026-11, ``sessionid`` before)."""
+
+    def __init__(self, param="session_id"):
+        self.param = param
         self.headers = {}
         self.cookies = _CookieJar()
         self.get_urls = []
@@ -48,6 +53,7 @@ class _FrontendSession:
 
     def get(self, url, **kwargs):
         self.get_urls.append(url)
+        q = f"{self.param}=session123"
         if url.endswith("/aquatic/"):
             self.cookies.add("client_reference")
             return _Response(url=url)
@@ -55,44 +61,43 @@ class _FrontendSession:
             return _Response(url=url)
         if "choose_alias" in url:
             return _Response(
-                url=(
-                    "https://pyrat.example/aquatic/frontend/session/choose_alias"
-                    "?sessionid=session123"
-                ),
+                url=f"https://pyrat.example/aquatic/frontend/session/choose_alias?{q}",
             )
-        if "welcome?sessionid=session123" in url:
+        if f"welcome?{q}" in url:
             return _Response(url=url)
-        if "tank_crossing_list?sessionid=session123" in url:
+        if "tank_crossing_list?" in url and url.endswith("=session123"):
             return _Response(url=url)
         raise AssertionError(f"unexpected GET {url}")
 
     def post(self, url, **kwargs):
         self.post_calls.append((url, kwargs.get("data") or {}))
+        q = f"{self.param}=session123"
         if url.endswith("/frontend/session/login"):
             self.cookies.add("session_session123")
             return _Response(
                 status_code=303,
-                headers={"Location": "choose_alias?sessionid=session123"},
+                headers={"Location": f"choose_alias?{q}"},
                 url=url,
                 cookies={"session_session123": "cookie"},
             )
         if url.endswith("/frontend/session/choose_alias"):
             return _Response(
                 status_code=303,
-                headers={"Location": "welcome?sessionid=session123"},
+                headers={"Location": f"welcome?{q}"},
                 url=url,
             )
-        if "welcome?sessionid=session123" in url:
+        if f"welcome?{q}" in url:
             return _Response(
                 status_code=303,
-                headers={"Location": "../tanks/tank_crossing_list?sessionid=session123"},
+                headers={"Location": f"../tanks/tank_crossing_list?{q}"},
                 url=url,
             )
         raise AssertionError(f"unexpected POST {url}")
 
 
-def test_login_pyrat_frontend_visits_crossings_page(monkeypatch):
-    session = _FrontendSession()
+@pytest.mark.parametrize("param", ["session_id", "sessionid"])
+def test_login_pyrat_frontend_visits_crossings_page(monkeypatch, param):
+    session = _FrontendSession(param)
     monkeypatch.setattr(pyrat_frontend_client.requests, "Session", lambda: session)
 
     debug_info = {}
@@ -107,14 +112,14 @@ def test_login_pyrat_frontend_visits_crossings_page(monkeypatch):
     assert session_id == "session123"
     assert (
         "https://pyrat.example/aquatic/frontend/tanks/"
-        "tank_crossing_list?sessionid=session123"
+        "tank_crossing_list?session_id=session123"
     ) in session.get_urls
     assert debug_info["frontend_crossings_status_code"] == 200
     assert debug_info["alias_choice"] == "no_alias"
     assert debug_info["welcome_continue_status_code"] == 303
     assert (
         "https://pyrat.example/aquatic/frontend/session/choose_alias",
-        {"sessionid": "session123", "user_id": ""},
+        {"session_id": "session123", "sessionid": "session123", "user_id": ""},
     ) in session.post_calls
 
 
