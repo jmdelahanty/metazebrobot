@@ -3434,3 +3434,83 @@ class TestOriginAndLocation:
         client.post(f"/fish/{fish_id}/assign", json={"unit_id": a1})
         last = client.get(f"/fish/{fish_id}/revisions").json()["items"][-1]
         assert (last["dish_id"], last["origin_dish_id"]) == (plate, source)
+
+
+class TestAssignByDish:
+    """POST /fish/{id}/assign with dish_id: a petri dish's open unit, made on first use."""
+
+    def _cross(self):
+        return f"CROSS_{uuid.uuid4().hex[:6]}"
+
+    def test_empty_dish_gets_open_unit_and_reuses_it(self, client):
+        cross = self._cross()
+        source, dest = _full_dish(cross, 1), _full_dish(cross, 2, fish_count=0)
+        first = client.post(f"/dishes/{source}/fish", json={"subject_label": "Z1"}).json()
+        second = client.post(f"/dishes/{source}/fish", json={"subject_label": "Z2"}).json()
+
+        moved = client.post(f"/fish/{first['fish_id']}/assign", json={"dish_id": dest})
+        again = client.post(f"/fish/{second['fish_id']}/assign", json={"dish_id": dest})
+
+        assert moved.status_code == again.status_code == 200
+        body = moved.json()
+        assert (body["dish_id"], body["current_unit_id"], body["origin_dish_id"]) \
+            == (dest, f"{dest}:open", source)
+        assert again.json()["current_unit_id"] == f"{dest}:open"
+        units = client.get(f"/dishes/{dest}/units").json()["items"]
+        assert [(u["unit_id"], u["unit_kind"], u["occupant_count"]) for u in units] \
+            == [(f"{dest}:open", "open", 2)]
+        assert (_count(client, source), _count(client, dest)) == (8, 2)
+
+    def test_same_dish_places_fish_without_a_transfer(self, client, seed_dish):
+        fish_id = client.post(f"/dishes/{seed_dish}/fish", json={}).json()["fish_id"]
+        before = _count(client, seed_dish)
+        moved = client.post(f"/fish/{fish_id}/assign", json={"dish_id": seed_dish})
+        assert moved.status_code == 200
+        assert moved.json()["current_unit_id"] == f"{seed_dish}:open"
+        assert _count(client, seed_dish) == before
+
+    @pytest.mark.parametrize("container,well", [("well_plate", None), ("petri_dish", "1")])
+    def test_dish_with_positions_needs_unit_id(self, client, container, well):
+        cross = self._cross()
+        source = _full_dish(cross, 1)
+        dest = _full_dish(cross, 2, container=container, fish_count=0)
+        if well:
+            _well(client, dest, well)
+        fish_id = client.post(f"/dishes/{source}/fish", json={}).json()["fish_id"]
+
+        resp = client.post(f"/fish/{fish_id}/assign", json={"dish_id": dest})
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "unit_id_required"
+        assert client.get(f"/fish/{fish_id}").json()["dish_id"] == source
+        assert _count(client, source) == 10
+
+    def test_unit_in_another_dish_is_422(self, client):
+        cross = self._cross()
+        source = _full_dish(cross, 1)
+        plate = _full_dish(cross, 2, container="well_plate", fish_count=0)
+        a1 = _well(client, plate, "A1")
+        fish_id = client.post(f"/dishes/{source}/fish", json={}).json()["fish_id"]
+
+        resp = client.post(f"/fish/{fish_id}/assign", json={"unit_id": a1, "dish_id": source})
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "unit_not_in_dish"
+
+    def test_unknown_dish_or_neither_field(self, client, seed_dish):
+        fish_id = client.post(f"/dishes/{seed_dish}/fish", json={}).json()["fish_id"]
+        missing = client.post(f"/fish/{fish_id}/assign", json={"dish_id": "NOPE_1"})
+        assert missing.status_code == 404
+        assert missing.json()["detail"] == {"error": "dish_not_found", "dish_id": "NOPE_1"}
+        neither = client.post(f"/fish/{fish_id}/assign", json={})
+        assert neither.status_code == 422
+        assert neither.json()["detail"]["error"] == "unit_id_required"
+
+    def test_other_cross_is_refused(self, client):
+        source = _full_dish(self._cross(), 1)
+        other = _full_dish(self._cross(), 1, fish_count=0)
+        fish_id = client.post(f"/dishes/{source}/fish", json={}).json()["fish_id"]
+        resp = client.post(f"/fish/{fish_id}/assign", json={"dish_id": other})
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["error"] == "transfer_refused"
+        assert client.get(f"/fish/{fish_id}").json()["dish_id"] == source

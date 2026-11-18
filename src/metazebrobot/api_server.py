@@ -6793,6 +6793,34 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         checks = data_manager.get_housing_unit_checks(unit_id)
         return {"items": checks}
 
+    def _open_unit_for_dish(dish_id: str) -> Dict[str, Any]:
+        """The open unit of a dish without positions, created on first use.
+
+        404 ``dish_not_found``; 422 ``unit_id_required`` for a well plate or a
+        dish with positioned units, where a dish alone doesn't say where.
+        """
+        db_path = _require_db_path()
+        with _open_readonly_connection(db_path, app.state.busy_timeout_ms) as conn:
+            dish = conn.execute("SELECT container_type FROM dishes WHERE dish_id = ?",
+                                (dish_id,)).fetchone()
+        if dish is None:
+            raise _not_found("dish", dish_id=dish_id)
+        open_id = f"{dish_id}:open"
+        positioned = [u["unit_id"] for u in data_manager.get_housing_units(dish_id)
+                      if u["unit_id"] != open_id]
+        if dish["container_type"] == "well_plate" or positioned:
+            raise HTTPException(status_code=422, detail={
+                "error": "unit_id_required", "dish_id": dish_id,
+                "message": "This dish has positions; name the unit_id."})
+        unit = data_manager.get_housing_unit(open_id)
+        if unit is None:
+            # A concurrent first move may create it first; either way it exists after.
+            data_manager.create_housing_unit(dish_id=dish_id, unit_kind="open", capacity=None)
+            unit = data_manager.get_housing_unit(open_id)
+        if unit is None:
+            raise HTTPException(status_code=500, detail="Failed to create the dish's open unit")
+        return unit
+
     @app.post("/fish/{fish_id}/assign", status_code=200)
     def assign_or_move_fish(
         fish_id: str,
@@ -6800,10 +6828,16 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     ) -> Dict[str, Any]:
         """Put a fish in a housing unit; its dish becomes the unit's dish.
 
-        Body: ``unit_id`` (required); ``reason`` for the occupancy record
-        (default ``initial`` for a first placement, else ``transfer``);
-        ``transfer_reason`` for the dish transfer when the unit is in another
-        dish (default ``manual_transfer``).
+        Body: ``unit_id`` or ``dish_id`` (one is required); ``reason`` for the
+        occupancy record (default ``initial`` for a first placement, else
+        ``transfer``); ``transfer_reason`` for the dish transfer when the unit
+        is in another dish (default ``manual_transfer``).
+
+        ``dish_id`` alone is for a dish without positions (a petri dish): the
+        fish goes in the dish's one open unit, ``{dish_id}:open``, created on
+        first use. A well plate, or a dish with numbered positions, needs a
+        ``unit_id`` (422 ``unit_id_required``). Both given must agree (422
+        ``unit_not_in_dish``).
 
         Moving into another dish first records a dish transfer of one fish,
         which updates both dishes' counts (and closes the source dish if that
@@ -6815,11 +6849,20 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if fish is None:
             raise _not_found("fish", fish_id=fish_id)
         new_unit_id = body.get("unit_id")
-        if not new_unit_id:
+        target_dish_id = body.get("dish_id")
+        if new_unit_id:
+            unit = data_manager.get_housing_unit(new_unit_id)
+            if unit is None:
+                raise _not_found("unit", unit_id=new_unit_id)
+            if target_dish_id and unit["dish_id"] != target_dish_id:
+                raise HTTPException(status_code=422, detail={
+                    "error": "unit_not_in_dish", "unit_id": new_unit_id,
+                    "dish_id": target_dish_id, "unit_dish_id": unit["dish_id"]})
+        elif target_dish_id:
+            unit = _open_unit_for_dish(target_dish_id)
+            new_unit_id = unit["unit_id"]
+        else:
             raise HTTPException(status_code=422, detail={"error": "unit_id_required"})
-        unit = data_manager.get_housing_unit(new_unit_id)
-        if unit is None:
-            raise _not_found("unit", unit_id=new_unit_id)
         if fish.get("status") and fish["status"] != "alive":
             raise HTTPException(status_code=409, detail={
                 "error": "fish_ended", "fish_id": fish_id, "status": fish["status"]})
