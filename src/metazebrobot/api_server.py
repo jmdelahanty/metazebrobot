@@ -5950,14 +5950,38 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
     @app.delete("/fish/{fish_id}", status_code=204)
     def delete_fish(request: Request, fish_id: str):
-        """Delete a fish subject. Returns HTMX partial when called from the browser."""
+        """Delete a fish subject. Returns HTMX partial when called from the browser.
+
+        Only for a fish no recording names: 409 ``fish_in_use`` (with the
+        ``recording_refs``) when a usage link names it as its subject or a
+        group member, so a delete can't leave a link pointing at nothing.
+        End a used fish instead (``POST /fish/{fish_id}/end``).
+        """
         _require_db_path()
         existing = data_manager.get_fish_subject(fish_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="Fish not found")
         dish_id = existing["dish_id"]
-        if not data_manager.delete_fish_subject(fish_id):
-            raise HTTPException(status_code=500, detail="Failed to delete fish subject")
+        try:
+            with data_manager.get_connection() as conn:
+                # One write transaction, so a link can't name the fish in between.
+                conn.execute("BEGIN IMMEDIATE")
+                refs = usage_links.refs_naming_fish(conn, fish_id)
+                if not refs:
+                    conn.execute("DELETE FROM fish_subjects WHERE fish_id = ?", (fish_id,))
+                conn.commit()
+        except sqlite3.Error as exc:
+            raise _database_error(exc) from exc
+        if refs and request.headers.get("HX-Request"):
+            return templates.TemplateResponse(request, "fish/_fish_table.html", {
+                "fish": data_manager.get_fish_subjects(dish_id),
+                "flash_message": "This fish is named by a recording, so it can't be "
+                                 "removed. End it instead.",
+                "flash_level": "error",
+            })
+        if refs:
+            raise HTTPException(status_code=409, detail={
+                "error": "fish_in_use", "fish_id": fish_id, "recording_refs": refs})
         # If called via HTMX, return updated fish table partial
         if request.headers.get("HX-Request"):
             fish = data_manager.get_fish_subjects(dish_id)

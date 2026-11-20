@@ -202,6 +202,13 @@ DELETE /fish/{fish_id}
 Returns `204` on success, `404` if not found. The fish's occupancy history and
 reference-image records are deleted with it.
 
+Delete is for a fish no recording uses, such as one registered into a plan
+that was abandoned. A fish that a usage link names, as its subject or as a
+group member, is refused with `409`
+`{"error": "fish_in_use", "fish_id": ..., "recording_refs": [...]}` and
+nothing changes; end it instead (`POST /fish/{fish_id}/end`). From the dish's
+fish page the refusal shows as an error message.
+
 ---
 
 ### Housing units

@@ -383,3 +383,51 @@ class TestSetMembers:
         assert resp.json()["detail"] == {"error": "fish_not_found", "fish_id": missing}
         assert client.get(f"/usage-links/{quote(group['recording_ref'], safe='')}").json()[
             "members_added_at"] is None
+
+
+class TestDeleteGuard:
+    """DELETE /fish/{id} refuses a fish a recording names (409 fish_in_use)."""
+
+    def test_unused_fish_deletes(self, client, seed_dish):
+        fish_id = _mint(client, seed_dish, "Z1")
+        assert client.delete(f"/fish/{fish_id}").status_code == 204
+        assert client.get(f"/fish/{fish_id}").status_code == 404
+
+    def test_subject_of_a_link_is_refused(self, client, fish):
+        dish_id, fish_id = fish
+        body = _link(dish_id, fish_id=fish_id, fish_revision=1, subject_count=1)
+        client.post("/usage-links", json=body)
+
+        resp = client.delete(f"/fish/{fish_id}")
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == {"error": "fish_in_use", "fish_id": fish_id,
+                                         "recording_refs": [body["recording_ref"]]}
+        assert client.get(f"/fish/{fish_id}").status_code == 200
+
+    def test_group_member_is_refused_others_delete(self, client, seed_dish):
+        members = [_mint(client, seed_dish, f"Z{i}") for i in range(2)]
+        spare = _mint(client, seed_dish, "Z9")
+        refs = []
+        for arena in ("arena_1", "arena_2"):
+            body = _link(seed_dish, arena_id=arena, subject_count=1, started_at=LATER)
+            client.post("/usage-links", json=body)
+            refs.append(body["recording_ref"])
+        put = client.put(f"/usage-links/{quote(refs[0], safe='')}/members",
+                         json={"members": [{"fish_id": members[0], "fish_revision": 1}]})
+        assert put.status_code == 201
+
+        refused = client.delete(f"/fish/{members[0]}")
+        assert refused.status_code == 409
+        assert refused.json()["detail"]["recording_refs"] == [refs[0]]
+        assert client.delete(f"/fish/{members[1]}").status_code == 204
+        assert client.delete(f"/fish/{spare}").status_code == 204
+
+    def test_browser_delete_shows_the_refusal(self, client, fish):
+        dish_id, fish_id = fish
+        client.post("/usage-links", json=_link(dish_id, fish_id=fish_id, fish_revision=1,
+                                                 subject_count=1))
+        resp = client.delete(f"/fish/{fish_id}", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "can&#39;t be" in resp.text or "can't be" in resp.text
+        assert client.get(f"/fish/{fish_id}").status_code == 200

@@ -246,6 +246,14 @@ def member_flag(conn, fish_id: str, dish_id: str, started_norm: str) -> Optional
     return None if dish_then == dish_id else "not_in_dish_at_start"
 
 
+def refs_naming_fish(conn, fish_id: str) -> List[str]:
+    """Recording refs of links that name this fish, as subject or group member."""
+    return [r[0] for r in conn.execute(
+        "SELECT recording_ref FROM usage_links WHERE fish_id = ? "
+        "UNION SELECT recording_ref FROM usage_link_members WHERE fish_id = ? "
+        "ORDER BY 1", (fish_id, fish_id))]
+
+
 def get_link(conn, recording_ref: str) -> Optional[Dict[str, Any]]:
     row = conn.execute("SELECT * FROM usage_links WHERE recording_ref = ?", (recording_ref,)).fetchone()
     return _row(conn, row) if row else None
