@@ -5948,14 +5948,43 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             raise HTTPException(status_code=500, detail="Failed to update fish subject")
         return data_manager.get_fish_subject(fish_id)
 
+    def _fish_delete_refusal(conn, fish_id: str) -> Optional[Tuple[Dict[str, Any], str]]:
+        """(409 detail, page message) when a record still points at the fish.
+
+        Usage links first, then the fish's own screening observations and its
+        linked images: those two tables have no foreign key, so a delete
+        would leave their rows pointing at nothing.
+        """
+        refs = usage_links.refs_naming_fish(conn, fish_id)
+        if refs:
+            return ({"error": "fish_in_use", "fish_id": fish_id, "recording_refs": refs},
+                    "This fish is named by a recording, so it can't be removed. End it instead.")
+        observations = conn.execute(
+            "SELECT COUNT(*) FROM fish_screening_observations WHERE fish_id = ?",
+            (fish_id,)).fetchone()[0]
+        if observations:
+            return ({"error": "fish_has_observations", "fish_id": fish_id,
+                     "observation_count": observations},
+                    "This fish has screening observations, so it can't be removed.")
+        linked = conn.execute("SELECT COUNT(*) FROM image_links WHERE fish_id = ?",
+                              (fish_id,)).fetchone()[0]
+        if linked:
+            return ({"error": "fish_has_image_links", "fish_id": fish_id,
+                     "image_link_count": linked},
+                    "This fish has linked images, so it can't be removed.")
+        return None
+
     @app.delete("/fish/{fish_id}", status_code=204)
     def delete_fish(request: Request, fish_id: str):
         """Delete a fish subject. Returns HTMX partial when called from the browser.
 
-        Only for a fish no recording names: 409 ``fish_in_use`` (with the
-        ``recording_refs``) when a usage link names it as its subject or a
-        group member, so a delete can't leave a link pointing at nothing.
-        End a used fish instead (``POST /fish/{fish_id}/end``).
+        Only for a fish nothing else points at, so a delete can't leave records
+        pointing at nothing. 409, checked in this order: ``fish_in_use`` (with
+        the ``recording_refs``) when a usage link names it as its subject or a
+        group member; ``fish_has_observations`` (``observation_count``) when it
+        has its own screening observations; ``fish_has_image_links``
+        (``image_link_count``) when images are linked to it. End a used fish
+        instead (``POST /fish/{fish_id}/end``).
         """
         _require_db_path()
         existing = data_manager.get_fish_subject(fish_id)
@@ -5964,24 +5993,22 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         dish_id = existing["dish_id"]
         try:
             with data_manager.get_connection() as conn:
-                # One write transaction, so a link can't name the fish in between.
+                # One write transaction, so nothing can attach to the fish in between.
                 conn.execute("BEGIN IMMEDIATE")
-                refs = usage_links.refs_naming_fish(conn, fish_id)
-                if not refs:
+                refusal = _fish_delete_refusal(conn, fish_id)
+                if refusal is None:
                     conn.execute("DELETE FROM fish_subjects WHERE fish_id = ?", (fish_id,))
                 conn.commit()
         except sqlite3.Error as exc:
             raise _database_error(exc) from exc
-        if refs and request.headers.get("HX-Request"):
+        if refusal and request.headers.get("HX-Request"):
             return templates.TemplateResponse(request, "fish/_fish_table.html", {
                 "fish": data_manager.get_fish_subjects(dish_id),
-                "flash_message": "This fish is named by a recording, so it can't be "
-                                 "removed. End it instead.",
+                "flash_message": refusal[1],
                 "flash_level": "error",
             })
-        if refs:
-            raise HTTPException(status_code=409, detail={
-                "error": "fish_in_use", "fish_id": fish_id, "recording_refs": refs})
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal[0])
         # If called via HTMX, return updated fish table partial
         if request.headers.get("HX-Request"):
             fish = data_manager.get_fish_subjects(dish_id)

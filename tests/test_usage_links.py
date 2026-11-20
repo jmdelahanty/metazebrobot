@@ -431,3 +431,28 @@ class TestDeleteGuard:
         assert resp.status_code == 200
         assert "can&#39;t be" in resp.text or "can't be" in resp.text
         assert client.get(f"/fish/{fish_id}").status_code == 200
+
+    @pytest.mark.parametrize("table,error,count_key", [
+        ("fish_screening_observations", "fish_has_observations", "observation_count"),
+        ("image_links", "fish_has_image_links", "image_link_count"),
+    ])
+    def test_fish_with_own_records_is_refused(self, client, seed_dish, table, error, count_key):
+        from metazebrobot.data.data_manager import data_manager
+        fish_id = _mint(client, seed_dish, "Z1")
+        with data_manager.get_connection() as conn:
+            if table == "image_links":
+                conn.execute(
+                    "INSERT INTO image_links (rel_path, dish_id, fish_id, kind, size_bytes, "
+                    "sha256, file_mtime) VALUES ('a.czi', ?, ?, 'screening', 1, 'x', 't')",
+                    (seed_dish, fish_id))
+            else:
+                conn.execute(
+                    "INSERT INTO fish_screening_observations (fish_id, dish_construct, "
+                    "result, observed_at) VALUES (?, 'Tg(x:y)', 'positive', 't')", (fish_id,))
+            conn.commit()
+
+        resp = client.delete(f"/fish/{fish_id}")
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == {"error": error, "fish_id": fish_id, count_key: 1}
+        assert client.get(f"/fish/{fish_id}").status_code == 200
