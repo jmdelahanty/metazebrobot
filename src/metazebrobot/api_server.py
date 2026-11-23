@@ -406,13 +406,20 @@ class UsageLinkCorrectionResponse(BaseModel):
     """Which fish was really in the arena, attested by a person.
 
     ``fish_id`` null is "fish unknown". ``member_fish_id`` is the sealed member
-    corrected, or null for the link's own fish. ``dish_id``, ``fish_revision``
-    and ``unit_id`` come from the fish's history at the link's ``started_at``.
+    corrected, or null for the link's own fish. ``recorded_fish_id`` and
+    ``recorded_fish_revision`` are the sealed values it overrides.
+    ``supersedes`` is the place's previous effective correction (null on the
+    first). ``dish_id`` (always set), ``fish_revision`` and ``unit_id`` come from
+    the fish's history at the link's ``started_at``; both are null for "fish
+    unknown".
     """
 
     id: int
     recording_ref: str
     member_fish_id: Optional[str] = None
+    recorded_fish_id: Optional[str] = None
+    recorded_fish_revision: Optional[int] = None
+    supersedes: Optional[int] = None
     fish_id: Optional[str] = None
     dish_id: str
     fish_revision: Optional[int] = None

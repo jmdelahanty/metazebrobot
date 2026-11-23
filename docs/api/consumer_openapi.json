@@ -1732,7 +1732,7 @@
         "type": "object"
       },
       "UsageLinkCorrectionResponse": {
-        "description": "Which fish was really in the arena, attested by a person.\n\n``fish_id`` null is \"fish unknown\". ``member_fish_id`` is the sealed member\ncorrected, or null for the link's own fish. ``dish_id``, ``fish_revision``\nand ``unit_id`` come from the fish's history at the link's ``started_at``.",
+        "description": "Which fish was really in the arena, attested by a person.\n\n``fish_id`` null is \"fish unknown\". ``member_fish_id`` is the sealed member\ncorrected, or null for the link's own fish. ``recorded_fish_id`` and\n``recorded_fish_revision`` are the sealed values it overrides.\n``supersedes`` is the place's previous effective correction (null on the\nfirst). ``dish_id`` (always set), ``fish_revision`` and ``unit_id`` come from\nthe fish's history at the link's ``started_at``; both are null for \"fish\nunknown\".",
         "properties": {
           "attested_by": {
             "title": "Attested By",
@@ -1787,9 +1787,42 @@
             ],
             "title": "Member Fish Id"
           },
+          "recorded_fish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Fish Id"
+          },
+          "recorded_fish_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Fish Revision"
+          },
           "recording_ref": {
             "title": "Recording Ref",
             "type": "string"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes"
           },
           "unit_id": {
             "anyOf": [

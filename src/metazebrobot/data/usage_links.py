@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS usage_link_corrections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     recording_ref TEXT NOT NULL REFERENCES usage_links(recording_ref),
     member_fish_id TEXT,
+    recorded_fish_id TEXT,
+    recorded_fish_revision INTEGER,
+    supersedes INTEGER REFERENCES usage_link_corrections(id),
     fish_id TEXT,
     dish_id TEXT NOT NULL,
     fish_revision INTEGER,
@@ -329,7 +332,12 @@ def add_correction(conn, recording_ref: str, body: Dict[str, Any]) -> Dict[str, 
     null is "fish unknown". ``member_fish_id`` names the sealed member being
     corrected and is required for a link with members. The fish's dish,
     revision and unit at ``started_at`` are filled from its history.
+    ``recorded_fish_id``/``recorded_fish_revision`` are the sealed values the
+    correction overrides, and ``supersedes`` is the place's previous
+    effective correction (null on the first).
     """
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")  # so two corrections can't both supersede one
     if not isinstance(body, dict):
         raise _bad_correction("body", "expected a JSON object")
     for key in body:
@@ -346,8 +354,8 @@ def add_correction(conn, recording_ref: str, body: Dict[str, Any]) -> Dict[str, 
         raise _bad_correction("evidence", f"required text, at most {MAX_EVIDENCE} characters")
     attested_by = body.get("attested_by")
     if not isinstance(attested_by, str) or not conn.execute(
-            "SELECT 1 FROM users WHERE username = ?", (attested_by,)).fetchone():
-        raise _bad_correction("attested_by", "a known username")
+            "SELECT 1 FROM users WHERE username = ? AND app_user = 1", (attested_by,)).fetchone():
+        raise _bad_correction("attested_by", "the username of a person who uses MetaZebrobot")
 
     row = conn.execute("SELECT * FROM usage_links WHERE recording_ref = ?",
                        (recording_ref,)).fetchone()
@@ -358,7 +366,11 @@ def add_correction(conn, recording_ref: str, body: Dict[str, Any]) -> Dict[str, 
         if member not in subjects["members"]:
             raise _bad_correction("member_fish_id", "required: one of the link's sealed members")
         current = subjects["members"][member]
+        recorded = (member, conn.execute(
+            "SELECT fish_revision FROM usage_link_members WHERE recording_ref = ? AND fish_id = ?",
+            (recording_ref, member)).fetchone()["fish_revision"])
     else:
+        recorded = (row["fish_id"], row["fish_revision"])
         if member is not None:
             raise _bad_correction("member_fish_id", "only for a link with members")
         if row["fish_id"] is None and (row["subject_count"] or 1) > 1:
@@ -391,13 +403,16 @@ def add_correction(conn, recording_ref: str, body: Dict[str, Any]) -> Dict[str, 
                 raise UsageLinkError(409, {"error": "fish_in_another_arena", "fish_id": fish_id,
                                            "recording_ref": other_ref})
         state = _fish_state_at(conn, fish_id, row["started_norm"])
+    previous = subjects["corrections"].get(member)
     stamp = now_utc()
     conn.execute(
-        """INSERT INTO usage_link_corrections (recording_ref, member_fish_id, fish_id, dish_id,
-               fish_revision, unit_id, attested_by, evidence, corrected_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (recording_ref, member, fish_id, state["dish_id"], state["fish_revision"],
-         state["unit_id"], attested_by, evidence.strip(), stamp))
+        """INSERT INTO usage_link_corrections (recording_ref, member_fish_id, recorded_fish_id,
+               recorded_fish_revision, supersedes, fish_id, dish_id, fish_revision, unit_id,
+               attested_by, evidence, corrected_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (recording_ref, member, recorded[0], recorded[1], previous["id"] if previous else None,
+         fish_id, state["dish_id"], state["fish_revision"], state["unit_id"], attested_by,
+         evidence.strip(), stamp))
     conn.execute("UPDATE usage_links SET updated_at = ? WHERE recording_ref = ?",
                  (stamp, recording_ref))
     return get_link(conn, recording_ref)

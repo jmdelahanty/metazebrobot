@@ -17,6 +17,9 @@ def attester(client):
     conn = sqlite3.connect(str(data_manager.database_path))
     conn.execute("INSERT OR IGNORE INTO users (pyrat_userid, username, fullname, app_user) "
                  "VALUES (?, ?, ?, 1)", (900001, ATTESTER, "Ada Lovelace"))
+    # A PyRAT account that doesn't use MetaZebrobot can't attest.
+    conn.execute("INSERT OR IGNORE INTO users (pyrat_userid, username, fullname, app_user) "
+                 "VALUES (?, ?, ?, 0)", (900002, "turinga", "Alan Turing"))
     conn.commit()
     conn.close()
 
@@ -54,7 +57,8 @@ class TestCorrectIndividualLink:
         c = link["correction"]
         assert c["fish_id"] == z6 and c["dish_id"] == seed_dish
         assert c["attested_by"] == ATTESTER and c["fish_revision"] == 1
-        assert c["member_fish_id"] is None
+        assert c["member_fish_id"] is None and c["supersedes"] is None
+        assert (c["recorded_fish_id"], c["recorded_fish_revision"]) == (z5, None)
         assert client.post("/usage-links", json=a3).status_code == 200
         assert client.get(f"/usage-links/{a3['recording_ref']}").json()["correction"]["id"] == c["id"]
 
@@ -88,6 +92,10 @@ class TestCorrectIndividualLink:
                                          "recording_ref": a2["recording_ref"]}
         history = client.get(f"/usage-links/{a3['recording_ref']}/corrections").json()["items"]
         assert [c["fish_id"] for c in history] == [z6]
+        # Undo once Z5's other arena no longer holds it.
+        _correct(client, a2["recording_ref"], None, evidence="unsure")
+        undo = _correct(client, a3["recording_ref"], z5).json()["correction"]
+        assert undo["supersedes"] == history[0]["id"] and undo["recorded_fish_id"] == z5
 
     def test_fish_unknown(self, client, seed_dish):
         z5, z6, a2, a3 = _pair(client, seed_dish)
@@ -161,6 +169,8 @@ class TestCorrectMembers:
         assert resp.status_code == 201
         members = {m["fish_id"]: m for m in resp.json()["members"]}
         assert members[b]["correction"]["fish_id"] == spare
+        assert members[b]["correction"]["recorded_fish_id"] == b
+        assert members[b]["correction"]["recorded_fish_revision"] == 1
         assert members[a]["correction"] is None and resp.json()["correction"] is None
         assert [i["recording_ref"] for i in
                 client.get("/usage-links", params={"fish_id": spare}).json()["items"]] == [ref]
@@ -196,6 +206,7 @@ class TestCorrectMembers:
     ({"fish_id": None, "evidence": "  ", "attested_by": ATTESTER}, "evidence"),
     ({"fish_id": None, "evidence": "x"}, "attested_by"),
     ({"fish_id": None, "evidence": "x", "attested_by": "nobody"}, "attested_by"),
+    ({"fish_id": None, "evidence": "x", "attested_by": "turinga"}, "attested_by"),
     ({"fish_id": "Z6", "evidence": "x", "attested_by": ATTESTER}, "fish_id"),
     ({"fish_id": None, "evidence": "x", "attested_by": ATTESTER, "dish_id": "D"}, "dish_id"),
 ])

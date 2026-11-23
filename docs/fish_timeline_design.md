@@ -284,9 +284,11 @@ can catch.
 | `recording_ref` | The corrected link (references `usage_links`) |
 | `fish_id` | The fish that was actually in the arena |
 | `dish_id` | That fish's dish at `started_at`, from its revisions (not sent); the link's dish for "fish unknown" |
-| `fish_revision`, `unit_id` | Filled by MetaZebrobot from the fish's revisions at the link's `started_at`, not typed |
+| `fish_revision`, `unit_id` | Filled by MetaZebrobot from the fish's revisions at the link's `started_at`, not typed; null for "fish unknown" |
 | `member_fish_id` | The sealed member corrected; null for the link's own fish |
-| `attested_by` | The username who made the correction (a `users` row; the viewer picker for the web; required) |
+| `recorded_fish_id`, `recorded_fish_revision` | The sealed values the correction overrides (the link's or the member's), so a reader can check them against the H5 |
+| `supersedes` | The place's previous effective correction's `id`; null on the first |
+| `attested_by` | The username of the person who made the correction: a `users` row marked as a MetaZebrobot user, never a service account (the viewer picker for the web; required) |
 | `evidence` | Free text, required (e.g. "bench notes: arena 3 held Z6") |
 | `corrected_at` | Server UTC |
 
