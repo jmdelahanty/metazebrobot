@@ -3802,13 +3802,15 @@ class DataManager:
             logger.error(f"Error assigning fish to unit: {e}")
             return False
 
-    def relocate_fish(self, fish_id: str, unit_id: str, reason: str = "transfer") -> bool:
+    def relocate_fish(self, fish_id: str, unit_id: str, reason: str = "transfer",
+                      at: Optional[str] = None) -> bool:
         """Put a fish in a unit: its dish becomes the unit's dish, in one transaction.
 
         Closes any open occupancy, fixes the origin if it was implicit
         (``origin_dish_id`` NULL means "never moved"), sets ``dish_id`` and
         ``current_unit_id`` from the unit, and opens a new occupancy. Dish
-        counts are the caller's job (a dish transfer), done first.
+        counts are the caller's job (a dish transfer), done first. ``at``
+        ('YYYY-MM-DD HH:MM:SS' UTC) dates the occupancy change; default now.
         """
         if not self.is_initialized:
             logger.error("DataManager not initialized.")
@@ -3816,9 +3818,10 @@ class DataManager:
         try:
             with self.get_connection() as conn:
                 conn.execute(
-                    """UPDATE housing_unit_occupancy SET moved_out_at = CURRENT_TIMESTAMP
+                    """UPDATE housing_unit_occupancy
+                       SET moved_out_at = COALESCE(?, CURRENT_TIMESTAMP)
                        WHERE fish_id = ? AND moved_out_at IS NULL""",
-                    (fish_id,),
+                    (at, fish_id),
                 )
                 cursor = conn.execute(
                     """
@@ -3839,8 +3842,8 @@ class DataManager:
                     return False
                 conn.execute(
                     """INSERT INTO housing_unit_occupancy (fish_id, unit_id, moved_in_at, reason)
-                       VALUES (?, ?, CURRENT_TIMESTAMP, ?)""",
-                    (fish_id, unit_id, reason),
+                       VALUES (?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?)""",
+                    (fish_id, unit_id, at, reason),
                 )
                 conn.commit()
                 return True
