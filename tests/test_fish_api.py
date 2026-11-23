@@ -3514,3 +3514,58 @@ class TestAssignByDish:
         assert resp.status_code == 409
         assert resp.json()["detail"]["error"] == "transfer_refused"
         assert client.get(f"/fish/{fish_id}").json()["dish_id"] == source
+
+
+class TestAssignAt:
+    """POST /fish/{id}/assign with ``at``: a move recorded after the fact."""
+
+    def _setup(self, client):
+        cross = f"CROSS_{uuid.uuid4().hex[:6]}"
+        source, dest = _full_dish(cross, 1), _full_dish(cross, 2, fish_count=0)
+        fish_id = client.post(f"/dishes/{source}/fish", json={}).json()["fish_id"]
+        return source, dest, fish_id
+
+    def _transfers(self, dest):
+        with data_manager.get_connection() as conn:
+            return [r[0] for r in conn.execute(
+                "SELECT event_datetime FROM dish_transfer_events WHERE destination_dish_id = ?",
+                (dest,))]
+
+    def test_at_dates_the_occupancy_and_transfer(self, client):
+        from datetime import datetime, timedelta, timezone
+        source, dest, fish_id = self._setup(client)
+        when = (datetime.now(timezone.utc) + timedelta(seconds=30)).replace(microsecond=0)
+        at = when.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        moved = client.post(f"/fish/{fish_id}/assign", json={"dish_id": dest, "at": at})
+
+        assert moved.status_code == 200
+        history = client.get(f"/fish/{fish_id}/history").json()["items"]
+        assert [h["moved_in_at"] for h in history] == [when.strftime("%Y-%m-%d %H:%M:%S")]
+        from metazebrobot.utils.lab_time import LAB_TIMEZONE
+        assert self._transfers(dest) == [when.astimezone(LAB_TIMEZONE).strftime("%Y%m%dT%H:%M:%S")]
+        assert (_count(client, source), _count(client, dest)) == (9, 1)
+
+    def test_retry_into_the_same_unit_changes_nothing(self, client):
+        source, dest, fish_id = self._setup(client)
+        first = client.post(f"/fish/{fish_id}/assign", json={"dish_id": dest}).json()
+        again = client.post(f"/fish/{fish_id}/assign", json={"dish_id": dest})
+        assert again.status_code == 200
+        assert again.json()["revision"] == first["revision"]
+        assert len(client.get(f"/fish/{fish_id}/history").json()["items"]) == 1
+        assert len(self._transfers(dest)) == 1
+        assert (_count(client, source), _count(client, dest)) == (9, 1)
+
+    @pytest.mark.parametrize("at,message", [
+        ("2026-11-20 18:00:00", "RFC 3339"),
+        ("2999-01-01T00:00:00Z", "future"),
+        ("2000-01-01T00:00:00Z", "before"),
+    ])
+    def test_bad_at_is_422_and_nothing_moves(self, client, at, message):
+        source, dest, fish_id = self._setup(client)
+        resp = client.post(f"/fish/{fish_id}/assign", json={"dish_id": dest, "at": at})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "invalid_at"
+        assert message in resp.json()["detail"]["message"]
+        assert client.get(f"/fish/{fish_id}").json()["dish_id"] == source
+        assert (_count(client, source), _count(client, dest)) == (10, 0)

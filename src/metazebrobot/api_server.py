@@ -6844,6 +6844,34 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         checks = data_manager.get_housing_unit_checks(unit_id)
         return {"items": checks}
 
+    def _move_time(fish: Dict[str, Any], at: Any) -> Optional[datetime]:
+        """The move's ``at`` (RFC 3339 UTC) as a UTC datetime; None means now.
+
+        422 ``invalid_at`` unless it ends in Z, isn't in the future, and isn't
+        before the fish was registered or placed where it is now, so a late
+        move can't reorder the fish's history.
+        """
+        if at is None:
+            return None
+        if usage_links.normalize_time(at) is None:
+            raise HTTPException(status_code=422, detail={
+                "error": "invalid_at", "at": str(at), "message": "RFC 3339 UTC ending in Z"})
+        instant = datetime.fromisoformat(at.replace("Z", "+00:00")).astimezone(timezone.utc)
+        if instant > datetime.now(timezone.utc) + timedelta(minutes=1):
+            raise HTTPException(status_code=422, detail={
+                "error": "invalid_at", "at": at, "message": "in the future"})
+        with data_manager.get_connection() as conn:
+            row = conn.execute(
+                "SELECT MAX(t) FROM (SELECT created_at AS t FROM fish_subjects WHERE fish_id = ? "
+                "UNION ALL SELECT moved_in_at FROM housing_unit_occupancy WHERE fish_id = ?)",
+                (fish["fish_id"], fish["fish_id"])).fetchone()
+        latest = row[0] if row else None
+        if latest and instant.strftime("%Y-%m-%d %H:%M:%S") < latest[:19]:
+            raise HTTPException(status_code=422, detail={
+                "error": "invalid_at", "at": at,
+                "message": f"before the fish's last placement or registration ({latest[:19]} UTC)"})
+        return instant
+
     def _open_unit_for_dish(dish_id: str) -> Dict[str, Any]:
         """The open unit of a dish without positions, created on first use.
 
@@ -6890,6 +6918,14 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         ``unit_id`` (422 ``unit_id_required``). Both given must agree (422
         ``unit_not_in_dish``).
 
+        ``at`` (optional, RFC 3339 UTC ending in Z, default now) is when the
+        move happened, for a move recorded after the fact (e.g. at a
+        recording's end). It dates the occupancy records and the dish
+        transfer; the fish's revision is still stamped when it's recorded.
+        422 ``invalid_at`` if it's malformed, in the future, or before the
+        fish was registered or placed where it is now. A move into the unit
+        the fish is already in changes nothing and returns the fish (200).
+
         Moving into another dish first records a dish transfer of one fish,
         which updates both dishes' counts (and closes the source dish if that
         was its last fish), then moves the fish: ``dish_id`` follows the fish;
@@ -6917,6 +6953,10 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         if fish.get("status") and fish["status"] != "alive":
             raise HTTPException(status_code=409, detail={
                 "error": "fish_ended", "fish_id": fish_id, "status": fish["status"]})
+        if fish.get("current_unit_id") == new_unit_id:
+            # Already there: a retried move changes nothing.
+            return fish
+        moved_at = _move_time(fish, body.get("at"))
         reason = body.get("reason") or ("transfer" if fish.get("current_unit_id") else "initial")
 
         if unit["dish_id"] != fish["dish_id"]:
@@ -6925,6 +6965,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                 destination_dish_id=unit["dish_id"],
                 count=1,
                 reason=body.get("transfer_reason") or "manual_transfer",
+                event_datetime=(moved_at.astimezone(LAB_TIMEZONE).strftime("%Y%m%dT%H:%M:%S")
+                                if moved_at else None),
                 notes=f"Fish {fish.get('subject_label') or fish_id} moved to {new_unit_id}",
             )
             if not ok:
@@ -6933,7 +6975,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
                     detail={"error": "transfer_refused", "fish_id": fish_id,
                             "unit_id": new_unit_id, "message": message},
                 )
-        if not data_manager.relocate_fish(fish_id, new_unit_id, reason):
+        if not data_manager.relocate_fish(
+                fish_id, new_unit_id, reason,
+                at=moved_at.strftime("%Y-%m-%d %H:%M:%S") if moved_at else None):
             raise HTTPException(status_code=500, detail="Failed to move fish")
         return data_manager.get_fish_subject(fish_id)
 

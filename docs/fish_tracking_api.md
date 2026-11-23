@@ -365,6 +365,22 @@ Give `unit_id`, or `dish_id` alone for a dish without positions:
 - **Both:** the unit must be in that dish, else `422` `unit_not_in_dish`.
 - **Neither:** `422` `unit_id_required`.
 
+`at` (optional, RFC 3339 UTC ending in `Z`, default now) is when the move
+happened, for a move recorded after the fact, such as fish moved to the
+used-fish dish at a recording's end:
+
+```
+{"dish_id": "19668_14", "at": "2026-11-20T18:11:29Z"}
+```
+
+It dates the occupancy records and the dish transfer. The fish's revision is
+still stamped when MetaZebrobot records the move. `422` `invalid_at` if it is
+malformed, in the future, or earlier than the fish's registration or its
+placement where it is now, so a late move can't reorder its history.
+
+A move into the unit the fish is already in (a retry) changes nothing and
+returns the fish, `200`.
+
 `reason` is stored on the
 occupancy record as free text; it defaults to `initial` for a fish's first
 placement and `transfer` otherwise. The conventional values are `initial`,
