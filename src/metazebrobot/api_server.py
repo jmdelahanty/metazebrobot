@@ -384,7 +384,7 @@ class ConstructListResponse(BaseModel):
 class TimelineEntryResponse(BaseModel):
     at: Optional[str] = Field(None, description="Lab-local YYYY-MM-DDTHH:MM:SS, or YYYY-MM-DD")
     kind: str = Field(..., description="fertilized, screening, registered, placed, edited, "
-                                       "recorded, possibly_recorded, ended")
+                                       "recorded, possibly_recorded, corrected_away, ended")
     summary: str
     source: str = Field(..., description="Table(s) the entry comes from")
     details: Dict[str, Any] = Field(default_factory=dict)
@@ -402,12 +402,38 @@ class FishTimelineResponse(BaseModel):
     not_yet_recorded: List[str] = Field(default_factory=list)
 
 
+class UsageLinkCorrectionResponse(BaseModel):
+    """Which fish was really in the arena, attested by a person.
+
+    ``fish_id`` null is "fish unknown". ``member_fish_id`` is the sealed member
+    corrected, or null for the link's own fish. ``dish_id``, ``fish_revision``
+    and ``unit_id`` come from the fish's history at the link's ``started_at``.
+    """
+
+    id: int
+    recording_ref: str
+    member_fish_id: Optional[str] = None
+    fish_id: Optional[str] = None
+    dish_id: str
+    fish_revision: Optional[int] = None
+    unit_id: Optional[str] = None
+    attested_by: str
+    evidence: str
+    corrected_at: str
+
+
+class UsageLinkCorrectionListResponse(BaseModel):
+    items: List[UsageLinkCorrectionResponse] = Field(default_factory=list)
+
+
 class UsageLinkMemberResponse(BaseModel):
     """One fish of a group arena, as sealed; ``flag`` says why it needs review."""
 
     fish_id: str
     fish_revision: Optional[int] = None
     flag: Optional[Literal["dead_at_start", "not_in_dish_at_start"]] = None
+    correction: Optional[UsageLinkCorrectionResponse] = Field(
+        default=None, description="The member's effective correction, or null")
 
 
 class UsageLinkResponse(BaseModel):
@@ -438,6 +464,10 @@ class UsageLinkResponse(BaseModel):
                     "they came with the link at Start")
     members_added_by: Optional[str] = Field(
         default=None, description="The X-Delivered-By token of that later request, if any")
+    correction: Optional[UsageLinkCorrectionResponse] = Field(
+        default=None,
+        description="The effective correction of the link's own fish, or null. The "
+                    "top-level fields stay as sealed.")
 
 
 class UsageLinkListResponse(BaseModel):
@@ -472,6 +502,15 @@ _USAGE_LINK_ERRORS = {
           "description": "usage_link_conflict (different creation body), usage_link_end_conflict, "
                          "or usage_link_members_conflict (different members)"},
     422: {"model": ApiErrorResponse, "description": "invalid_usage_link (with field)"},
+    **_DATABASE_ERROR_RESPONSE,
+}
+
+_CORRECTION_ERRORS = {
+    404: {"model": ApiErrorResponse, "description": "usage_link_not_found / fish_not_found"},
+    409: {"model": ApiErrorResponse,
+          "description": "fish_in_another_arena (with the other recording_ref) or "
+                         "correction_unchanged"},
+    422: {"model": ApiErrorResponse, "description": "invalid_correction (with field)"},
     **_DATABASE_ERROR_RESPONSE,
 }
 
@@ -7056,6 +7095,32 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         response.status_code = status
         return link
 
+    @app.post("/usage-links/{recording_ref}/corrections", status_code=201,
+              response_model=UsageLinkResponse, responses=_CORRECTION_ERRORS)
+    def correct_usage_link(recording_ref: str, body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Record which fish was really in the arena; the link with its correction.
+
+        Body ``{member_fish_id?, fish_id, evidence, attested_by}``. ``fish_id``
+        null means "fish unknown". ``member_fish_id`` (a sealed member) is
+        required for a link with members. Append-only: the newest correction
+        is the effective one, and undoing one is a correction back to the
+        sealed fish. The sealed fields are never changed, so replays of the
+        original POST stay 200.
+        """
+        return _usage_call(usage_links.add_correction, recording_ref, body)
+
+    @app.get("/usage-links/{recording_ref}/corrections",
+             response_model=UsageLinkCorrectionListResponse, responses=_USAGE_LINK_ERRORS)
+    def list_usage_link_corrections(recording_ref: str) -> Dict[str, Any]:
+        """Every correction of a link, oldest first."""
+        def _list(conn):
+            if not conn.execute("SELECT 1 FROM usage_links WHERE recording_ref = ?",
+                                (recording_ref,)).fetchone():
+                raise usage_links.UsageLinkError(404, {"error": "usage_link_not_found",
+                                                       "recording_ref": recording_ref})
+            return {"items": usage_links.corrections(conn, recording_ref)}
+        return _usage_call(_list)
+
     @app.get("/usage-links/{recording_ref}", response_model=UsageLinkResponse,
              responses=_USAGE_LINK_ERRORS)
     def get_usage_link(recording_ref: str) -> Dict[str, Any]:
@@ -7073,8 +7138,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         active_at: Optional[str] = Query(default=None,
                                          description="RFC 3339 UTC instant; links open then"),
     ) -> Dict[str, Any]:
-        """Links by fish (its own or as a group member), by dish (including
-        dish-level rows), or open at an instant."""
+        """Links by fish (its own or as a group member, once corrections
+        apply), by dish (including dish-level rows), or open at an instant."""
         return {"items": _usage_call(usage_links.list_links, fish_id, dish_id, active_at)}
 
     def _refresh_dish_counts(dish_id: str) -> None:

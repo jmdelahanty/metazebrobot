@@ -66,6 +66,136 @@ def _entry(at, kind, summary, source, **details):
             "details": {k: v for k, v in details.items() if v is not None}}
 
 
+def _end_text(link) -> str:
+    return (f", ended {_rfc3339_to_lab_iso(link['ended_at']).replace('T', ' ')} ({link['end_status']})"
+            if link["ended_at"] else ", end not recorded yet")
+
+
+def _label(conn, fish_id: Optional[str]) -> str:
+    if fish_id is None:
+        return "fish unknown"
+    row = conn.execute("SELECT subject_label FROM fish_subjects WHERE fish_id = ?",
+                       (fish_id,)).fetchone()
+    return (row["subject_label"] if row and row["subject_label"] else fish_id[:8])
+
+
+def _correction_text(conn, correction, sealed: Optional[str]) -> str:
+    """'; corrected (sealed Z5) by user on date: evidence'."""
+    when = _rfc3339_to_lab_iso(correction["corrected_at"]) or ""
+    return (f"; corrected (sealed {_label(conn, sealed) if sealed else 'no fish'}) by "
+            f"{correction['attested_by']} on {when[:10]}: {correction['evidence']}")
+
+
+def _recording_entries(conn, fish, fish_id: str, revisions) -> List[Dict[str, Any]]:
+    """Recorded, possibly-recorded and corrected-away entries, from usage links
+    with their corrections applied (docs/fish_timeline_design.md)."""
+    from .usage_links import effective_subjects, member_flag, refs_naming_fish
+
+    try:
+        named = refs_naming_fish(conn, fish_id)
+        # Links that may leave every fish in their dish "possibly used": no
+        # fish named, or a place corrected to "fish unknown".
+        unnamed = [r[0] for r in conn.execute(
+            """SELECT recording_ref FROM usage_links WHERE fish_id IS NULL
+               UNION SELECT recording_ref FROM usage_link_corrections WHERE fish_id IS NULL""")]
+    except Exception:  # usage_links absent (older database)
+        return []
+    created_norm = _sqlite_utc_to_norm(fish["created_at"])
+    entries = []
+    for ref in sorted(set(named) | set(unnamed)):
+        link = dict(conn.execute("SELECT * FROM usage_links WHERE recording_ref = ?",
+                                 (ref,)).fetchone())
+        subjects = effective_subjects(conn, link)
+        rec = link["recording_id"] or link["recording_ref"]
+        where = f"rig {link['rig_id']} arena {link['arena_id']}"
+        at = _rfc3339_to_lab_iso(link["started_at"])
+        common = dict(recording_ref=link["recording_ref"], recording_id=link["recording_id"],
+                      rig_id=link["rig_id"], arena_id=link["arena_id"])
+        # Places in the link: (sealed fish, effective fish, correction).
+        if subjects["members"]:
+            places = [(m, e, subjects["corrections"].get(m)) for m, e in subjects["members"].items()]
+        else:
+            places = [(link["fish_id"], subjects["fish_id"], subjects["corrections"].get(None))]
+        mine = [p for p in places if p[1] == fish_id]
+        sealed_mine = [p for p in places if p[0] == fish_id and p[1] != fish_id]
+        group = bool(subjects["members"])
+        for sealed, _, correction in mine:
+            note = _correction_text(conn, correction, sealed) if correction else ""
+            unit = correction["unit_id"] if correction else (None if group else link["unit_id"])
+            fish_revision = (correction["fish_revision"] if correction else
+                             None if group else link["fish_revision"])
+            flag = None
+            if group:
+                if not correction:
+                    flag = member_flag(conn, fish_id, link["dish_id"], link["started_norm"])
+                    member_row = conn.execute(
+                        "SELECT fish_revision FROM usage_link_members WHERE recording_ref = ? "
+                        "AND fish_id = ?", (ref, fish_id)).fetchone()
+                    fish_revision = member_row["fish_revision"]
+                summary = (f"Used in recording {rec} on {where}, one of {link['subject_count']} "
+                           f"from dish {link['dish_id']}" + _end_text(link)
+                           + {"dead_at_start": "; needs review: it had already ended before this "
+                                               "recording",
+                              "not_in_dish_at_start": f"; needs review: it wasn't in dish "
+                                                      f"{link['dish_id']} when this recording "
+                                                      "started"}.get(flag, ""))
+            else:
+                summary = (f"Used in recording {rec} on {where}"
+                           + (f", taken from well {unit.split(':')[-1]}" if unit else "")
+                           + _end_text(link))
+            entries.append(_entry(
+                at, "recorded", summary + note,
+                "usage_links" + (", usage_link_members" if group else "")
+                + (", usage_link_corrections" if correction else ""),
+                **common, unit_id=unit, fish_revision=fish_revision,
+                dish_id=link["dish_id"] if group else None,
+                subject_count=link["subject_count"] if group else None,
+                group_member=True if group else None, flag=flag,
+                correction_id=correction["id"] if correction else None,
+                ended_at=_rfc3339_to_lab_iso(link["ended_at"]), end_status=link["end_status"],
+            ))
+        for sealed, effective, correction in sealed_mine:
+            note = (f" by {correction['attested_by']} on "
+                    f"{(_rfc3339_to_lab_iso(correction['corrected_at']) or '')[:10]}: "
+                    f"{correction['evidence']}")
+            if effective is None:
+                entries.append(_entry(
+                    at, "possibly_recorded",
+                    f"Possibly used in recording {rec} on {where}: this fish was sealed for the "
+                    f"arena, but it was corrected to fish unknown" + note,
+                    "usage_links, usage_link_corrections", **common,
+                    correction_id=correction["id"]))
+            else:
+                entries.append(_entry(
+                    at, "corrected_away",
+                    f"Recording {rec} on {where} named this fish; corrected to "
+                    f"{_label(conn, effective)}" + note,
+                    "usage_links, usage_link_corrections", **common,
+                    corrected_to=effective, correction_id=correction["id"]))
+        if mine or sealed_mine or any(p[0] == fish_id for p in places):
+            continue
+        # Possibly used: the link leaves a place unknown and the fish was in
+        # the link's dish when it started.
+        unknown = [p for p in places if p[1] is None]
+        if not unknown or _dish_at(revisions, created_norm, link["started_norm"]) != link["dish_id"]:
+            continue
+        if any(p[2] for p in unknown):
+            why = (f"one of its {link['subject_count']} fish from dish {link['dish_id']} was "
+                   "corrected to fish unknown" if group else
+                   f"its fish from dish {link['dish_id']} was corrected to fish unknown")
+        else:
+            why = (f"dish {link['dish_id']} was recorded"
+                   + (f" ({link['subject_count']} fish)" if link["subject_count"] else "")
+                   + " but no fish was named")
+        entries.append(_entry(
+            at, "possibly_recorded",
+            f"Possibly used in recording {rec} on {where}: {why}",
+            "usage_links", recording_ref=link["recording_ref"], dish_id=link["dish_id"],
+            subject_count=link["subject_count"],
+        ))
+    return entries
+
+
 def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
     fish = conn.execute(
         """SELECT f.fish_id, f.dish_id, f.subject_label, f.current_unit_id, f.created_at,
@@ -186,70 +316,7 @@ def fish_timeline(conn, fish_id: str) -> Optional[Dict[str, Any]]:
                 ))
         previous = rev
 
-    try:
-        own_links = [dict(r) for r in conn.execute(
-            "SELECT * FROM usage_links WHERE fish_id = ? ORDER BY started_norm", (fish_id,))]
-        # A group link names its members; only links that name no fish at all
-        # leave every fish in the dish "possibly used".
-        member_links = [dict(r) for r in conn.execute(
-            """SELECT l.*, m.fish_revision AS member_revision FROM usage_links l
-               JOIN usage_link_members m ON m.recording_ref = l.recording_ref
-               WHERE m.fish_id = ? ORDER BY l.started_norm""", (fish_id,))]
-        dish_links = [dict(r) for r in conn.execute(
-            """SELECT * FROM usage_links WHERE fish_id IS NULL AND recording_ref NOT IN
-               (SELECT recording_ref FROM usage_link_members) ORDER BY started_norm""")]
-    except Exception:  # usage_links absent (older database)
-        own_links, member_links, dish_links = [], [], []
-    for link in member_links:
-        from .usage_links import member_flag
-        flag = member_flag(conn, fish_id, link["dish_id"], link["started_norm"])
-        end = (f", ended {_rfc3339_to_lab_iso(link['ended_at']).replace('T', ' ')} ({link['end_status']})"
-               if link["ended_at"] else ", end not recorded yet")
-        entries.append(_entry(
-            _rfc3339_to_lab_iso(link["started_at"]), "recorded",
-            f"Used in recording {link['recording_id'] or link['recording_ref']} on rig "
-            f"{link['rig_id']} arena {link['arena_id']}, one of {link['subject_count']} "
-            f"from dish {link['dish_id']}" + end
-            + {"dead_at_start": "; needs review: it had already ended before this recording",
-               "not_in_dish_at_start": f"; needs review: it wasn't in dish {link['dish_id']} "
-                                       "when this recording started"}.get(flag, ""),
-            "usage_links, usage_link_members",
-            recording_ref=link["recording_ref"], recording_id=link["recording_id"],
-            rig_id=link["rig_id"], arena_id=link["arena_id"], dish_id=link["dish_id"],
-            subject_count=link["subject_count"], fish_revision=link["member_revision"],
-            group_member=True, flag=flag,
-            ended_at=_rfc3339_to_lab_iso(link["ended_at"]), end_status=link["end_status"],
-        ))
-    for link in own_links:
-        where = f"rig {link['rig_id']} arena {link['arena_id']}"
-        ref = link["recording_id"] or link["recording_ref"]
-        end = (f", ended {_rfc3339_to_lab_iso(link['ended_at']).replace('T', ' ')} ({link['end_status']})"
-               if link["ended_at"] else ", end not recorded yet")
-        entries.append(_entry(
-            _rfc3339_to_lab_iso(link["started_at"]), "recorded",
-            f"Used in recording {ref} on {where}"
-            + (f", taken from well {link['unit_id'].split(':')[-1]}" if link["unit_id"] else "")
-            + end,
-            "usage_links",
-            recording_ref=link["recording_ref"], recording_id=link["recording_id"],
-            rig_id=link["rig_id"], arena_id=link["arena_id"], unit_id=link["unit_id"],
-            fish_revision=link["fish_revision"],
-            ended_at=_rfc3339_to_lab_iso(link["ended_at"]), end_status=link["end_status"],
-        ))
-    created_norm = _sqlite_utc_to_norm(fish["created_at"])
-    for link in dish_links:
-        if _dish_at(revisions, created_norm, link["started_norm"]) != link["dish_id"]:
-            continue
-        entries.append(_entry(
-            _rfc3339_to_lab_iso(link["started_at"]), "possibly_recorded",
-            f"Possibly used in recording {link['recording_id'] or link['recording_ref']} on rig "
-            f"{link['rig_id']} arena {link['arena_id']}: dish {link['dish_id']} was recorded"
-            + (f" ({link['subject_count']} fish)" if link["subject_count"] else "")
-            + " but no fish was named",
-            "usage_links",
-            recording_ref=link["recording_ref"], dish_id=link["dish_id"],
-            subject_count=link["subject_count"],
-        ))
+    entries.extend(_recording_entries(conn, fish, fish_id, revisions))
 
     if fish["status"] and fish["status"] != "alive":
         at = (fish["ended_at"] if fish["ended_precision"] == "day"
