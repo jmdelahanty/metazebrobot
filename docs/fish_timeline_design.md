@@ -4,7 +4,7 @@ summary: "Proposal: one inspectable timeline per fish, assembled from the record
 owner: metazebrobot
 status: current
 kind: design
-verified_against: c6a88c1
+verified_against: b903f65
 ---
 
 # Fish Timeline and Experiment Usage
@@ -234,7 +234,10 @@ if an end with different values is already recorded. `404 usage_link_not_found`.
 
 ## Correcting the fish a recording names (design, 2026-11-09)
 
-Status: proposal; decisions of 2026-11-09 below. Nothing is built.
+Status (2026-11-23): the table, `POST`/`GET /usage-links/{recording_ref}/corrections`,
+`correction` on responses (and on each member), `?fish_id=` over effective fish, the
+timeline and the fish-delete guard are built. The overlap flag, the needs-review list
+and the web "Wrong fish?" action are not. Decisions of 2026-11-09 and 2026-11-23 below.
 
 ### The problem
 
@@ -277,12 +280,15 @@ can catch.
 
 | Column | Meaning |
 |---|---|
-| `id` | Primary key |
+| `id` | Integer primary key; the correction id readers cite |
 | `recording_ref` | The corrected link (references `usage_links`) |
 | `fish_id` | The fish that was actually in the arena |
-| `dish_id` | That fish's dish at `started_at`; usually the link's dish |
-| `fish_revision`, `unit_id` | Filled by MetaZebrobot from the fish's revisions at the link's `started_at`, not typed |
-| `attested_by` | The username who made the correction (the viewer picker for the web; required) |
+| `dish_id` | That fish's dish at `started_at`, from its revisions (not sent); the link's dish for "fish unknown" |
+| `fish_revision`, `unit_id` | Filled by MetaZebrobot from the fish's revisions at the link's `started_at`, not typed; null for "fish unknown" |
+| `member_fish_id` | The sealed member corrected; null for the link's own fish |
+| `recorded_fish_id`, `recorded_fish_revision` | The sealed values the correction overrides (the link's or the member's), so a reader can check them against the H5 |
+| `supersedes` | The place's previous effective correction's `id`; null on the first |
+| `attested_by` | The username of the person who made the correction: a `users` row marked as a MetaZebrobot user, never a service account (the viewer picker for the web; required) |
 | `evidence` | Free text, required (e.g. "bench notes: arena 3 held Z6") |
 | `corrected_at` | Server UTC |
 
@@ -293,7 +299,10 @@ Rules:
 - **One fish, one arena:** a correction is refused (409
   `fish_in_another_arena`) if the corrected fish is the effective fish of
   another link whose time overlaps. Correct that arena first, so the
-  recording never ends up claiming one fish twice.
+  recording never ends up claiming one fish twice. A link whose end isn't
+  recorded counts as ending at its start, so a missing Stop doesn't block
+  later corrections; arenas of one recording share a start, so they are
+  still caught.
 - A dish-level link (no `fish_id`) can be corrected to name a fish.
 - **"Fish unknown"** (decided 2026-11-09): a correction may set `fish_id`
   null when nobody can tell which fish was in the arena. The link then reads
@@ -311,8 +320,10 @@ Rules:
   sealed, so the idempotency comparison and anything reading them unchanged
   keep working. This is additive; `api_schema_version` stays 2.
 - `GET /usage-links?fish_id=` matches the **effective** fish. A fish that was
-  sealed but corrected away gets a timeline entry instead: "recording R,
-  arena 3 named this fish; corrected to Z6 by <user> on <date>: <evidence>".
+  sealed but corrected away gets a timeline entry instead (kind
+  `corrected_away`): "recording R, arena 3 named this fish; corrected to Z6
+  by <user> on <date>: <evidence>". A sealed fish corrected to "fish
+  unknown" gets `possibly_recorded` instead, like the dish's other fish.
 - The fish timeline and "out of well" entries use the effective fish and
   well, so Z6's timeline shows it out of C2, and Z5's shows it out of C1 for
   arena_2 only.
@@ -324,16 +335,22 @@ Rules:
 ### Endpoints (proposed)
 
 - `POST /usage-links/{recording_ref}/corrections` with
-  `{fish_id, dish_id?, evidence}`. Returns 201 and the link with its new
-  `correction`. Errors: 404 `usage_link_not_found` / `fish_not_found`, 409
-  `fish_in_another_arena` / `correction_unchanged`, 422
-  `invalid_correction`.
-- `GET /usage-links/{recording_ref}/corrections`: every correction, oldest
-  first.
+  `{member_fish_id?, fish_id, evidence, attested_by}` (built 2026-11-23).
+  `fish_id` is required and null means "fish unknown". `dish_id`,
+  `fish_revision` and `unit_id` are filled from the fish's history, not sent.
+  Returns 201 and the link with its new `correction`. Errors: 404
+  `usage_link_not_found` / `fish_not_found`, 409 `fish_in_another_arena`
+  (with the other `recording_ref`) / `correction_unchanged` (the fish is
+  already the effective one, or "unknown" on a link that names no fish), 422
+  `invalid_correction` (with `field`). A dish-level link of more than one fish
+  without members is 422: it gets members, not a correction.
+- `GET /usage-links/{recording_ref}/corrections` (built): every correction,
+  oldest first, as `{items: [...]}`; 404 `usage_link_not_found`.
 - Web: a "Wrong fish?" action on the fish timeline's recording entry and on
   the needs-review list, like the plate map's "Wrong result?".
 
-Who may write: the web UI only at first. Citrus and Palette don't send
+Who may write: people, through the web UI once its action is built, and
+until then the operator through the API. Citrus and Palette don't send
 corrections.
 
 ### Across systems (needs an agent-contracts amendment)
@@ -353,8 +370,9 @@ corrections.
 
 ### Build order
 
-1. MetaZebrobot: table, endpoints, `correction` on responses, timeline and
-   overlap flag, needs-review list, "Wrong fish?" action.
+1. MetaZebrobot: table, endpoints, `correction` on responses, timeline
+   (built 2026-11-23); overlap flag, needs-review list, "Wrong fish?" action
+   (not built).
 2. agent-contracts amendment: `UsageLinkResponse.correction`; Palette and
    Citrus review; merges on the operator's word; re-pin.
 3. Apply the data (after a database backup): the two 2026-11-06
@@ -370,13 +388,15 @@ corrections.
 2. A correction can say "fish unknown".
 3. The October cases were misclicks, and which fish were in those arenas
    can't be known: both arenas of each become "fish unknown".
+4. (2026-11-23) The operator confirmed MetaZebrobot as the single owner;
+   Palette won't build its own correction record.
 
 ## Group members on usage links (design, 2026-11-15)
 
 Status (2026-11-15): members on `POST /usage-links`, responses, queries and
 the timeline are built (`ecaa247`), and so is
 [giving a link its members after Start](#members-given-after-start). The
-overlap flag and corrections for members are not built.
+overlap flag is not built. Corrections for members are built (2026-11-23).
 
 Decided (2026-11-15): the target is Citrus sending `members` on its POST at
 Start, from fish minted when they're picked. Until Citrus does, the members

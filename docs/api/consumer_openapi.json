@@ -1709,7 +1709,7 @@
             "type": "object"
           },
           "kind": {
-            "description": "fertilized, screening, registered, placed, edited, recorded, possibly_recorded, ended",
+            "description": "fertilized, screening, registered, placed, edited, recorded, possibly_recorded, corrected_away, ended",
             "title": "Kind",
             "type": "string"
           },
@@ -1731,6 +1731,122 @@
         "title": "TimelineEntryResponse",
         "type": "object"
       },
+      "UsageLinkCorrectionResponse": {
+        "description": "Which fish was really in the arena, attested by a person.\n\n``fish_id`` null is \"fish unknown\". ``member_fish_id`` is the sealed member\ncorrected, or null for the link's own fish. ``recorded_fish_id`` and\n``recorded_fish_revision`` are the sealed values it overrides.\n``supersedes`` is the place's previous effective correction (null on the\nfirst). ``dish_id`` (always set), ``fish_revision`` and ``unit_id`` come from\nthe fish's history at the link's ``started_at``; both are null for \"fish\nunknown\".",
+        "properties": {
+          "attested_by": {
+            "title": "Attested By",
+            "type": "string"
+          },
+          "corrected_at": {
+            "title": "Corrected At",
+            "type": "string"
+          },
+          "dish_id": {
+            "title": "Dish Id",
+            "type": "string"
+          },
+          "evidence": {
+            "title": "Evidence",
+            "type": "string"
+          },
+          "fish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fish Id"
+          },
+          "fish_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fish Revision"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "member_fish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Fish Id"
+          },
+          "recorded_fish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Fish Id"
+          },
+          "recorded_fish_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Fish Revision"
+          },
+          "recording_ref": {
+            "title": "Recording Ref",
+            "type": "string"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes"
+          },
+          "unit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Id"
+          }
+        },
+        "required": [
+          "id",
+          "recording_ref",
+          "dish_id",
+          "attested_by",
+          "evidence",
+          "corrected_at"
+        ],
+        "title": "UsageLinkCorrectionResponse",
+        "type": "object"
+      },
       "UsageLinkListResponse": {
         "properties": {
           "items": {
@@ -1747,6 +1863,17 @@
       "UsageLinkMemberResponse": {
         "description": "One fish of a group arena, as sealed; ``flag`` says why it needs review.",
         "properties": {
+          "correction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageLinkCorrectionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The member's effective correction, or null"
+          },
           "fish_id": {
             "title": "Fish Id",
             "type": "string"
@@ -1790,6 +1917,17 @@
           "arena_id": {
             "title": "Arena Id",
             "type": "string"
+          },
+          "correction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageLinkCorrectionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The effective correction of the link's own fish, or null. The top-level fields stay as sealed."
           },
           "delivered_by": {
             "anyOf": [
@@ -2988,7 +3126,7 @@
     },
     "/usage-links": {
       "get": {
-        "description": "Links by fish (its own or as a group member), by dish (including\ndish-level rows), or open at an instant.",
+        "description": "Links by fish (its own or as a group member, once corrections\napply), by dish (including dish-level rows), or open at an instant.",
         "operationId": "list_usage_links_usage_links_get",
         "parameters": [
           {

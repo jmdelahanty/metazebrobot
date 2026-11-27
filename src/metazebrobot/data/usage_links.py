@@ -6,6 +6,12 @@ A group arena's link can name its members (docs/fish_timeline_design.md,
 group link created without them can be given its members once, later
 (``set_members``), with the same checks; the link records when and by whom.
 
+A link's fish (or a member) can be corrected (docs/fish_timeline_design.md,
+"Correcting the fish a recording names"): ``usage_link_corrections`` is
+append-only, the newest correction for a link (or a member) is the effective
+one, and ``fish_id`` null means "fish unknown". The sealed fields are never
+edited, so replays still compare against what was sealed.
+
 docs/fish_timeline_design.md ("Usage links", "Proposed endpoints",
 "Refinements from Citrus's review"). MetaZebrobot stores only the reference
 and these fields; recordings stay owned by Palette and the H5. Citrus POSTs a
@@ -69,11 +75,36 @@ CREATE TABLE IF NOT EXISTS usage_link_members (
     PRIMARY KEY (recording_ref, fish_id)
 )
 """
+CORRECTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS usage_link_corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recording_ref TEXT NOT NULL REFERENCES usage_links(recording_ref),
+    member_fish_id TEXT,
+    recorded_fish_id TEXT,
+    recorded_fish_revision INTEGER,
+    supersedes INTEGER REFERENCES usage_link_corrections(id),
+    fish_id TEXT,
+    dish_id TEXT NOT NULL,
+    fish_revision INTEGER,
+    unit_id TEXT,
+    attested_by TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    corrected_at TEXT NOT NULL,
+    CHECK (fish_revision IS NULL OR fish_id IS NOT NULL),
+    CHECK (unit_id IS NULL OR fish_id IS NOT NULL)
+)
+"""
+CORRECTION_FIELDS = ("member_fish_id", "fish_id", "evidence", "attested_by")
+MAX_EVIDENCE = 2000
 INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_usage_links_fish ON usage_links(fish_id)",
     "CREATE INDEX IF NOT EXISTS idx_usage_links_dish ON usage_links(dish_id)",
     "CREATE INDEX IF NOT EXISTS idx_usage_links_started ON usage_links(started_norm)",
     "CREATE INDEX IF NOT EXISTS idx_usage_link_members_fish ON usage_link_members(fish_id)",
+    "CREATE INDEX IF NOT EXISTS idx_usage_link_corrections_ref "
+    "ON usage_link_corrections(recording_ref)",
+    "CREATE INDEX IF NOT EXISTS idx_usage_link_corrections_fish "
+    "ON usage_link_corrections(fish_id)",
 )
 
 
@@ -92,6 +123,7 @@ _DELIVERED_BY = re.compile(r"^[a-z0-9_-]{1,32}$")
 def ensure_schema(conn) -> None:
     conn.execute(SCHEMA)
     conn.execute(MEMBERS_SCHEMA)
+    conn.execute(CORRECTIONS_SCHEMA)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(usage_links)")}
     for column in ("delivered_by", "members_added_at", "members_added_by"):
         if column not in cols:
@@ -202,14 +234,188 @@ def _validate_members(members: Any, values: Dict[str, Any]) -> List[Dict[str, An
 def _row(conn, row) -> Dict[str, Any]:
     link = {k: row[k] for k in row.keys()
             if k not in ("started_norm", "ended_norm", "creation_body")}
+    effective = effective_corrections(conn, row["recording_ref"])
+    link["correction"] = effective.get(None)
     link["members"] = [
         {"fish_id": m["fish_id"], "fish_revision": m["fish_revision"],
-         "flag": member_flag(conn, m["fish_id"], row["dish_id"], row["started_norm"])}
+         "flag": member_flag(conn, m["fish_id"], row["dish_id"], row["started_norm"]),
+         "correction": effective.get(m["fish_id"])}
         for m in conn.execute(
             "SELECT fish_id, fish_revision FROM usage_link_members "
             "WHERE recording_ref = ? ORDER BY fish_id", (row["recording_ref"],))
     ]
     return link
+
+
+def corrections(conn, recording_ref: str) -> List[Dict[str, Any]]:
+    """Every correction of a link, oldest first."""
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM usage_link_corrections WHERE recording_ref = ? ORDER BY id",
+        (recording_ref,))]
+
+
+def effective_corrections(conn, recording_ref: str) -> Dict[Optional[str], Dict[str, Any]]:
+    """The newest correction per corrected place: key None for the link's own
+    fish, else the sealed member's fish_id."""
+    return {c["member_fish_id"]: c for c in corrections(conn, recording_ref)}
+
+
+def effective_subjects(conn, row) -> Dict[str, Any]:
+    """Who the link names once corrections apply.
+
+    ``fish_id``: the link's effective fish (None for a dish-level link or
+    "fish unknown"). ``unknown``: the link's own fish was corrected to
+    unknown. ``members``: ``{sealed fish_id: effective fish_id or None}``.
+    """
+    effective = effective_corrections(conn, row["recording_ref"])
+    own = effective.get(None)
+    members = {}
+    for m in conn.execute("SELECT fish_id FROM usage_link_members WHERE recording_ref = ?",
+                          (row["recording_ref"],)):
+        c = effective.get(m["fish_id"])
+        members[m["fish_id"]] = c["fish_id"] if c else m["fish_id"]
+    return {
+        "fish_id": own["fish_id"] if own else row["fish_id"],
+        "unknown": bool(own) and own["fish_id"] is None,
+        "members": members,
+        "corrections": effective,
+    }
+
+
+def refs_with_effective_fish(conn, fish_id: str) -> List[str]:
+    """Refs of links whose effective fish, or an effective member, is this fish."""
+    candidates = set(refs_naming_fish(conn, fish_id))
+    found = []
+    for ref in sorted(candidates):
+        row = conn.execute("SELECT * FROM usage_links WHERE recording_ref = ?", (ref,)).fetchone()
+        subjects = effective_subjects(conn, row)
+        if subjects["fish_id"] == fish_id or fish_id in subjects["members"].values():
+            found.append(ref)
+    return found
+
+
+def _span(row) -> Tuple[str, str]:
+    """A link's time span for the one-fish-one-arena check. An end not yet
+    recorded counts as the start, so a missing Stop doesn't block later work."""
+    return row["started_norm"], row["ended_norm"] or row["started_norm"]
+
+
+def _fish_state_at(conn, fish_id: str, started_norm: str) -> Dict[str, Any]:
+    """The fish's revision, dish and unit at an instant, from its revisions.
+
+    A fish registered after the start (Citrus's outbox) gets its first
+    revision.
+    """
+    from .fish_timeline import _sqlite_utc_to_norm
+
+    revisions = [dict(r) for r in conn.execute(
+        "SELECT revision, recorded_at, dish_id, current_unit_id FROM fish_subject_revisions "
+        "WHERE fish_id = ? ORDER BY revision", (fish_id,))]
+    before = [r for r in revisions if _sqlite_utc_to_norm(r["recorded_at"]) <= started_norm]
+    chosen = before[-1] if before else (revisions[0] if revisions else None)
+    if chosen is None:
+        fish = conn.execute("SELECT revision, dish_id, current_unit_id FROM fish_subjects "
+                            "WHERE fish_id = ?", (fish_id,)).fetchone()
+        chosen = dict(fish)
+    return {"fish_revision": chosen["revision"], "dish_id": chosen["dish_id"],
+            "unit_id": chosen["current_unit_id"]}
+
+
+def _bad_correction(field: str, message: str) -> UsageLinkError:
+    return UsageLinkError(422, {"error": "invalid_correction", "field": field, "message": message})
+
+
+def add_correction(conn, recording_ref: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Record which fish was really in the arena: the link, or UsageLinkError.
+
+    Body ``{member_fish_id?, fish_id, evidence, attested_by}``. ``fish_id``
+    null is "fish unknown". ``member_fish_id`` names the sealed member being
+    corrected and is required for a link with members. The fish's dish,
+    revision and unit at ``started_at`` are filled from its history.
+    ``recorded_fish_id``/``recorded_fish_revision`` are the sealed values the
+    correction overrides, and ``supersedes`` is the place's previous
+    effective correction (null on the first).
+    """
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")  # so two corrections can't both supersede one
+    if not isinstance(body, dict):
+        raise _bad_correction("body", "expected a JSON object")
+    for key in body:
+        if key not in CORRECTION_FIELDS:
+            raise _bad_correction(key, "unknown field")
+    if "fish_id" not in body:
+        raise _bad_correction("fish_id", "required (null for fish unknown)")
+    fish_id, member = body.get("fish_id"), body.get("member_fish_id")
+    for key, value in (("fish_id", fish_id), ("member_fish_id", member)):
+        if value is not None and (not isinstance(value, str) or not _UUID.match(value)):
+            raise _bad_correction(key, "expected a lowercase UUID")
+    evidence = body.get("evidence")
+    if not isinstance(evidence, str) or not evidence.strip() or len(evidence) > MAX_EVIDENCE:
+        raise _bad_correction("evidence", f"required text, at most {MAX_EVIDENCE} characters")
+    attested_by = body.get("attested_by")
+    if not isinstance(attested_by, str) or not conn.execute(
+            "SELECT 1 FROM users WHERE username = ? AND app_user = 1", (attested_by,)).fetchone():
+        raise _bad_correction("attested_by", "the username of a person who uses MetaZebrobot")
+
+    row = conn.execute("SELECT * FROM usage_links WHERE recording_ref = ?",
+                       (recording_ref,)).fetchone()
+    if not row:
+        raise UsageLinkError(404, {"error": "usage_link_not_found", "recording_ref": recording_ref})
+    subjects = effective_subjects(conn, row)
+    if subjects["members"]:
+        if member not in subjects["members"]:
+            raise _bad_correction("member_fish_id", "required: one of the link's sealed members")
+        current = subjects["members"][member]
+        recorded = (member, conn.execute(
+            "SELECT fish_revision FROM usage_link_members WHERE recording_ref = ? AND fish_id = ?",
+            (recording_ref, member)).fetchone()["fish_revision"])
+    else:
+        recorded = (row["fish_id"], row["fish_revision"])
+        if member is not None:
+            raise _bad_correction("member_fish_id", "only for a link with members")
+        if row["fish_id"] is None and (row["subject_count"] or 1) > 1:
+            raise _bad_correction("fish_id", "a dish-level link of several fish gets members "
+                                             "(PUT /usage-links/{recording_ref}/members), "
+                                             "not a correction")
+        current = subjects["fish_id"]
+    # A plain dish-level link already names no fish, so "unknown" there is
+    # unchanged too.
+    if fish_id == current:
+        raise UsageLinkError(409, {"error": "correction_unchanged", "recording_ref": recording_ref})
+
+    state = {"fish_revision": None, "dish_id": row["dish_id"], "unit_id": None}
+    if fish_id is not None:
+        if not conn.execute("SELECT 1 FROM fish_subjects WHERE fish_id = ?", (fish_id,)).fetchone():
+            raise UsageLinkError(404, {"error": "fish_not_found", "fish_id": fish_id})
+        # One fish, one arena: not another place in this link, nor another
+        # link whose time overlaps.
+        if fish_id in [v for k, v in subjects["members"].items() if k != member]:
+            raise UsageLinkError(409, {"error": "fish_in_another_arena", "fish_id": fish_id,
+                                       "recording_ref": recording_ref})
+        start, end = _span(row)
+        for other_ref in refs_with_effective_fish(conn, fish_id):
+            if other_ref == recording_ref:
+                continue
+            other = conn.execute("SELECT * FROM usage_links WHERE recording_ref = ?",
+                                 (other_ref,)).fetchone()
+            other_start, other_end = _span(other)
+            if other_start <= end and start <= other_end:
+                raise UsageLinkError(409, {"error": "fish_in_another_arena", "fish_id": fish_id,
+                                           "recording_ref": other_ref})
+        state = _fish_state_at(conn, fish_id, row["started_norm"])
+    previous = subjects["corrections"].get(member)
+    stamp = now_utc()
+    conn.execute(
+        """INSERT INTO usage_link_corrections (recording_ref, member_fish_id, recorded_fish_id,
+               recorded_fish_revision, supersedes, fish_id, dish_id, fish_revision, unit_id,
+               attested_by, evidence, corrected_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (recording_ref, member, recorded[0], recorded[1], previous["id"] if previous else None,
+         fish_id, state["dish_id"], state["fish_revision"], state["unit_id"], attested_by,
+         evidence.strip(), stamp))
+    conn.execute("UPDATE usage_links SET updated_at = ? WHERE recording_ref = ?",
+                 (stamp, recording_ref))
+    return get_link(conn, recording_ref)
 
 
 def member_flag(conn, fish_id: str, dish_id: str, started_norm: str) -> Optional[str]:
@@ -247,11 +453,13 @@ def member_flag(conn, fish_id: str, dish_id: str, started_norm: str) -> Optional
 
 
 def refs_naming_fish(conn, fish_id: str) -> List[str]:
-    """Recording refs of links that name this fish, as subject or group member."""
+    """Recording refs of links that name this fish, as subject or group member,
+    sealed or by a correction."""
     return [r[0] for r in conn.execute(
         "SELECT recording_ref FROM usage_links WHERE fish_id = ? "
         "UNION SELECT recording_ref FROM usage_link_members WHERE fish_id = ? "
-        "ORDER BY 1", (fish_id, fish_id))]
+        "UNION SELECT recording_ref FROM usage_link_corrections WHERE fish_id = ? "
+        "ORDER BY 1", (fish_id, fish_id, fish_id))]
 
 
 def get_link(conn, recording_ref: str) -> Optional[Dict[str, Any]]:
@@ -379,13 +587,13 @@ def end_link(conn, recording_ref: str, body: Dict[str, Any]) -> Dict[str, Any]:
 
 def list_links(conn, fish_id: Optional[str] = None, dish_id: Optional[str] = None,
                active_at: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Links filtered by fish (the link's fish or a member), dish and/or the
-    instant they were open at."""
+    """Links filtered by fish (the link's effective fish or an effective
+    member, once corrections apply), dish and/or the instant they were open at."""
     where, params = [], []
     if fish_id:
-        where.append("(fish_id = ? OR recording_ref IN "
-                     "(SELECT recording_ref FROM usage_link_members WHERE fish_id = ?))")
-        params += [fish_id, fish_id]
+        refs = refs_with_effective_fish(conn, fish_id)
+        where.append(f"recording_ref IN ({', '.join('?' for _ in refs) or 'NULL'})")
+        params += refs
     if dish_id:
         where.append("dish_id = ?")
         params.append(dish_id)
